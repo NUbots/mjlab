@@ -38,9 +38,6 @@ class Sensor(ABC, Generic[T]):
   - Sensor[ContactData] for sensors returning structured contact data
   """
 
-  _cached_data: T
-  _is_outdated: bool = True
-
   @abstractmethod
   def edit_spec(
     self,
@@ -79,56 +76,40 @@ class Sensor(ABC, Generic[T]):
     """
     raise NotImplementedError
 
+  @property
   @abstractmethod
-  def _compute_data(self) -> T:
-    """Compute the sensor data.
+  def data(self) -> T:
+    """Get the current sensor data.
 
-    This method is called when the cache is stale. Subclasses must implement
-    this to compute and return the sensor's current data.
+    This property returns the sensor's current data in its specific type.
+    The data type is specified by the type parameter T.
 
     Returns:
       The sensor data in the format specified by type parameter T.
     """
     raise NotImplementedError
 
-  @property
-  def data(self) -> T:
-    """Get the current sensor data (cached within a step).
-
-    This property returns the sensor's current data, using a cached value if
-    available. The cache is invalidated by update() and reset() calls.
-
-    Returns:
-      The sensor data in the format specified by type parameter T.
-    """
-    if self._is_outdated:
-      self._cached_data = self._compute_data()
-      self._is_outdated = False
-    return self._cached_data
-
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     """Reset sensor state for specified environments.
 
-    Invalidates the cache. Subclasses that maintain internal state should
-    override this and call super().reset(env_ids).
+    Base implementation does nothing. Override in subclasses that maintain
+    internal state.
 
     Args:
       env_ids: Environment indices to reset. If None, reset all environments.
     """
     del env_ids  # Unused.
-    self._is_outdated = True
 
   def update(self, dt: float) -> None:
     """Update sensor state after a simulation step.
 
-    Invalidates the cache. Subclasses that need per-step updates should
-    override this and call super().update(dt).
+    Base implementation does nothing. Override in subclasses that need
+    per-step updates.
 
     Args:
       dt: Time step in seconds.
     """
     del dt  # Unused.
-    self._is_outdated = True
 
   def debug_vis(self, visualizer: DebugVisualizer) -> None:
     """Visualize sensor data for debugging.

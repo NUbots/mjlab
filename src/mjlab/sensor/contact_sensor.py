@@ -268,7 +268,8 @@ class ContactSensor(Sensor[ContactData]):
           (n_envs, n_contacts, h), device=device
         )
 
-  def _compute_data(self) -> ContactData:
+  @property
+  def data(self) -> ContactData:
     out = self._extract_sensor_data()
     if self._air_time_state is not None:
       out.current_air_time = self._air_time_state.current_air_time
@@ -282,7 +283,6 @@ class ContactSensor(Sensor[ContactData]):
     return out
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
-    super().reset(env_ids)
     if env_ids is None:
       env_ids = slice(None)
 
@@ -301,7 +301,7 @@ class ContactSensor(Sensor[ContactData]):
         buf[env_ids] = 0.0
 
   def update(self, dt: float) -> None:
-    super().update(dt)
+    del dt  # Unused.
     if self._air_time_state is not None:
       self._update_air_time_tracking()
     if self._history_state is not None:

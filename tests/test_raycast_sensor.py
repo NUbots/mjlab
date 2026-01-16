@@ -651,7 +651,6 @@ def test_raycast_body_rotation_affects_rays(device):
 
   # First, verify baseline: unrotated body, rays hit floor at ~2m.
   sim.step()
-  scene.update(dt=0.01)
   data_unrotated = sensor.data
   assert torch.allclose(
     data_unrotated.distances, torch.full_like(data_unrotated.distances, 2.0), atol=0.1
@@ -664,7 +663,6 @@ def test_raycast_body_rotation_affects_rays(device):
   quat = [math.cos(angle / 2), math.sin(angle / 2), 0, 0]  # w, x, y, z
   sim.data.qpos[0, 3:7] = torch.tensor(quat, device=device)
   sim.step()
-  scene.update(dt=0.01)
   data_rotated = sensor.data
 
   expected_distance = 2.0 / math.cos(angle)  # ~2.83m
