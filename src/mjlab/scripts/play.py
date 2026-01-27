@@ -168,7 +168,7 @@ def run_play(task_id: str, cfg: PlayConfig):
 
   env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
   if DUMMY_MODE:
-    action_shape: tuple[int, ...] = env.unwrapped.action_space.shape  # type: ignore
+    action_shape: tuple[int, ...] = env.unwrapped.action_space.shape
     if cfg.agent == "zero":
 
       class PolicyZero:

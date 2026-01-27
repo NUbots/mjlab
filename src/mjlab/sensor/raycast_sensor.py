@@ -542,7 +542,7 @@ class RayCastSensor(Sensor[RayCastData]):
     self._ray_bodyexclude = wp.full(
       (self._num_rays,),
       body_exclude,
-      dtype=int,  # type: ignore
+      dtype=int,  # pyright: ignore[reportArgumentType]
       device=device,
     )
 
@@ -671,7 +671,7 @@ class RayCastSensor(Sensor[RayCastData]):
       d=self._data.struct,  # type: ignore[attr-defined]
       pnt=self._ray_pnt,
       vec=self._ray_vec,
-      geomgroup=self._geomgroup,  # type: ignore[arg-type]
+      geomgroup=self._geomgroup,  # pyright: ignore[reportArgumentType]
       flg_static=True,
       bodyexclude=self._ray_bodyexclude,
       dist=self._ray_dist,
