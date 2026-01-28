@@ -119,7 +119,7 @@ NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
 ##
 
 STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
-    pos=(0, 0, 1.473774),  # TODO: adjust height
+    pos=(0, 0, 0.473774),  # TODO: adjust height
     joint_pos={ # TODO: check these
         "left_hip_yaw": 0.0339,
         "left_hip_roll": 0.163,
