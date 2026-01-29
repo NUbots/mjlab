@@ -88,7 +88,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "policy": ObservationGroupCfg(
       terms=policy_terms,
       concatenate_terms=True,
-      enable_corruption=True,
+      enable_corruption=True, # Domain randomisation
     ),
     "critic": ObservationGroupCfg(
       terms=critic_terms,
@@ -117,17 +117,17 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
   commands: dict[str, CommandTermCfg] = {
     "twist": UniformVelocityCommandCfg(
       entity_name="robot",
-      resampling_time_range=(3.0, 8.0),
-      rel_standing_envs=0.1,
-      rel_heading_envs=0.3,
+      resampling_time_range=(3.0, 8.0),   # Resample every 3-8s
+      rel_standing_envs=0.1,              # 10% of envs get zero velocity
+      rel_heading_envs=0.3,               # 30% use heading control
       heading_command=True,
       heading_control_stiffness=0.5,
       debug_vis=True,
       ranges=UniformVelocityCommandCfg.Ranges(
-        lin_vel_x=(-1.0, 1.0),
-        lin_vel_y=(-1.0, 1.0),
-        ang_vel_z=(-0.5, 0.5),
-        heading=(-math.pi, math.pi),
+        lin_vel_x=(-1.0, 1.0),  # Target x velocity range
+        lin_vel_y=(-1.0, 1.0),  # Target y velocity range
+        ang_vel_z=(-0.5, 0.5),  # Target yaw velocity range
+        heading=(-math.pi, math.pi),  # Target heading range
       ),
     )
   }
