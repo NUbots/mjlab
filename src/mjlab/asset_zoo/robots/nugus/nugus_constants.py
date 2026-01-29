@@ -151,7 +151,15 @@ STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
 
 # Basic collision
 FEET_COLLISION = CollisionCfg(
-    geom_names_expr=(".*foot.*",),
+    geom_names_expr=(".*foot_collision",),
+    contype=1,
+    conaffinity=1,
+    condim=3,
+    friction=(1.0,),
+)
+
+FULL_COLLISION = CollisionCfg(
+    geom_names_expr=(".*_collision",),
     contype=1,
     conaffinity=1,
     condim=3,
@@ -181,7 +189,7 @@ def get_nugus_robot_cfg() -> EntityCfg:
     """
     return EntityCfg(
         init_state=STAND_BENT_KNEES_KEYFRAME,
-        collisions=(FEET_COLLISION,),
+        collisions=(FULL_COLLISION,),
         spec_fn=get_spec, 
         articulation=NUGUS_ARTICULATION,
     )
