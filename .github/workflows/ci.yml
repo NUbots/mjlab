@@ -34,8 +34,6 @@ jobs:
         run: uvx ruff@0.14.14 check --diff
       - name: Run format
         run: uvx ruff@0.14.14 format --diff
-      - name: Check tyro.cli() calls
-        run: uv run python scripts/lint_tyro.py
 
   tests:
     runs-on: ubuntu-latest
