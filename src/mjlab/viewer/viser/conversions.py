@@ -294,7 +294,10 @@ def create_primitive_mesh(mj_model: mujoco.MjModel, geom_id: int) -> trimesh.Tri
   elif geom_type == mjtGeom.mjGEOM_CYLINDER:
     mesh = trimesh.creation.cylinder(radius=size[0], height=2.0 * size[1])
   elif geom_type == mjtGeom.mjGEOM_PLANE:
-    mesh = trimesh.creation.box((20, 20, 0.01))
+    # size[0], size[1] are half-lengths in x, y (0 means infinite).
+    plane_x = 2.0 * size[0] if size[0] > 0 else 20.0
+    plane_y = 2.0 * size[1] if size[1] > 0 else 20.0
+    mesh = trimesh.creation.box((plane_x, plane_y, 0.001))
   elif geom_type == mjtGeom.mjGEOM_ELLIPSOID:
     mesh = trimesh.creation.icosphere(subdivisions=3, radius=1.0)
     mesh.apply_scale(size)
