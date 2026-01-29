@@ -168,7 +168,7 @@ def run_play(task_id: str, cfg: PlayConfig):
 
   env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
   if DUMMY_MODE:
-    action_shape: tuple[int, ...] = env.unwrapped.action_space.shape  # type: ignore
+    action_shape: tuple[int, ...] = env.unwrapped.action_space.shape
     if cfg.agent == "zero":
 
       class PolicyZero:
@@ -219,6 +219,7 @@ def main():
     tyro.extras.literal_type_from_choices(all_tasks),
     add_help=False,
     return_unknown_args=True,
+    config=mjlab.TYRO_FLAGS,
   )
 
   # Parse the rest of the arguments + allow overriding env_cfg and agent_cfg.
@@ -229,10 +230,7 @@ def main():
     args=remaining_args,
     default=PlayConfig(),
     prog=sys.argv[0] + f" {chosen_task}",
-    config=(
-      tyro.conf.AvoidSubcommands,
-      tyro.conf.FlagConversionOff,
-    ),
+    config=mjlab.TYRO_FLAGS,
   )
   del remaining_args, agent_cfg
 

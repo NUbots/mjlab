@@ -161,9 +161,10 @@ def test_material_colors():
       mesh = mujoco_mesh_to_trimesh(model, geom_idx, verbose=False)
 
       # Check visual colors.
-      if mesh.visual and hasattr(mesh.visual, "vertex_colors"):
+      visual = mesh.visual
+      if visual and hasattr(visual, "vertex_colors"):
         # Get the first vertex color (they should all be the same).
-        color = mesh.visual.vertex_colors[0]
+        color = visual.vertex_colors[0]
         colors_found.append(tuple(color))
 
   assert len(colors_found) == 3, "Should have 3 meshes"

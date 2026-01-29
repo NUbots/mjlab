@@ -5,6 +5,7 @@ import torch
 import tyro
 from tqdm import tqdm
 
+import mjlab
 from mjlab.entity import Entity
 from mjlab.scene import Scene
 from mjlab.sim.sim import Simulation, SimulationCfg
@@ -305,7 +306,7 @@ def run_sim(
           log[k] = np.stack(log[k], axis=0)
 
         print("Saving to /tmp/motion.npz...")
-        np.savez("/tmp/motion.npz", **log)  # type: ignore[arg-type]
+        np.savez("/tmp/motion.npz", **log)
 
         print("Uploading to Weights & Biases...")
         import wandb
@@ -432,4 +433,4 @@ def main(
 
 
 if __name__ == "__main__":
-  tyro.cli(main)
+  tyro.cli(main, config=mjlab.TYRO_FLAGS)

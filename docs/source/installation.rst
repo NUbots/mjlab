@@ -3,7 +3,6 @@
 Installation Guide
 ==================
 
-``mjlab`` is in active **beta** and tightly coupled to MuJoCo Warp.
 This guide presents different installation paths so you can
 choose the one that best fits your use case.
 

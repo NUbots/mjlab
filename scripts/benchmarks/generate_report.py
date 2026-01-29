@@ -13,6 +13,7 @@ from pathlib import Path
 import tyro
 import wandb
 
+import mjlab
 from mjlab.tasks.tracking.scripts.evaluate import EvaluateConfig, run_evaluate
 
 # Metrics to display: (key, label, unit, scale, higher_is_better)
@@ -848,4 +849,4 @@ def main(
 
 
 if __name__ == "__main__":
-  tyro.cli(main)
+  tyro.cli(main, config=mjlab.TYRO_FLAGS)
