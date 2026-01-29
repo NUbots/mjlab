@@ -511,6 +511,7 @@ class HfDiscreteObstaclesTerrainCfg(SubTerrainCfg):
   vertical_scale: float = 0.005
   base_thickness_ratio: float = 1.0
   border_width: float = 0.0
+  square_obstacles: bool = False
 
   def function(
     self, difficulty: float, spec: mujoco.MjSpec, rng: np.random.Generator
@@ -556,7 +557,7 @@ class HfDiscreteObstaclesTerrainCfg(SubTerrainCfg):
         h = obs_h
 
       w = rng.choice(obs_width_range)
-      obs_len = rng.choice(obs_width_range)
+      obs_len = w if self.square_obstacles else rng.choice(obs_width_range)
 
       x_range = np.arange(0, inner_width_pixels, 4)
       y_range = np.arange(0, inner_length_pixels, 4)
