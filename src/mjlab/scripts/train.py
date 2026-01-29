@@ -220,6 +220,7 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
 def main():
   # Parse first argument to choose the task.
   # Import tasks to populate the registry.
+  import mjlab
   import mjlab.tasks  # noqa: F401
 
   all_tasks = list_tasks()
@@ -227,6 +228,7 @@ def main():
     tyro.extras.literal_type_from_choices(all_tasks),
     add_help=False,
     return_unknown_args=True,
+    config=mjlab.TYRO_FLAGS,
   )
 
   args = tyro.cli(
@@ -234,10 +236,7 @@ def main():
     args=remaining_args,
     default=TrainConfig.from_task(chosen_task),
     prog=sys.argv[0] + f" {chosen_task}",
-    config=(
-      tyro.conf.AvoidSubcommands,
-      tyro.conf.FlagConversionOff,
-    ),
+    config=mjlab.TYRO_FLAGS,
   )
   del remaining_args
 

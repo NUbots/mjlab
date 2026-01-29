@@ -241,5 +241,7 @@ def main(cfg: ThroughputConfig) -> list[BenchmarkResult]:
 
 
 if __name__ == "__main__":
-  cfg = tyro.cli(ThroughputConfig)
+  import mjlab
+
+  cfg = tyro.cli(ThroughputConfig, config=mjlab.TYRO_FLAGS)
   main(cfg)

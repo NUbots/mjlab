@@ -248,4 +248,6 @@ def main(
 
 
 if __name__ == "__main__":
-  tyro.cli(main)
+  import mjlab
+
+  tyro.cli(main, config=mjlab.TYRO_FLAGS)

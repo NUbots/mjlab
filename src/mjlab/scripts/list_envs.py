@@ -40,7 +40,9 @@ def list_environments(keyword: str | None = None):
 
 
 def main():
-  return tyro.cli(list_environments)
+  import mjlab
+
+  return tyro.cli(list_environments, config=mjlab.TYRO_FLAGS)
 
 
 if __name__ == "__main__":
