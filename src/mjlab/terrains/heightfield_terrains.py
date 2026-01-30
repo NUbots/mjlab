@@ -22,6 +22,7 @@ from mjlab.terrains.terrain_generator import (
   TerrainGeometry,
   TerrainOutput,
 )
+from mjlab.terrains.utils import find_flat_patches_from_heightfield
 
 
 def color_by_height(
@@ -99,6 +100,30 @@ def color_by_height(
   material.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB] = texture_name
 
   return material_name
+
+
+def _compute_flat_patches(
+  noise: np.ndarray,
+  vertical_scale: float,
+  horizontal_scale: float,
+  z_offset: float,
+  flat_patch_sampling: dict | None,
+  rng: np.random.Generator,
+) -> dict[str, np.ndarray] | None:
+  """Compute flat patches for a heightfield terrain if configured."""
+  if flat_patch_sampling is None:
+    return None
+  physical_heights = (noise.astype(np.float64) - noise.min()) * vertical_scale
+  flat_patches: dict[str, np.ndarray] = {}
+  for name, patch_cfg in flat_patch_sampling.items():
+    flat_patches[name] = find_flat_patches_from_heightfield(
+      heights=physical_heights,
+      horizontal_scale=horizontal_scale,
+      z_offset=z_offset,
+      cfg=patch_cfg,
+      rng=rng,
+    )
+  return flat_patches
 
 
 @dataclass(kw_only=True)
@@ -249,8 +274,17 @@ class HfPyramidSlopedTerrainCfg(SubTerrainCfg):
 
     origin = np.array([self.size[0] / 2, self.size[1] / 2, spawn_height])
 
+    flat_patches = _compute_flat_patches(
+      noise,
+      self.vertical_scale,
+      self.horizontal_scale,
+      hfield_z_offset,
+      self.flat_patch_sampling,
+      rng,
+    )
+
     geom = TerrainGeometry(geom=hfield_geom, hfield=field)
-    return TerrainOutput(origin=origin, geometries=[geom])
+    return TerrainOutput(origin=origin, geometries=[geom], flat_patches=flat_patches)
 
 
 @dataclass(kw_only=True)
@@ -385,8 +419,17 @@ class HfRandomUniformTerrainCfg(SubTerrainCfg):
     spawn_height = (self.noise_range[0] + self.noise_range[1]) / 2
     origin = np.array([self.size[0] / 2, self.size[1] / 2, spawn_height])
 
+    flat_patches = _compute_flat_patches(
+      noise,
+      self.vertical_scale,
+      self.horizontal_scale,
+      0,
+      self.flat_patch_sampling,
+      rng,
+    )
+
     geom = TerrainGeometry(geom=hfield_geom, hfield=field)
-    return TerrainOutput(origin=origin, geometries=[geom])
+    return TerrainOutput(origin=origin, geometries=[geom], flat_patches=flat_patches)
 
 
 @dataclass(kw_only=True)
@@ -496,8 +539,17 @@ class HfWaveTerrainCfg(SubTerrainCfg):
     spawn_height = 0.0
     origin = np.array([self.size[0] / 2, self.size[1] / 2, spawn_height])
 
+    flat_patches = _compute_flat_patches(
+      noise,
+      self.vertical_scale,
+      self.horizontal_scale,
+      -max_physical_height / 2,
+      self.flat_patch_sampling,
+      rng,
+    )
+
     geom = TerrainGeometry(geom=hfield_geom, hfield=field)
-    return TerrainOutput(origin=origin, geometries=[geom])
+    return TerrainOutput(origin=origin, geometries=[geom], flat_patches=flat_patches)
 
 
 @dataclass(kw_only=True)
@@ -639,5 +691,14 @@ class HfDiscreteObstaclesTerrainCfg(SubTerrainCfg):
     spawn_height = max_physical_height + hfield_z_offset
     origin = np.array([self.size[0] / 2, self.size[1] / 2, spawn_height])
 
+    flat_patches = _compute_flat_patches(
+      noise,
+      self.vertical_scale,
+      self.horizontal_scale,
+      hfield_z_offset,
+      self.flat_patch_sampling,
+      rng,
+    )
+
     geom = TerrainGeometry(geom=hfield_geom, hfield=field)
-    return TerrainOutput(origin=origin, geometries=[geom])
+    return TerrainOutput(origin=origin, geometries=[geom], flat_patches=flat_patches)

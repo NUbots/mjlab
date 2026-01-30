@@ -86,14 +86,24 @@ class TerrainImporter:
       terrain_generator = TerrainGenerator(self.cfg.terrain_generator, device=device)
       terrain_generator.compile(self._spec)
       self.configure_env_origins(terrain_generator.terrain_origins)
+      self._flat_patches: dict[str, torch.Tensor] = {
+        name: torch.from_numpy(arr).to(device=device, dtype=torch.float)
+        for name, arr in terrain_generator.flat_patches.items()
+      }
+      self._flat_patch_radii: dict[str, float] = dict(
+        terrain_generator.flat_patch_radii
+      )
     elif self.cfg.terrain_type == "plane":
       self.import_ground_plane("terrain")
       self.configure_env_origins()
+      self._flat_patches: dict[str, torch.Tensor] = {}
+      self._flat_patch_radii: dict[str, float] = {}
     else:
       raise ValueError(f"Unknown terrain type: {self.cfg.terrain_type}")
 
     self._add_env_origin_sites()
     self._add_terrain_origin_sites()
+    self._add_flat_patch_sites()
 
   def _add_env_origin_sites(self) -> None:
     """Add transparent sphere sites at each environment origin for visualization."""
@@ -147,9 +157,36 @@ class TerrainImporter:
           group=5,
         )
 
+  def _add_flat_patch_sites(self) -> None:
+    """Add transparent box sites at each flat patch location for visualization."""
+    if not self._flat_patches:
+      return
+    site_thickness = 0.02
+    site_color = (0.9, 0.6, 0.1, 0.1)
+    for name, patches_tensor in self._flat_patches.items():
+      radius = self._flat_patch_radii.get(name, 0.5)
+      patches_np = patches_tensor.cpu().numpy()
+      num_rows, num_cols, num_patches, _ = patches_np.shape
+      for row in range(num_rows):
+        for col in range(num_cols):
+          for p in range(num_patches):
+            pos = patches_np[row, col, p]
+            self._spec.worldbody.add_site(
+              name=f"flat_patch_{name}_{row}_{col}_{p}",
+              pos=pos,
+              size=(radius, radius, site_thickness),
+              type=mujoco.mjtGeom.mjGEOM_BOX,
+              rgba=site_color,
+              group=3,
+            )
+
   @property
   def spec(self) -> mujoco.MjSpec:
     return self._spec
+
+  @property
+  def flat_patches(self) -> dict[str, torch.Tensor]:
+    return self._flat_patches
 
   def import_ground_plane(self, name: str) -> None:
     _DEFAULT_PLANE_TEXTURE.edit_spec(self._spec)
