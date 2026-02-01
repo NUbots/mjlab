@@ -28,7 +28,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 Run the demo (no installation needed):
 
 ```bash
-uvx --from mjlab --with "mujoco-warp @ git+https://github.com/google-deepmind/mujoco_warp@7c20a44bfed722e6415235792a1b247ea6b6a6d3" demo
+uvx --from mjlab --with "mujoco-warp @ git+https://github.com/google-deepmind/mujoco_warp@1dc288cf1fa819fc3346ec5c9546e2cc2b7be667" demo
 ```
 
 This launches an interactive viewer with a pre-trained Unitree G1 agent tracking a reference dance motion in MuJoCo Warp.
@@ -56,7 +56,7 @@ uv run demo
 **From PyPI:**
 
 ```bash
-uv add mjlab "mujoco-warp @ git+https://github.com/google-deepmind/mujoco_warp@7c20a44bfed722e6415235792a1b247ea6b6a6d3"
+uv add mjlab "mujoco-warp @ git+https://github.com/google-deepmind/mujoco_warp@1dc288cf1fa819fc3346ec5c9546e2cc2b7be667"
 ```
 
 A Dockerfile is also provided.
@@ -171,6 +171,24 @@ Compile documentation locally:
 ```bash
 uv pip install -r docs/requirements.txt
 make docs
+```
+
+---
+
+## Citation
+
+If you use mjlab in your research, please cite:
+
+```bibtex
+@misc{zakka2026mjlablightweightframeworkgpuaccelerated,
+  title={mjlab: A Lightweight Framework for GPU-Accelerated Robot Learning},
+  author={Kevin Zakka and Qiayuan Liao and Brent Yi and Louis Le Lay and Koushil Sreenath and Pieter Abbeel},
+  year={2026},
+  eprint={2601.22074},
+  archivePrefix={arXiv},
+  primaryClass={cs.RO},
+  url={https://arxiv.org/abs/2601.22074},
+}
 ```
 
 ---

@@ -134,6 +134,8 @@ class Entity:
     self._non_free_joints = tuple(self._all_joints)
     if self._all_joints and self._all_joints[0].type == mujoco.mjtJoint.mjJNT_FREE:
       self._free_joint = self._all_joints[0]
+      if not self._free_joint.name:
+        self._free_joint.name = "floating_base_joint"
       self._non_free_joints = tuple(self._all_joints[1:])
     self._actuators: list[actuator.Actuator] = []
 

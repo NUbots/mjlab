@@ -294,7 +294,10 @@ def create_primitive_mesh(mj_model: mujoco.MjModel, geom_id: int) -> trimesh.Tri
   elif geom_type == mjtGeom.mjGEOM_CYLINDER:
     mesh = trimesh.creation.cylinder(radius=size[0], height=2.0 * size[1])
   elif geom_type == mjtGeom.mjGEOM_PLANE:
-    mesh = trimesh.creation.box((20, 20, 0.01))
+    # size[0], size[1] are half-lengths in x, y (0 means infinite).
+    plane_x = 2.0 * size[0] if size[0] > 0 else 20.0
+    plane_y = 2.0 * size[1] if size[1] > 0 else 20.0
+    mesh = trimesh.creation.box((plane_x, plane_y, 0.001))
   elif geom_type == mjtGeom.mjGEOM_ELLIPSOID:
     mesh = trimesh.creation.icosphere(subdivisions=3, radius=1.0)
     mesh.apply_scale(size)
@@ -396,6 +399,67 @@ def create_primitive_mesh(mj_model: mujoco.MjModel, geom_id: int) -> trimesh.Tri
   vertex_colors = np.tile(rgba_uint8, (len(mesh.vertices), 1))
   mesh.visual = trimesh.visual.ColorVisuals(mesh=mesh, vertex_colors=vertex_colors)
   return mesh
+
+
+def get_geom_texture_id(mj_model: mujoco.MjModel, geom_idx: int) -> int:
+  """Return the texture ID that the trimesh conversion will use, or -1.
+
+  Returns -1 (untextured) when any of these hold:
+    - The geom is a primitive (``create_primitive_mesh`` always emits
+      ``ColorVisuals``, even if the material references a texture).
+    - The material has no texture (neither mjTEXROLE_RGB nor mjTEXROLE_RGBA).
+    - The mesh has no UV coordinates (mesh_texcoordnum == 0).
+
+  Args:
+    mj_model: MuJoCo model containing geom definitions.
+    geom_idx: Index of the geometry in the model.
+
+  Returns:
+    Texture ID (>= 0) if conversion will produce TextureVisuals, -1 otherwise.
+  """
+  if mj_model.geom_type[geom_idx] != mjtGeom.mjGEOM_MESH:
+    return -1
+
+  matid = mj_model.geom_matid[geom_idx]
+  if matid < 0 or matid >= mj_model.nmat:
+    return -1
+
+  texid = int(mj_model.mat_texid[matid, int(mujoco.mjtTextureRole.mjTEXROLE_RGB)])
+  if texid < 0:
+    texid = int(mj_model.mat_texid[matid, int(mujoco.mjtTextureRole.mjTEXROLE_RGBA)])
+
+  if texid < 0:
+    return -1
+
+  mesh_id = mj_model.geom_dataid[geom_idx]
+  if mj_model.mesh_texcoordnum[mesh_id] <= 0:
+    return -1
+
+  return texid
+
+
+def group_geoms_by_visual_compat(
+  mj_model: mujoco.MjModel, geom_ids: list[int]
+) -> list[list[int]]:
+  """Partition geom IDs into groups that can be safely merged.
+
+  Geoms sharing the same texture ID are grouped together. All untextured
+  geoms (texture ID = -1) form a single group. This prevents trimesh
+  concatenation from producing gray meshes when mixing TextureVisuals
+  and ColorVisuals, or when combining different texture images.
+
+  Args:
+    mj_model: MuJoCo model containing geom definitions.
+    geom_ids: List of geom indices to partition.
+
+  Returns:
+    List of geom ID lists, each safe to pass to ``merge_geoms``.
+  """
+  groups: dict[int, list[int]] = {}
+  for gid in geom_ids:
+    tex_id = get_geom_texture_id(mj_model, gid)
+    groups.setdefault(tex_id, []).append(gid)
+  return list(groups.values())
 
 
 def merge_geoms(mj_model: mujoco.MjModel, geom_ids: list[int]) -> trimesh.Trimesh:
