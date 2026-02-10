@@ -153,7 +153,7 @@ STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
 FEET_COLLISION = CollisionCfg(
     geom_names_expr=(".*foot_collision",),
     contype=1,
-    conaffinity=1,
+    conaffinity=2,
     condim=3,
     friction=(1.0,),
 )
@@ -161,7 +161,7 @@ FEET_COLLISION = CollisionCfg(
 FULL_COLLISION = CollisionCfg(
     geom_names_expr=(".*_collision",),
     contype=1,
-    conaffinity=1,
+    conaffinity=2,
     condim=3,
     friction=(1.0,),
 )
