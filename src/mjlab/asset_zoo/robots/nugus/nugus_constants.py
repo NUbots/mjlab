@@ -161,7 +161,7 @@ FEET_COLLISION = CollisionCfg(
 FULL_COLLISION = CollisionCfg(
     geom_names_expr=(".*_collision",),
     contype=1,
-    conaffinity=2,
+    conaffinity=1,
     condim=3,
     friction=(1.0,),
 )
