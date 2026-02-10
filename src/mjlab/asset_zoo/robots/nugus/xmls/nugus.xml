@@ -231,23 +231,5 @@
   <contact>
     <exclude body1="left_hip_yaw" body2="left_upper_leg"/>
     <exclude body1="right_hip_yaw" body2="right_upper_leg"/>
-
-    <exclude body1="left_hip_yaw" body2="left_hip_roll"/>
-    <exclude body1="right_hip_yaw" body2="right_hip_roll"/>
-
-    <exclude body1="left_upper_leg" body2="left_lower_leg"/>
-    <exclude body1="right_upper_leg" body2="right_lower_leg"/>
-
-    <exclude body1="left_lower_leg" body2="left_ankle"/>
-    <exclude body1="right_lower_leg" body2="right_ankle"/>
-    
-    <exclude body1="left_ankle" body2="left_foot"/>
-    <exclude body1="right_ankle" body2="right_foot"/>
-
-    <exclude body1="torso" body2="left_shoulder"/>
-    <exclude body1="torso" body2="right_shoulder"/>
-
-    <exclude body1="left_upper_arm" body2="left_lower_arm"/>
-    <exclude body1="right_upper_arm" body2="right_lower_arm"/>
   </contact>
 </mujoco>
