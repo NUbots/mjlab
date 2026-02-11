@@ -75,12 +75,12 @@ DAMPING_XH540   = 1.6548
 # Using order from poster in NUbots lab (right then left)
 NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
     target_names_expr=(
-        ".right_shoulder_pitch",
-        ".left_shoulder_pitch",
-        ".right_shoulder_roll",
-        ".left_shoulder_roll",
-        ".right_elbow_pitch",
-        ".left_elbow_pitch",
+        "right_shoulder_pitch",
+        "left_shoulder_pitch",
+        "right_shoulder_roll",
+        "left_shoulder_roll",
+        "right_elbow_pitch",
+        "left_elbow_pitch",
     ),
     stiffness=STIFFNESS_MX64,
     damping=DAMPING_MX64,
@@ -90,12 +90,12 @@ NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
 
 NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
     target_names_expr=(
-        ".right_hip_yaw",
-        ".left_hip_yaw",
-        ".right_hip_roll",
-        ".left_hip_roll",
-        ".right_hip_pitch",
-        ".left_hip_pitch",
+        "right_hip_yaw",
+        "left_hip_yaw",
+        "right_hip_roll",
+        "left_hip_roll",
+        "right_hip_pitch",
+        "left_hip_pitch",
     ),
     stiffness=STIFFNESS_MX106,
     damping=DAMPING_MX106,
@@ -105,12 +105,12 @@ NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
 
 NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
     target_names_expr=(
-        ".right_knee_pitch",
-        ".left_knee_pitch",
-        ".right_ankle_pitch",
-        ".left_ankle_pitch",
-        ".right_ankle_roll",
-        ".left_ankle_roll",
+        "right_knee_pitch",
+        "left_knee_pitch",
+        "right_ankle_pitch",
+        "left_ankle_pitch",
+        "right_ankle_roll",
+        "left_ankle_roll",
     ),
     stiffness=STIFFNESS_XH540,
     damping=DAMPING_XH540,
