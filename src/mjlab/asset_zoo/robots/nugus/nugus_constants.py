@@ -72,8 +72,31 @@ STIFFNESS_XH540 = 56.052
 DAMPING_XH540   = 1.6548
 
 # Actuator configs for different joint groups
-NUGUS_ACTUATOR_HIP_YAW = BuiltinPositionActuatorCfg(
-    target_names_expr=(".*_hip_yaw",),
+# Using order from poster in NUbots lab (right then left)
+NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
+    target_names_expr=(
+        ".right_shoulder_pitch",
+        ".left_shoulder_pitch",
+        ".right_shoulder_roll",
+        ".left_shoulder_roll",
+        ".right_elbow_pitch",
+        ".left_elbow_pitch",
+    ),
+    stiffness=STIFFNESS_MX64,
+    damping=DAMPING_MX64,
+    effort_limit=ACTUATOR_MX64.effort_limit,
+    armature=ACTUATOR_MX64.reflected_inertia,
+)
+
+NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
+    target_names_expr=(
+        ".right_hip_yaw",
+        ".left_hip_yaw",
+        ".right_hip_roll",
+        ".left_hip_roll",
+        ".right_hip_pitch",
+        ".left_hip_pitch",
+    ),
     stiffness=STIFFNESS_MX106,
     damping=DAMPING_MX106,
     effort_limit=ACTUATOR_MX106.effort_limit,
@@ -82,11 +105,12 @@ NUGUS_ACTUATOR_HIP_YAW = BuiltinPositionActuatorCfg(
 
 NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
     target_names_expr=(
-        ".*_hip_roll",
-        ".*_hip_pitch",
-        ".*_ankle_pitch",
-        ".*_ankle_roll",
-        ".*_knee_pitch",
+        ".right_knee_pitch",
+        ".left_knee_pitch",
+        ".right_ankle_pitch",
+        ".left_ankle_pitch",
+        ".right_ankle_roll",
+        ".left_ankle_roll",
     ),
     stiffness=STIFFNESS_XH540,
     damping=DAMPING_XH540,
@@ -102,45 +126,33 @@ NUGUS_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
     armature=ACTUATOR_MX64.reflected_inertia,
 )
 
-NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
-    target_names_expr=(
-        ".*_shoulder_pitch",
-        ".*_shoulder_roll",
-        ".*_elbow_pitch",
-    ),
-    stiffness=STIFFNESS_MX64,
-    damping=DAMPING_MX64,
-    effort_limit=ACTUATOR_MX64.effort_limit,
-    armature=ACTUATOR_MX64.reflected_inertia,
-)
-
 ##
 # Keyframe config.
 ##
 
 STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
-    pos=(0, 0, 0.473774),  # TODO: adjust height
-    joint_pos={ # TODO: check these
-        "left_hip_yaw": 0.0339,
-        "left_hip_roll": 0.163,
-        "left_hip_pitch": -0.904,
-        "left_knee_pitch": 1.20,
-        "left_ankle_pitch": -0.510,
-        "left_ankle_roll": -0.166,
+    pos=(0, 0, 0.473774),  
+    joint_pos={
+        "right_shoulder_pitch": 1.71,
+        "left_shoulder_pitch": 1.71,
+        "right_shoulder_roll": -0.197,
+        "left_shoulder_roll": 0.197,
+        "right_elbow_pitch": -0.718,
+        "left_elbow_pitch": -0.713,
         "right_hip_yaw": -0.0329,
+        "left_hip_yaw": 0.0339,
         "right_hip_roll": -0.162,
+        "left_hip_roll": 0.163,
         "right_hip_pitch": -0.904,
+        "left_hip_pitch": -0.904,
         "right_knee_pitch": 1.20,
+        "left_knee_pitch": 1.20,
         "right_ankle_pitch": -0.508,
+        "left_ankle_pitch": -0.510,
         "right_ankle_roll": 0.167,
+        "left_ankle_roll": -0.166,
         "neck_yaw": 0.0,
         "head_pitch": 0.0000645,
-        "left_shoulder_pitch": 1.71,
-        "left_shoulder_roll": 0.197,
-        "left_elbow_pitch": -0.713,
-        "right_shoulder_pitch": 1.71,
-        "right_shoulder_roll": -0.197,
-        "right_elbow_pitch": -0.718,
     },
     joint_vel={".*": 0.0},
 )
@@ -173,7 +185,7 @@ FULL_COLLISION = CollisionCfg(
 
 NUGUS_ARTICULATION = EntityArticulationInfoCfg(
     actuators=(
-        NUGUS_ACTUATOR_HIP_YAW,
+        NUGUS_ACTUATOR_HIPS,
         NUGUS_ACTUATOR_LEGS,
         NUGUS_ACTUATOR_HEAD,
         NUGUS_ACTUATOR_ARMS, 
