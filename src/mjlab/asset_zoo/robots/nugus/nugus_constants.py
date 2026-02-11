@@ -185,10 +185,10 @@ FULL_COLLISION = CollisionCfg(
 
 NUGUS_ARTICULATION = EntityArticulationInfoCfg(
     actuators=(
+        NUGUS_ACTUATOR_ARMS,
         NUGUS_ACTUATOR_HIPS,
         NUGUS_ACTUATOR_LEGS,
-        NUGUS_ACTUATOR_HEAD,
-        NUGUS_ACTUATOR_ARMS, 
+        NUGUS_ACTUATOR_HEAD, 
     ),
     soft_joint_pos_limit_factor=0.9, # TODO
 )
