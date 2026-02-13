@@ -72,8 +72,31 @@ STIFFNESS_XH540 = 56.052
 DAMPING_XH540   = 1.6548
 
 # Actuator configs for different joint groups
-NUGUS_ACTUATOR_HIP_YAW = BuiltinPositionActuatorCfg(
-    target_names_expr=(".*_hip_yaw",),
+# Using order from poster in NUbots lab (right then left)
+NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
+    target_names_expr=(
+        "right_shoulder_pitch",
+        "left_shoulder_pitch",
+        "right_shoulder_roll",
+        "left_shoulder_roll",
+        "right_elbow_pitch",
+        "left_elbow_pitch",
+    ),
+    stiffness=STIFFNESS_MX64,
+    damping=DAMPING_MX64,
+    effort_limit=ACTUATOR_MX64.effort_limit,
+    armature=ACTUATOR_MX64.reflected_inertia,
+)
+
+NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
+    target_names_expr=(
+        "right_hip_yaw",
+        "left_hip_yaw",
+        "right_hip_roll",
+        "left_hip_roll",
+        "right_hip_pitch",
+        "left_hip_pitch",
+    ),
     stiffness=STIFFNESS_MX106,
     damping=DAMPING_MX106,
     effort_limit=ACTUATOR_MX106.effort_limit,
@@ -82,11 +105,12 @@ NUGUS_ACTUATOR_HIP_YAW = BuiltinPositionActuatorCfg(
 
 NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
     target_names_expr=(
-        ".*_hip_roll",
-        ".*_hip_pitch",
-        ".*_ankle_pitch",
-        ".*_ankle_roll",
-        ".*_knee_pitch",
+        "right_knee_pitch",
+        "left_knee_pitch",
+        "right_ankle_pitch",
+        "left_ankle_pitch",
+        "right_ankle_roll",
+        "left_ankle_roll",
     ),
     stiffness=STIFFNESS_XH540,
     damping=DAMPING_XH540,
@@ -96,18 +120,6 @@ NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
 
 NUGUS_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
     target_names_expr=("neck_yaw", "head_pitch"),
-    stiffness=STIFFNESS_MX64,
-    damping=DAMPING_MX64,
-    effort_limit=ACTUATOR_MX64.effort_limit,
-    armature=ACTUATOR_MX64.reflected_inertia,
-)
-
-NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
-    target_names_expr=(
-        ".*_shoulder_pitch",
-        ".*_shoulder_roll",
-        ".*_elbow_pitch",
-    ),
     stiffness=STIFFNESS_MX64,
     damping=DAMPING_MX64,
     effort_limit=ACTUATOR_MX64.effort_limit,
@@ -151,9 +163,17 @@ STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
 
 # Basic collision
 FEET_COLLISION = CollisionCfg(
-    geom_names_expr=(".*_foot1_collision.*",),
+    geom_names_expr=(".*foot_collision",),
     contype=1,
-    conaffinity=1,
+    conaffinity=2,
+    condim=3,
+    friction=(1.0,),
+)
+
+FULL_COLLISION = CollisionCfg(
+    geom_names_expr=(".*_collision",),
+    contype=1,
+    conaffinity=2,
     condim=3,
     friction=(1.0,),
 )
@@ -174,10 +194,10 @@ FULL_COLLISION = CollisionCfg(
 
 NUGUS_ARTICULATION = EntityArticulationInfoCfg(
     actuators=(
-        NUGUS_ACTUATOR_HIP_YAW,
+        NUGUS_ACTUATOR_ARMS,
+        NUGUS_ACTUATOR_HIPS,
         NUGUS_ACTUATOR_LEGS,
-        NUGUS_ACTUATOR_HEAD,
-        NUGUS_ACTUATOR_ARMS, 
+        NUGUS_ACTUATOR_HEAD, 
     ),
     soft_joint_pos_limit_factor=0.9, # TODO
 )
@@ -190,7 +210,7 @@ def get_nugus_robot_cfg() -> EntityCfg:
     """
     return EntityCfg(
         init_state=STAND_BENT_KNEES_KEYFRAME,
-        collisions=(FEET_COLLISION,),
+        collisions=(FULL_COLLISION,),
         spec_fn=get_spec, 
         articulation=NUGUS_ARTICULATION,
     )

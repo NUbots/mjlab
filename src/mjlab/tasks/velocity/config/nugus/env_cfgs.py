@@ -26,7 +26,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
     site_names = ("left_foot", "right_foot")
     geom_names = tuple(
-        f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 2) # TODO: Add more feet collision points?
+        f"{side}_foot_collision" for side in ("left", "right")
     )
 
     feet_ground_cfg = ContactSensorCfg(
