@@ -49,7 +49,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
     joint_pos_action = cfg.actions["joint_pos"]
     assert isinstance(joint_pos_action, JointPositionActionCfg)
-    joint_pos_action.scale = NUGUS_ACTION_SCALE
+    joint_pos_action.scale = NUGUS_ACTION_SCALE # Note: This is really small (0.05)-> seems to correspond to a less falling over early on in training.
 
     cfg.viewer.body_name = "torso"
 

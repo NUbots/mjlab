@@ -121,26 +121,26 @@ NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
 STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
     pos=(0, 0, 0.473774),  # TODO: adjust height
     joint_pos={ # TODO: check these
-        "left_hip_yaw": 0.0339,
-        "left_hip_roll": 0.163,
-        "left_hip_pitch": -0.904,
-        "left_knee_pitch": 1.20,
-        "left_ankle_pitch": -0.510,
-        "left_ankle_roll": -0.166,
+        "right_shoulder_pitch": 1.71,
+        "left_shoulder_pitch": 1.71,
+        "right_shoulder_roll": -0.197,
+        "left_shoulder_roll": 0.197,
+        "right_elbow_pitch": -0.718,
+        "left_elbow_pitch": -0.713,
         "right_hip_yaw": -0.0329,
+        "left_hip_yaw": 0.0339,
         "right_hip_roll": -0.162,
+        "left_hip_roll": 0.163,
         "right_hip_pitch": -0.904,
+        "left_hip_pitch": -0.904,
         "right_knee_pitch": 1.20,
+        "left_knee_pitch": 1.20,
         "right_ankle_pitch": -0.508,
+        "left_ankle_pitch": -0.510,
         "right_ankle_roll": 0.167,
+        "left_ankle_roll": -0.166,
         "neck_yaw": 0.0,
         "head_pitch": 0.0000645,
-        "left_shoulder_pitch": 1.71,
-        "left_shoulder_roll": 0.197,
-        "left_elbow_pitch": -0.713,
-        "right_shoulder_pitch": 1.71,
-        "right_shoulder_roll": -0.197,
-        "right_elbow_pitch": -0.718,
     },
     joint_vel={".*": 0.0},
 )
@@ -151,11 +151,20 @@ STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
 
 # Basic collision
 FEET_COLLISION = CollisionCfg(
-    geom_names_expr=(".*foot.*",),
+    geom_names_expr=(".*_foot1_collision.*",),
     contype=1,
     conaffinity=1,
     condim=3,
     friction=(1.0,),
+)
+
+# Full body collision with ground only
+FULL_COLLISION = CollisionCfg(
+     geom_names_expr=(".*_foot1_collision.*", ".*_bodycollision.*",),
+     contype=1,
+     conaffinity=1,
+     condim=3,
+     friction=(1.0,),
 )
 
 

@@ -12,8 +12,8 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     policy=RslRlPpoActorCriticCfg(
       init_noise_std=1.0,
-      actor_obs_normalization=True,
-      critic_obs_normalization=True,
+      actor_obs_normalization=False,
+      critic_obs_normalization=False,
       actor_hidden_dims=(512, 256, 128),
       critic_hidden_dims=(512, 256, 128),
       activation="elu",
@@ -35,5 +35,5 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     experiment_name="nugus_velocity",
     save_interval=500,
     num_steps_per_env=24,
-    max_iterations=30_000,
+    max_iterations=500,
   )
