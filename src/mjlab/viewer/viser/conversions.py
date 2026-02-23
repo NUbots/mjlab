@@ -157,13 +157,13 @@ def mujoco_mesh_to_trimesh(
           tex_array = tex_data.reshape(tex_height, tex_width, 3)
           # Flip vertically for GLTF convention.
           tex_array = np.flipud(tex_array)
-          image = Image.fromarray(tex_array.astype(np.uint8), mode="RGB")
+          image = Image.fromarray(tex_array.astype(np.uint8))
         elif tex_nchannel == 4:
           # RGBA.
           tex_array = tex_data.reshape(tex_height, tex_width, 4)
           # Flip vertically for GLTF convention.
           tex_array = np.flipud(tex_array)
-          image = Image.fromarray(tex_array.astype(np.uint8), mode="RGBA")
+          image = Image.fromarray(tex_array.astype(np.uint8))
         else:
           if verbose:
             print(f"Unsupported number of texture channels: {tex_nchannel}")
@@ -583,3 +583,130 @@ def get_body_name(mj_model: mujoco.MjModel, body_id: int) -> str:
   if not body_name:
     body_name = f"body_{body_id}"
   return body_name
+
+
+def create_site_mesh(mj_model: mujoco.MjModel, site_id: int) -> trimesh.Trimesh:
+  """Create a mesh for a single site.
+
+  Reads site_type, site_size, and site_rgba from the model. Supports sphere,
+  capsule, ellipsoid, cylinder, and box site types. When site_rgba is all-zero,
+  falls back to [0.5, 0.5, 0.5, 1.0].
+
+  Args:
+    mj_model: MuJoCo model containing site definition
+    site_id: Index of the site to create mesh for
+
+  Returns:
+    Trimesh representation of the site
+  """
+  size = mj_model.site_size[site_id]
+  site_type = mj_model.site_type[site_id]
+  rgba = mj_model.site_rgba[site_id].copy()
+
+  # Fall back to gray when RGBA is all-zero (MuJoCo default when unset).
+  if np.all(rgba == 0):
+    rgba = np.array([0.5, 0.5, 0.5, 1.0])
+
+  rgba_uint8 = (np.clip(rgba, 0, 1) * 255).astype(np.uint8)
+
+  # Site types reuse mjtGeom enum values.
+  if site_type == mjtGeom.mjGEOM_SPHERE:
+    mesh = trimesh.creation.icosphere(radius=size[0], subdivisions=2)
+  elif site_type == mjtGeom.mjGEOM_BOX:
+    mesh = trimesh.creation.box(extents=2.0 * size)
+  elif site_type == mjtGeom.mjGEOM_CAPSULE:
+    mesh = trimesh.creation.capsule(radius=size[0], height=2.0 * size[1])
+  elif site_type == mjtGeom.mjGEOM_CYLINDER:
+    mesh = trimesh.creation.cylinder(radius=size[0], height=2.0 * size[1])
+  elif site_type == mjtGeom.mjGEOM_ELLIPSOID:
+    mesh = trimesh.creation.icosphere(subdivisions=3, radius=1.0)
+    mesh.apply_scale(size)
+  else:
+    raise ValueError(f"Unsupported site type: {site_type}")
+
+  vertex_colors = np.tile(rgba_uint8, (len(mesh.vertices), 1))
+  mesh.visual = trimesh.visual.ColorVisuals(mesh=mesh, vertex_colors=vertex_colors)
+  return mesh
+
+
+def merge_sites(mj_model: mujoco.MjModel, site_ids: list[int]) -> trimesh.Trimesh:
+  """Merge multiple sites into a single trimesh.
+
+  Each site's mesh is transformed by its site_pos/site_quat before merging.
+
+  Args:
+    mj_model: MuJoCo model containing site definitions
+    site_ids: List of site indices to merge
+
+  Returns:
+    Single merged trimesh with all sites transformed to their local poses
+  """
+  meshes = []
+  for site_id in site_ids:
+    mesh = create_site_mesh(mj_model, site_id)
+    pos = mj_model.site_pos[site_id]
+    quat = mj_model.site_quat[site_id]
+    transform = np.eye(4)
+    transform[:3, :3] = vtf.SO3(quat).as_matrix()
+    transform[:3, 3] = pos
+    mesh.apply_transform(transform)
+    meshes.append(mesh)
+
+  if len(meshes) == 1:
+    return meshes[0]
+  return trimesh.util.concatenate(meshes)
+
+
+def get_site_name(mj_model: mujoco.MjModel, site_id: int) -> str:
+  """Get site name with fallback to ID-based name.
+
+  Args:
+    mj_model: MuJoCo model
+    site_id: Site index
+
+  Returns:
+    Site name or "site_{site_id}" if name not found.
+  """
+  site_name = mj_id2name(mj_model, mjtObj.mjOBJ_SITE, site_id)
+  if not site_name:
+    site_name = f"site_{site_id}"
+  return site_name
+
+
+def merge_geoms_global(
+  mj_model: mujoco.MjModel, mj_data: mujoco.MjData, geom_ids: list[int]
+) -> trimesh.Trimesh:
+  """Merge multiple geoms into a single trimesh using world-space coordinates.
+
+  Args:
+    mj_model: MuJoCo model containing geom definitions
+    mj_data: MuJoCo data containing world-space transforms (geom_xpos, geom_xmat)
+    geom_ids: List of geom indices to merge
+
+  Returns:
+    Single merged trimesh with all geoms transformed to their world poses
+  """
+  meshes = []
+  for geom_id in geom_ids:
+    geom_type = mj_model.geom_type[geom_id]
+
+    if geom_type == mjtGeom.mjGEOM_MESH:
+      mesh = mujoco_mesh_to_trimesh(mj_model, geom_id, verbose=False)
+    else:
+      mesh = create_primitive_mesh(mj_model, geom_id)
+
+    # Use world-space position and rotation from mj_data.
+    pos = mj_data.geom_xpos[geom_id]
+    xmat = mj_data.geom_xmat[geom_id].reshape(3, 3)
+
+    transform = np.eye(4)
+    transform[:3, :3] = xmat
+    transform[:3, 3] = pos
+    mesh.apply_transform(transform)
+    meshes.append(mesh)
+
+  if not meshes:
+    return trimesh.Trimesh()
+  if len(meshes) == 1:
+    return meshes[0]
+  return trimesh.util.concatenate(meshes)

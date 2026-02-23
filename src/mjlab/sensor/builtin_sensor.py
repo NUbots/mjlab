@@ -314,19 +314,19 @@ class BuiltinSensor(Sensor[torch.Tensor]):
           )
 
     # Add sensor to spec.
-    kwargs = {
-      "name": self.cfg.name,
-      "type": _SENSOR_TYPE_MAP[self.cfg.sensor_type],
-    }
-    if self.cfg.obj is not None:
-      kwargs["objtype"] = _OBJECT_TYPE_MAP[self.cfg.obj.type]
-      kwargs["objname"] = self.cfg.obj.prefixed_name()
-    if self.cfg.ref is not None:
-      kwargs["reftype"] = _OBJECT_TYPE_MAP[self.cfg.ref.type]
-      kwargs["refname"] = self.cfg.ref.prefixed_name()
-    if self.cfg.cutoff > 0:
-      kwargs["cutoff"] = self.cfg.cutoff
-    scene_spec.add_sensor(**kwargs)
+    scene_spec.add_sensor(
+      name=self.cfg.name,
+      type=_SENSOR_TYPE_MAP[self.cfg.sensor_type],
+      objtype=(
+        _OBJECT_TYPE_MAP[self.cfg.obj.type] if self.cfg.obj is not None else None
+      ),
+      objname=(self.cfg.obj.prefixed_name() if self.cfg.obj is not None else None),
+      reftype=(
+        _OBJECT_TYPE_MAP[self.cfg.ref.type] if self.cfg.ref is not None else None
+      ),
+      refname=(self.cfg.ref.prefixed_name() if self.cfg.ref is not None else None),
+      cutoff=self.cfg.cutoff if self.cfg.cutoff > 0 else None,
+    )
 
   def initialize(
     self, mj_model: mujoco.MjModel, model: mjwarp.Model, data: mjwarp.Data, device: str

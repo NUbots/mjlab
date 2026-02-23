@@ -64,8 +64,8 @@ This is our recommended way to use ``mjlab``. You have
 your own project and want to use ``mjlab`` as a dependency
 using ``uv``.
 
-Install uv
-^^^^^^^^^^
+1. Install uv
+^^^^^^^^^^^^^
 
 If you do not have ``uv`` installed, run:
 
@@ -73,9 +73,19 @@ If you do not have ``uv`` installed, run:
 
    curl -LsSf https://astral.sh/uv/install.sh | sh
 
+2. Initialize your project
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Add mjlab dependency
-^^^^^^^^^^^^^^^^^^^^
+Initialize a managed Python project:
+
+.. code-block:: bash
+
+   # Create a new package-based project
+   uv init --package my_mjlab_project
+   cd my_mjlab_project
+
+3. Add mjlab dependencies
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
 There are different options to add ``mjlab`` as a dependency.
 We recommend using the latest stable version from PyPI. If you need
@@ -91,11 +101,7 @@ install. These options are interchangeable: you can switch at any time.
 
       .. code:: bash
 
-         uv add mjlab "mujoco-warp @ git+https://github.com/google-deepmind/mujoco_warp@1dc288cf1fa819fc3346ec5c9546e2cc2b7be667"
-
-      .. note::
-
-        ``mujoco-warp`` must be installed from GitHub since it's not available on PyPI.
+         uv add mjlab
 
    .. tab-item:: Source
 
@@ -103,11 +109,7 @@ install. These options are interchangeable: you can switch at any time.
 
       .. code:: bash
 
-         uv add "mjlab @ git+https://github.com/mujocolab/mjlab" "mujoco-warp @ git+https://github.com/google-deepmind/mujoco_warp@1dc288cf1fa819fc3346ec5c9546e2cc2b7be667"
-
-      .. note::
-
-        ``mujoco-warp`` must be installed from GitHub since it's not available on PyPI.
+         uv add "mjlab @ git+https://github.com/mujocolab/mjlab"
 
    .. tab-item:: Local
 
@@ -123,6 +125,11 @@ install. These options are interchangeable: you can switch at any time.
 
          uv add --editable /path/to/cloned/mjlab
 
+.. tip::
+
+   For a complete example of how to structure a project that integrates a custom robot
+   with an existing ``mjlab`` task, check out the
+   `ANYmal C Velocity Tracking <https://github.com/mujocolab/anymal_c_velocity>`_ repository.
 
 Verification
 ^^^^^^^^^^^^
@@ -200,7 +207,6 @@ Install mjlab and dependencies via pip
 
       .. code:: bash
 
-         pip install git+https://github.com/google-deepmind/mujoco_warp@1dc288cf1fa819fc3346ec5c9546e2cc2b7be667
          pip install mjlab
 
    .. tab-item:: Source
@@ -209,17 +215,9 @@ Install mjlab and dependencies via pip
 
       .. code:: bash
 
-         pip install git+https://github.com/google-deepmind/mujoco_warp@1dc288cf1fa819fc3346ec5c9546e2cc2b7be667
          git clone https://github.com/mujocolab/mjlab.git
          cd mjlab
          pip install -e .
-
-      .. note::
-
-         You must install ``mujoco-warp`` from GitHub before running
-         ``pip install -e .`` since it's not available on PyPI and pip cannot resolve
-         the GitHub dependency specified in ``pyproject.toml`` (which uses uv-specific
-         syntax).
 
 
 Verification

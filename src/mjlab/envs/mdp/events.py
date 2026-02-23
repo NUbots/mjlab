@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Dict, Literal, Tuple
 import torch
 
 from mjlab.entity import Entity, EntityIndexing
+from mjlab.managers.event_manager import requires_model_fields
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import (
   quat_from_euler_xyz,
@@ -89,6 +90,14 @@ def reset_root_state_uniform(
 
   For floating-base entities: Resets pose and velocity via write_root_state_to_sim().
   For fixed-base mocap entities: Resets pose only via write_mocap_pose_to_sim().
+
+  .. note::
+    This function applies the env_origins offset to position entities in a grid.
+    For fixed-base robots, this is the ONLY way to position them per-environment.
+    Without calling this function in a reset event, fixed-base robots will stack
+    at (0,0,0).
+
+  See FAQ: "Why are my fixed-base robots all stacked at the origin?"
 
   Args:
     env: The environment.
@@ -374,12 +383,8 @@ FIELD_SPECS = {
   "jnt_range": FieldSpec("joint"),
   "jnt_stiffness": FieldSpec("joint"),
   # Body - uses IDs directly.
-  "body_mass": FieldSpec("body"),
   "body_ipos": FieldSpec("body", default_axes=[0, 1, 2]),
   "body_iquat": FieldSpec("body", default_axes=[0, 1, 2, 3]),
-  "body_inertia": FieldSpec("body"),
-  "body_pos": FieldSpec("body", default_axes=[0, 1, 2]),
-  "body_quat": FieldSpec("body", default_axes=[0, 1, 2, 3]),
   # Geom - uses IDs directly.
   "geom_friction": FieldSpec("geom", default_axes=[0], valid_axes=[0, 1, 2]),
   "geom_pos": FieldSpec("geom", default_axes=[0, 1, 2]),
@@ -409,7 +414,7 @@ def randomize_field(
   Args:
     env: The environment.
     env_ids: Environment IDs to randomize.
-    field: Field name (e.g., "geom_friction", "body_mass").
+    field: Field name (e.g., "geom_friction", "dof_damping").
     ranges: Either (min, max) for all axes, or {axis: (min, max)} for specific axes.
     distribution: Distribution type.
     operation: How to apply randomization. For "scale" and "add" operations,
@@ -637,6 +642,7 @@ def _sample_distribution(
     raise ValueError(f"Unknown distribution: {distribution}")
 
 
+@requires_model_fields("actuator_gainprm", "actuator_biasprm")
 def randomize_pd_gains(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,
@@ -686,7 +692,7 @@ def randomize_pd_gains(
   ]
 
   for actuator in actuators:
-    ctrl_ids = actuator.ctrl_ids
+    ctrl_ids = actuator.global_ctrl_ids
 
     kp_samples = _sample_distribution(
       distribution,
@@ -745,6 +751,7 @@ def randomize_pd_gains(
       )
 
 
+@requires_model_fields("actuator_forcerange")
 def randomize_effort_limits(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,
@@ -785,7 +792,7 @@ def randomize_effort_limits(
     actuators = [actuators]
 
   for actuator in actuators:
-    ctrl_ids = actuator.ctrl_ids
+    ctrl_ids = actuator.global_ctrl_ids
     num_actuators = len(ctrl_ids)
 
     effort_samples = _sample_distribution(
@@ -835,7 +842,7 @@ def randomize_encoder_bias(
 ) -> None:
   """Randomize encoder bias to simulate joint encoder calibration errors.
 
-  See docs/api/domain_randomization.md for details on how encoder bias works.
+  See docs/source/randomization.rst for details on how encoder bias works.
   """
   asset: Entity = env.scene[asset_cfg.name]
 

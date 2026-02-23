@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "make format"
+            "command": "uv run ruff format"
           }
         ]
       }

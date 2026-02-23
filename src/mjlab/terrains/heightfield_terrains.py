@@ -102,6 +102,70 @@ def color_by_height(
   return material_name
 
 
+def _fractal_perlin_noise_2d(
+  x_size: int,
+  y_size: int,
+  rng: np.random.Generator,
+  octaves: int = 4,
+  persistence: float = 0.5,
+  lacunarity: float = 2.0,
+  scale: float = 1.0,
+) -> np.ndarray:
+  """Generate 2D fractal Perlin noise."""
+
+  def lerp(a, b, x):
+    return a + x * (b - a)
+
+  def fade(t):
+    return t * t * t * (t * (t * 6 - 15) + 10)
+
+  def gradient(h, x, y):
+    h = h % 4
+    return np.where(
+      h == 0,
+      x + y,
+      np.where(h == 1, x - y, np.where(h == 2, -x + y, -x - y)),
+    )
+
+  def perlin(x, y, p):
+    xi = x.astype(int) % 256
+    yi = y.astype(int) % 256
+    xf = x - x.astype(int)
+    yf = y - y.astype(int)
+    u = fade(xf)
+    v = fade(yf)
+
+    n00 = gradient(p[p[xi] + yi], xf, yf)
+    n01 = gradient(p[p[xi] + yi + 1], xf, yf - 1)
+    n11 = gradient(p[p[xi + 1] + yi + 1], xf - 1, yf - 1)
+    n10 = gradient(p[p[xi + 1] + yi], xf - 1, yf)
+
+    x1 = lerp(n00, n10, u)
+    x2 = lerp(n01, n11, u)
+    return lerp(x1, x2, v)
+
+  p = np.arange(256, dtype=int)
+  rng.shuffle(p)
+  p = np.stack([p, p]).flatten()
+
+  noise = np.zeros((x_size, y_size))
+  amplitude = 1.0
+  frequency = scale
+  total_amplitude = 0.0
+
+  x = np.linspace(0, x_size, x_size, endpoint=False)
+  y = np.linspace(0, y_size, y_size, endpoint=False)
+  xx, yy = np.meshgrid(x, y, indexing="ij")
+
+  for _ in range(octaves):
+    noise += amplitude * perlin(xx * frequency / x_size, yy * frequency / y_size, p)
+    total_amplitude += amplitude
+    amplitude *= persistence
+    frequency *= lacunarity
+
+  return noise / total_amplitude
+
+
 def _compute_flat_patches(
   noise: np.ndarray,
   vertical_scale: float,
@@ -129,12 +193,20 @@ def _compute_flat_patches(
 @dataclass(kw_only=True)
 class HfPyramidSlopedTerrainCfg(SubTerrainCfg):
   slope_range: tuple[float, float]
+  """Range of slope gradients (rise / run), interpolated by difficulty."""
   platform_width: float = 1.0
+  """Side length of the flat square platform at the terrain center, in meters."""
   inverted: bool = False
+  """If True, the pyramid is inverted so the platform is at the bottom."""
   border_width: float = 0.0
+  """Width of the flat border around the terrain edges, in meters. Must be >=
+  horizontal_scale if non-zero."""
   horizontal_scale: float = 0.1
+  """Heightfield grid resolution along x and y, in meters per cell."""
   vertical_scale: float = 0.005
+  """Heightfield height resolution, in meters per integer unit of the noise array."""
   base_thickness_ratio: float = 1.0
+  """Ratio of the heightfield base thickness to its maximum surface height."""
 
   def function(
     self, difficulty: float, spec: mujoco.MjSpec, rng: np.random.Generator
@@ -246,7 +318,7 @@ class HfPyramidSlopedTerrainCfg(SubTerrainCfg):
       ],
       nrow=noise.shape[0],
       ncol=noise.shape[1],
-      userdata=normalized_elevation.flatten().astype(np.float32),
+      userdata=normalized_elevation.flatten().astype(np.float32).tolist(),
     )
 
     if self.inverted:
@@ -290,12 +362,22 @@ class HfPyramidSlopedTerrainCfg(SubTerrainCfg):
 @dataclass(kw_only=True)
 class HfRandomUniformTerrainCfg(SubTerrainCfg):
   noise_range: tuple[float, float]
+  """Min and max height noise, in meters."""
   noise_step: float = 0.005
+  """Height quantization step, in meters. Sampled heights are multiples of this
+  value within noise_range."""
   downsampled_scale: float | None = None
+  """Spacing between randomly sampled height points before interpolation, in
+  meters. If None, uses horizontal_scale. Must be >= horizontal_scale."""
   horizontal_scale: float = 0.1
+  """Heightfield grid resolution along x and y, in meters per cell."""
   vertical_scale: float = 0.005
+  """Heightfield height resolution, in meters per integer unit of the noise array."""
   base_thickness_ratio: float = 1.0
+  """Ratio of the heightfield base thickness to its maximum surface height."""
   border_width: float = 0.0
+  """Width of the flat border around the terrain edges, in meters. Must be >=
+  horizontal_scale if non-zero."""
 
   def function(
     self, difficulty: float, spec: mujoco.MjSpec, rng: np.random.Generator
@@ -404,7 +486,7 @@ class HfRandomUniformTerrainCfg(SubTerrainCfg):
       ],
       nrow=noise.shape[0],
       ncol=noise.shape[1],
-      userdata=normalized_elevation.flatten().astype(np.float32),
+      userdata=normalized_elevation.flatten().astype(np.float32).tolist(),
     )
 
     material_name = color_by_height(spec, noise, unique_id, normalized_elevation)
@@ -435,11 +517,18 @@ class HfRandomUniformTerrainCfg(SubTerrainCfg):
 @dataclass(kw_only=True)
 class HfWaveTerrainCfg(SubTerrainCfg):
   amplitude_range: tuple[float, float]
+  """Min and max wave amplitude, in meters. Interpolated by difficulty."""
   num_waves: int = 1
+  """Number of complete wave cycles along the terrain length."""
   horizontal_scale: float = 0.1
+  """Heightfield grid resolution along x and y, in meters per cell."""
   vertical_scale: float = 0.005
+  """Heightfield height resolution, in meters per integer unit of the noise array."""
   base_thickness_ratio: float = 0.25
+  """Ratio of the heightfield base thickness to its maximum surface height."""
   border_width: float = 0.0
+  """Width of the flat border around the terrain edges, in meters. Must be >=
+  horizontal_scale if non-zero."""
 
   def function(
     self, difficulty: float, spec: mujoco.MjSpec, rng: np.random.Generator
@@ -524,7 +613,7 @@ class HfWaveTerrainCfg(SubTerrainCfg):
       ],
       nrow=noise.shape[0],
       ncol=noise.shape[1],
-      userdata=normalized_elevation.flatten().astype(np.float32),
+      userdata=normalized_elevation.flatten().astype(np.float32).tolist(),
     )
 
     material_name = color_by_height(spec, noise, unique_id, normalized_elevation)
@@ -555,15 +644,34 @@ class HfWaveTerrainCfg(SubTerrainCfg):
 @dataclass(kw_only=True)
 class HfDiscreteObstaclesTerrainCfg(SubTerrainCfg):
   obstacle_height_mode: Literal["choice", "fixed"] = "choice"
+  """How obstacle heights are chosen. "choice" randomly picks from [-h, -h/2,
+  h/2, h] (mix of pits and bumps); "fixed" uses h for all obstacles."""
   obstacle_width_range: tuple[float, float]
+  """Min and max obstacle width, in meters."""
   obstacle_height_range: tuple[float, float]
+  """Min and max obstacle height, in meters. Interpolated by difficulty."""
   num_obstacles: int
+  """Number of obstacles to place on the terrain."""
   platform_width: float = 1.0
+  """Side length of the obstacle-free flat square at the terrain center, in meters."""
   horizontal_scale: float = 0.1
+  """Heightfield grid resolution along x and y, in meters per cell."""
   vertical_scale: float = 0.005
+  """Heightfield height resolution, in meters per integer unit of the noise array."""
   base_thickness_ratio: float = 1.0
+  """Ratio of the heightfield base thickness to its maximum surface height."""
   border_width: float = 0.0
+  """Width of the flat border around the terrain edges, in meters. Must be >=
+  horizontal_scale if non-zero."""
   square_obstacles: bool = False
+  """If True, obstacles have equal width and length. If False, each dimension
+  is sampled independently."""
+  origin_z_offset: float = 0.0
+  """Vertical offset added to spawn origin height (meters).
+
+  Useful to prevent robot feet from clipping through terrain when spawning at
+  the origin.
+  """
 
   def function(
     self, difficulty: float, spec: mujoco.MjSpec, rng: np.random.Generator
@@ -665,7 +773,7 @@ class HfDiscreteObstaclesTerrainCfg(SubTerrainCfg):
       ],
       nrow=noise.shape[0],
       ncol=noise.shape[1],
-      userdata=normalized_elevation.flatten().astype(np.float32),
+      userdata=normalized_elevation.flatten().astype(np.float32).tolist(),
     )
 
     # For "choice" mode, obstacles can be negative (pits), so offset the
@@ -688,7 +796,8 @@ class HfDiscreteObstaclesTerrainCfg(SubTerrainCfg):
       material=material_name,
     )
 
-    spawn_height = max_physical_height + hfield_z_offset
+    # The cleared platform (noise=0) is at z=0 due to the offset logic.
+    spawn_height = self.origin_z_offset
     origin = np.array([self.size[0] / 2, self.size[1] / 2, spawn_height])
 
     flat_patches = _compute_flat_patches(
@@ -696,6 +805,129 @@ class HfDiscreteObstaclesTerrainCfg(SubTerrainCfg):
       self.vertical_scale,
       self.horizontal_scale,
       hfield_z_offset,
+      self.flat_patch_sampling,
+      rng,
+    )
+
+    geom = TerrainGeometry(geom=hfield_geom, hfield=field)
+    return TerrainOutput(origin=origin, geometries=[geom], flat_patches=flat_patches)
+
+
+@dataclass(kw_only=True)
+class HfPerlinNoiseTerrainCfg(SubTerrainCfg):
+  height_range: tuple[float, float]
+  octaves: int = 4
+  persistence: float = 0.5
+  lacunarity: float = 2.0
+  scale: float = 10.0
+  horizontal_scale: float = 0.1
+  resolution: float = 0.05
+  base_thickness_ratio: float = 1.0
+  border_width: float = 0.0
+
+  def function(
+    self, difficulty: float, spec: mujoco.MjSpec, rng: np.random.Generator
+  ) -> TerrainOutput:
+    body = spec.body("terrain")
+
+    if self.border_width > 0 and self.border_width < self.horizontal_scale:
+      raise ValueError(
+        f"Border width ({self.border_width}) must be >= "
+        f"horizontal_scale ({self.horizontal_scale})"
+      )
+
+    target_height = self.height_range[0] + difficulty * (
+      self.height_range[1] - self.height_range[0]
+    )
+
+    # Resolution is the pixel size (distance between grid points).
+    grid_spacing = self.resolution
+
+    # Feature scale is affected by both 'scale' and 'horizontal_scale'.
+    # A larger horizontal_scale means larger features (stretched out).
+    effective_scale = self.scale * (self.resolution / self.horizontal_scale)
+
+    border_pixels = int(self.border_width / grid_spacing)
+    width_pixels = int(self.size[0] / grid_spacing)
+    length_pixels = int(self.size[1] / grid_spacing)
+
+    if border_pixels > 0:
+      inner_width_pixels = width_pixels - 2 * border_pixels
+      inner_length_pixels = length_pixels - 2 * border_pixels
+      noise_raw = _fractal_perlin_noise_2d(
+        inner_width_pixels,
+        inner_length_pixels,
+        rng,
+        octaves=self.octaves,
+        persistence=self.persistence,
+        lacunarity=self.lacunarity,
+        scale=effective_scale,
+      )
+      # Normalize to [0, 1]
+      noise_min, noise_max = noise_raw.min(), noise_raw.max()
+      noise_range = noise_max - noise_min if noise_max > noise_min else 1.0
+      inner_normalized = (noise_raw - noise_min) / noise_range
+
+      normalized_elevation = np.zeros((width_pixels, length_pixels), dtype=np.float32)
+      normalized_elevation[
+        border_pixels:-border_pixels,
+        border_pixels:-border_pixels,
+      ] = inner_normalized
+    else:
+      noise_raw = _fractal_perlin_noise_2d(
+        width_pixels,
+        length_pixels,
+        rng,
+        octaves=self.octaves,
+        persistence=self.persistence,
+        lacunarity=self.lacunarity,
+        scale=effective_scale,
+      )
+      noise_min, noise_max = noise_raw.min(), noise_raw.max()
+      noise_range = noise_max - noise_min if noise_max > noise_min else 1.0
+      normalized_elevation = ((noise_raw - noise_min) / noise_range).astype(np.float32)
+
+    max_physical_height = target_height
+    base_thickness = max_physical_height * self.base_thickness_ratio
+
+    unique_id = uuid.uuid4().hex
+    field = spec.add_hfield(
+      name=f"hfield_{unique_id}",
+      size=[
+        self.size[0] / 2,
+        self.size[1] / 2,
+        max_physical_height,
+        base_thickness,
+      ],
+      nrow=normalized_elevation.shape[0],
+      ncol=normalized_elevation.shape[1],
+      userdata=normalized_elevation.flatten().tolist(),
+    )
+
+    material_name = color_by_height(
+      spec, normalized_elevation, unique_id, normalized_elevation
+    )
+
+    hfield_geom = body.add_geom(
+      type=mujoco.mjtGeom.mjGEOM_HFIELD,
+      hfieldname=field.name,
+      pos=[
+        self.size[0] / 2,
+        self.size[1] / 2,
+        0,
+      ],
+      material=material_name,
+    )
+
+    spawn_height = max_physical_height
+    origin = np.array([self.size[0] / 2, self.size[1] / 2, spawn_height])
+
+    # For flat patches, we pass the absolute physical heights.
+    flat_patches = _compute_flat_patches(
+      normalized_elevation * max_physical_height,
+      1.0,  # vertical_scale is 1.0 because we already have physical heights
+      grid_spacing,
+      0,
       self.flat_patch_sampling,
       rng,
     )

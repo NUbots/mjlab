@@ -40,22 +40,39 @@ class FlatPatchSamplingCfg:
 @dataclass
 class TerrainGeometry:
   geom: mujoco.MjsGeom | None = None
+  """MuJoCo geometry spec element, or None."""
   hfield: mujoco.MjsHField | None = None
+  """MuJoCo heightfield spec element, or None."""
   color: tuple[float, float, float, float] | None = None
+  """RGBA color override for this geometry, or None to use default."""
 
 
 @dataclass
 class TerrainOutput:
   origin: np.ndarray
+  """Spawn origin position (x, y, z) in the sub-terrain's local frame."""
   geometries: list[TerrainGeometry]
+  """List of geometry elements comprising this terrain."""
   flat_patches: dict[str, np.ndarray] | None = None
+  """Named sets of flat patch positions, each an (N, 3) array. None if not configured."""
 
 
 @dataclass
 class SubTerrainCfg(abc.ABC):
   proportion: float = 1.0
+  """Terrain type allocation weight (behavior depends on curriculum mode):
+
+  - curriculum=True: Controls column allocation. Normalized proportions determine
+    how many columns each terrain type occupies via cumulative distribution.
+    Example: proportions [0.5, 0.5] with num_cols=2 gives one terrain per column.
+
+  - curriculum=False: Sampling probability for each patch. Each patch independently
+    samples a terrain type weighted by normalized proportions.
+  """
   size: tuple[float, float] = (10.0, 10.0)
+  """Width and length of the terrain patch, in meters."""
   flat_patch_sampling: dict[str, FlatPatchSamplingCfg] | None = None
+  """Named flat-patch sampling configurations, or None to disable."""
 
   @abc.abstractmethod
   def function(
@@ -72,24 +89,58 @@ class SubTerrainCfg(abc.ABC):
 @dataclass(kw_only=True)
 class TerrainGeneratorCfg:
   seed: int | None = None
+  """Random seed for terrain generation. None uses a random seed."""
   curriculum: bool = False
+  """Controls terrain allocation mode:
+
+  - curriculum=True: Each column gets ONE terrain type (deterministic allocation).
+    Difficulty increases along rows. Use this to ensure each terrain type occupies
+    its own column(s).
+
+  - curriculum=False: Every patch is randomly sampled from all terrain types.
+    Proportions control sampling probability. Use this for random variety.
+
+  Example: With 2 terrain types and num_cols=2, curriculum=True gives one terrain
+  per column. curriculum=False gives a random mix of both types in all patches.
+  """
   size: tuple[float, float]
+  """Width and length of each sub-terrain patch, in meters."""
   border_width: float = 0.0
+  """Width of the flat border around the entire terrain grid, in meters."""
   border_height: float = 1.0
+  """Height of the border wall around the terrain grid, in meters."""
   num_rows: int = 1
+  """Number of sub-terrain rows in the grid. Represents difficulty levels in
+  curriculum mode. Note: Environments are randomly assigned to rows, so multiple
+  envs can share the same patch."""
   num_cols: int = 1
+  """Number of sub-terrain columns in the grid. Represents terrain type variants.
+  Note: Environments are evenly distributed across columns (not random)."""
   color_scheme: Literal["height", "random", "none"] = "height"
+  """Coloring strategy for terrain geometry. "height" colors by elevation,
+  "random" assigns random colors, "none" uses uniform gray."""
   sub_terrains: dict[str, SubTerrainCfg] = field(default_factory=dict)
+  """Named sub-terrain configurations to populate the grid."""
   difficulty_range: tuple[float, float] = (0.0, 1.0)
+  """Min and max difficulty values used when generating sub-terrains."""
   add_lights: bool = False
+  """If True, adds a directional light above the terrain grid."""
 
 
 class TerrainGenerator:
   """Generates procedural terrain grids with configurable difficulty.
 
   Creates a grid of terrain patches where each patch can be a different
-  terrain type. Supports two modes: random (patches get random difficulty)
-  or curriculum (difficulty increases along rows for progressive training).
+  terrain type. Supports two modes:
+
+  - **Random mode** (curriculum=False): Every patch independently samples a
+    terrain type weighted by proportions. Results in random variety across
+    all patches.
+
+  - **Curriculum mode** (curriculum=True): Columns are deterministically
+    assigned to terrain types based on proportions. All patches in a column
+    share the same terrain type, with difficulty increasing along rows.
+    Use this to ensure each terrain type occupies specific column(s).
 
   Terrain types are weighted by proportion and their geometry is generated
   based on a difficulty value in the configured range. The grid is centered
@@ -283,8 +334,9 @@ class TerrainGenerator:
         patches = output.flat_patches[name]
         arr[sub_row, sub_col, : len(patches)] = patches + world_position
         arr[sub_row, sub_col, len(patches) :] = spawn_origin
-      elif cfg.flat_patch_sampling is not None and name in cfg.flat_patch_sampling:
-        # Terrain didn't produce patches (primitive fallback): fill with spawn origin.
+      else:
+        # Sub-terrain didn't produce patches: fill with spawn origin so that
+        # every slot contains a valid position for reset_root_state_from_flat_patches.
         arr[sub_row, sub_col] = spawn_origin
 
     return spawn_origin

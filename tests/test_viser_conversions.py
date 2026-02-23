@@ -5,9 +5,11 @@ from pathlib import Path
 import mujoco
 
 from mjlab.viewer.viser import (
+  create_site_mesh,
   get_geom_texture_id,
   group_geoms_by_visual_compat,
   merge_geoms,
+  merge_sites,
   mujoco_mesh_to_trimesh,
 )
 
@@ -428,6 +430,140 @@ def test_merge_mixed_visual_geoms():
       assert vertex_colors[0][1] == 255, (
         f"Expected green channel 255, got {vertex_colors[0][1]}"
       )
+
+
+def _make_site_model() -> mujoco.MjModel:
+  """Create a model with all 5 site types."""
+  xml = """
+    <mujoco>
+      <worldbody>
+        <body name="test_body" pos="0 0 1">
+          <joint type="free"/>
+          <geom type="sphere" size="0.01"/>
+          <site name="sphere_site" type="sphere" size="0.1" rgba="1 0 0 1"/>
+          <site name="capsule_site" type="capsule" size="0.05 0.1" rgba="0 1 0 1"
+                pos="1 0 0"/>
+          <site name="ellipsoid_site" type="ellipsoid" size="0.1 0.05 0.03"
+                rgba="0 0 1 1" pos="2 0 0"/>
+          <site name="cylinder_site" type="cylinder" size="0.05 0.1" rgba="1 1 0 1"
+                pos="3 0 0"/>
+          <site name="box_site" type="box" size="0.1 0.05 0.03" rgba="0 1 1 1"
+                pos="4 0 0"/>
+        </body>
+      </worldbody>
+    </mujoco>
+  """
+  return mujoco.MjModel.from_xml_string(xml)
+
+
+def test_create_site_mesh_sphere():
+  """Test sphere site mesh creation."""
+  model = _make_site_model()
+  site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "sphere_site")
+  mesh = create_site_mesh(model, site_id)
+  assert len(mesh.vertices) > 0
+  assert len(mesh.faces) > 0
+  # Check color is red.
+  assert mesh.visual is not None
+  assert mesh.visual.vertex_colors[0][0] == 255
+  assert mesh.visual.vertex_colors[0][1] == 0
+
+
+def test_create_site_mesh_capsule():
+  """Test capsule site mesh creation."""
+  model = _make_site_model()
+  site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "capsule_site")
+  mesh = create_site_mesh(model, site_id)
+  assert len(mesh.vertices) > 0
+  assert len(mesh.faces) > 0
+  # Check color is green.
+  assert mesh.visual is not None
+  assert mesh.visual.vertex_colors[0][1] == 255
+
+
+def test_create_site_mesh_ellipsoid():
+  """Test ellipsoid site mesh creation."""
+  model = _make_site_model()
+  site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "ellipsoid_site")
+  mesh = create_site_mesh(model, site_id)
+  assert len(mesh.vertices) > 0
+  assert len(mesh.faces) > 0
+  # Check color is blue.
+  assert mesh.visual is not None
+  assert mesh.visual.vertex_colors[0][2] == 255
+
+
+def test_create_site_mesh_cylinder():
+  """Test cylinder site mesh creation."""
+  model = _make_site_model()
+  site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "cylinder_site")
+  mesh = create_site_mesh(model, site_id)
+  assert len(mesh.vertices) > 0
+  assert len(mesh.faces) > 0
+
+
+def test_create_site_mesh_box():
+  """Test box site mesh creation."""
+  model = _make_site_model()
+  site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "box_site")
+  mesh = create_site_mesh(model, site_id)
+  assert len(mesh.vertices) > 0
+  assert len(mesh.faces) > 0
+
+
+def test_create_site_mesh_rgba_fallback():
+  """Test that all-zero RGBA falls back to gray."""
+  xml = """
+    <mujoco>
+      <worldbody>
+        <site name="zero_rgba" type="sphere" size="0.1" rgba="0 0 0 0"/>
+      </worldbody>
+    </mujoco>
+  """
+  model = mujoco.MjModel.from_xml_string(xml)
+  site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "zero_rgba")
+  mesh = create_site_mesh(model, site_id)
+  # Should be gray (0.5 * 255 = 127), not transparent black.
+  assert mesh.visual is not None
+  color = mesh.visual.vertex_colors[0]
+  assert color[0] == 127, f"Expected R=127, got {color[0]}"
+  assert color[1] == 127, f"Expected G=127, got {color[1]}"
+  assert color[2] == 127, f"Expected B=127, got {color[2]}"
+  assert color[3] == 255, f"Expected A=255, got {color[3]}"
+
+
+def test_merge_sites_single():
+  """Test merging a single site returns the site mesh."""
+  model = _make_site_model()
+  site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "sphere_site")
+  mesh = merge_sites(model, [site_id])
+  assert len(mesh.vertices) > 0
+  assert len(mesh.faces) > 0
+
+
+def test_merge_sites_multiple():
+  """Test merging multiple sites combines them correctly."""
+  model = _make_site_model()
+  sphere_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "sphere_site")
+  capsule_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "capsule_site")
+  box_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "box_site")
+
+  single_sphere = create_site_mesh(model, sphere_id)
+  single_capsule = create_site_mesh(model, capsule_id)
+  single_box = create_site_mesh(model, box_id)
+
+  merged = merge_sites(model, [sphere_id, capsule_id, box_id])
+
+  # Merged mesh should have at least the sum of individual vertices.
+  expected_min_verts = (
+    len(single_sphere.vertices)
+    + len(single_capsule.vertices)
+    + len(single_box.vertices)
+  )
+  assert len(merged.vertices) >= expected_min_verts, (
+    f"Expected >= {expected_min_verts} vertices, got {len(merged.vertices)}"
+  )
+  assert len(merged.faces) > 0
 
 
 if __name__ == "__main__":

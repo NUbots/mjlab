@@ -22,9 +22,7 @@ You can try mjlab *without installing anything* by using `uvx`:
    curl -LsSf https://astral.sh/uv/install.sh | sh
 
    # Run the mjlab demo (no local installation needed)
-   uvx --from mjlab \
-       --with "mujoco-warp @ git+https://github.com/google-deepmind/mujoco_warp@1dc288cf1fa819fc3346ec5c9546e2cc2b7be667" \
-       demo
+   uvx --from mjlab demo
 
 If this runs, your setup is compatible with mjlab *for evaluation*.
 
@@ -71,6 +69,7 @@ Table of Contents
 
    source/motivation
    source/faq
+   source/changelog
 
 .. toctree::
    :maxdepth: 2

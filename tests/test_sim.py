@@ -136,3 +136,31 @@ def test_sim_reset_selective(robot_xml, device):
   # Envs 0 and 2 should be unchanged.
   torch.testing.assert_close(sim.data.qpos[0], qpos_after_sim[0])
   torch.testing.assert_close(sim.data.qpos[2], qpos_after_sim[2])
+
+
+def test_xpos_matches_qpos_after_forward(robot_xml, device):
+  """sim.step() leaves xpos stale; sim.forward() makes it match qpos.
+
+  In MuJoCo, mj_step = mj_step1 (forward kinematics + forces) + mj_step2
+  (integration). After mj_step, qpos/qvel are post-integration but xpos is
+  from the pre-integration forward pass. sim.forward() recomputes xpos from
+  the current qpos.
+  """
+  model = mujoco.MjModel.from_xml_string(robot_xml)
+  cfg = SimulationCfg(mujoco=MujocoCfg(timestep=0.01))  # Large dt for clear signal
+  sim = Simulation(num_envs=2, cfg=cfg, model=model, device=device)
+
+  # Step enough for significant velocity -> large staleness gap.
+  for _ in range(50):
+    sim.step()
+
+  # xpos is stale: reflects pre-integration state of last step.
+  # For the freejoint body (body 1), qpos[:3] is the true position.
+  xpos_stale = sim.data.xpos[:, 1].clone()
+  qpos_pos = sim.data.qpos[:, :3].clone()
+  assert not torch.allclose(xpos_stale, qpos_pos, atol=1e-4)
+
+  # forward() refreshes derived quantities from current qpos.
+  sim.forward()
+  xpos_fresh = sim.data.xpos[:, 1].clone()
+  torch.testing.assert_close(xpos_fresh, qpos_pos, atol=1e-5, rtol=0)

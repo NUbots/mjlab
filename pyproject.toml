@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "mjlab"
-version = "1.0.0"
+version = "1.1.1"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 readme = { file = "README.md", content-type = "text/markdown" }
@@ -36,14 +36,15 @@ dependencies = [
   "tyro>=1.0.1",
   "torch>=2.7.0",
   "torchrunx>=0.3.4",
-  "warp-lang>=1.11.0.dev20251211",
-  "mujoco-warp",
-  "mujoco>=3.4.0",
+  "warp-lang>=1.12.0.dev",
+  "mujoco-warp>=3.5.0",
+  "mujoco>=3.5.0",
   "trimesh>=4.8.3",
   "viser>=1.0.21",
-  "moviepy",
+  "mediapy>=1.2.6",
+  "imageio-ffmpeg",
   "tensordict",
-  "rsl-rl-lib==3.1.0",
+  "rsl-rl-lib==4.0.1",
   "tensorboard>=2.20.0",
   "onnxscript>=0.5.4",
   "wandb>=0.22.3",
@@ -69,23 +70,24 @@ dev = [
   "ruff>=v0.14.14",
   "ty>=v0.0.14",
 ]
+docs = [
+  "myst-parser>=4.0.1",
+  "sphinx>=8.1.3",
+  "sphinx-autodoc-typehints>=3.0.1",
+  "sphinx-autobuild>=2024.10.3",
+  "sphinx-book-theme>=1.1.4",
+  "sphinx-copybutton>=0.5.2",
+  "sphinx-design>=0.6.1",
+  "autodocsumm",
+  "sphinxemoji",
+  "sphinxcontrib.bibtex",
+  "sphinx-icon",
+  "sphinx-tabs",
+  "sphinx_multiversion",
+]
 
 [project.optional-dependencies]
 cu128 = ["torch>=2.7.0"]
-docs = [
-    "myst-parser>=4.0.1",
-    "sphinx>=8.1.3",
-    "sphinx-autodoc-typehints>=3.0.1",
-    "sphinx-book-theme>=1.1.4",
-    "sphinx-copybutton>=0.5.2",
-    "sphinx-design>=0.6.1",
-    "autodocsumm",
-    "sphinxemoji",
-    "sphinxcontrib.bibtex",
-    "sphinx-icon",
-    "sphinx-tabs",
-    "sphinx_multiversion",
-]
 
 [tool.uv]
 required-environments = [
@@ -118,9 +120,9 @@ explicit = true
 
 [tool.uv.sources]
 warp-lang = { index = "nvidia", marker = "sys_platform != 'darwin'" }
-mujoco = { index = "mujoco" }
 torch = { index = "pytorch-cu128", extra = "cu128", marker = "sys_platform != 'darwin'" }
-mujoco-warp = { git = "https://github.com/google-deepmind/mujoco_warp", rev = "1dc288cf1fa819fc3346ec5c9546e2cc2b7be667" }
+mujoco = { index = "mujoco" }
+mujoco-warp = { git = "https://github.com/google-deepmind/mujoco_warp", rev = "fc9158989525538db53a2a8c3c0f156cbfeca911" }
 
 [tool.ruff]
 src = ["src"]  # Helpful for recognizing first-party imports.
