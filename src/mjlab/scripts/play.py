@@ -8,10 +8,9 @@ from typing import Literal
 
 import torch
 import tyro
-from rsl_rl.runners import OnPolicyRunner
 
 from mjlab.envs import ManagerBasedRlEnv
-from mjlab.rl import RslRlVecEnvWrapper
+from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.utils.os import get_wandb_checkpoint_path
@@ -168,7 +167,7 @@ def run_play(task_id: str, cfg: PlayConfig):
 
   env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
   if DUMMY_MODE:
-    action_shape: tuple[int, ...] = env.unwrapped.action_space.shape  # type: ignore
+    action_shape: tuple[int, ...] = env.unwrapped.action_space.shape
     if cfg.agent == "zero":
 
       class PolicyZero:
@@ -186,9 +185,11 @@ def run_play(task_id: str, cfg: PlayConfig):
 
       policy = PolicyRandom()
   else:
-    runner_cls = load_runner_cls(task_id) or OnPolicyRunner
+    runner_cls = load_runner_cls(task_id) or MjlabOnPolicyRunner
     runner = runner_cls(env, asdict(agent_cfg), device=device)
-    runner.load(str(resume_path), map_location=device)
+    runner.load(
+      str(resume_path), load_cfg={"actor": True}, strict=True, map_location=device
+    )
     policy = runner.get_inference_policy(device=device)
 
   # Handle "auto" viewer selection.
@@ -219,6 +220,7 @@ def main():
     tyro.extras.literal_type_from_choices(all_tasks),
     add_help=False,
     return_unknown_args=True,
+    config=mjlab.TYRO_FLAGS,
   )
 
   # Parse the rest of the arguments + allow overriding env_cfg and agent_cfg.
@@ -229,10 +231,7 @@ def main():
     args=remaining_args,
     default=PlayConfig(),
     prog=sys.argv[0] + f" {chosen_task}",
-    config=(
-      tyro.conf.AvoidSubcommands,
-      tyro.conf.FlagConversionOff,
-    ),
+    config=mjlab.TYRO_FLAGS,
   )
   del remaining_args, agent_cfg
 

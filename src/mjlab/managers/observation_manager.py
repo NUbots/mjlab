@@ -62,7 +62,7 @@ class ObservationTermCfg(ManagerTermBaseCfg):
 
   When True and concatenate_terms=True, uses term-major ordering:
   [A_t0, A_t1, ..., A_tH-1, B_t0, B_t1, ..., B_tH-1, ...]
-  See docs/api/observation_history_delay.md for details on ordering."""
+  See docs/source/observation.rst for details on ordering."""
 
 
 @dataclass
@@ -70,7 +70,7 @@ class ObservationGroupCfg:
   """Configuration for an observation group.
 
   An observation group bundles multiple observation terms together. Groups are
-  typically used to separate observations for different purposes (e.g., "policy"
+  typically used to separate observations for different purposes (e.g., "actor"
   for the actor, "critic" for the value function).
   """
 
@@ -264,7 +264,7 @@ class ObservationManager(ManagerBase):
 
     Args:
       tensor: Observation tensor to check.
-      context: Context string for error/warning messages (e.g., "policy/base_lin_vel").
+      context: Context string for error/warning messages (e.g., "actor/base_lin_vel").
       policy: NaN handling policy ("disabled", "warn", "sanitize", "error").
 
     Returns:

@@ -42,6 +42,9 @@ class Sensor(ABC, Generic[T]):
   - If overriding `reset()` or `update()`, call `super()` FIRST to invalidate cache
   """
 
+  requires_sensor_context: bool = False
+  """Whether this sensor needs a SensorContext (render context)."""
+
   def __init__(self) -> None:
     self._cached_data: T | None = None
     self._cache_valid: bool = False

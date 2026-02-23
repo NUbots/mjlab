@@ -5,6 +5,7 @@ import torch
 import tyro
 from tqdm import tqdm
 
+import mjlab
 from mjlab.entity import Entity
 from mjlab.scene import Scene
 from mjlab.sim.sim import Simulation, SimulationCfg
@@ -305,7 +306,7 @@ def run_sim(
           log[k] = np.stack(log[k], axis=0)
 
         print("Saving to /tmp/motion.npz...")
-        np.savez("/tmp/motion.npz", **log)  # type: ignore[arg-type]
+        np.savez("/tmp/motion.npz", **log)
 
         print("Uploading to Weights & Biases...")
         import wandb
@@ -324,11 +325,10 @@ def run_sim(
         print(f"[INFO]: Motion saved to wandb registry: {REGISTRY}/{COLLECTION}")
 
         if render:
-          from moviepy import ImageSequenceClip
+          import mediapy as media
 
           print("Creating video...")
-          clip = ImageSequenceClip(frames, fps=output_fps)
-          clip.write_videofile("./motion.mp4")
+          media.write_video("./motion.mp4", frames, fps=output_fps)
 
           print("Logging video to wandb...")
           wandb.log({"motion_video": wandb.Video("./motion.mp4", format="mp4")})
@@ -432,4 +432,4 @@ def main(
 
 
 if __name__ == "__main__":
-  tyro.cli(main)
+  tyro.cli(main, config=mjlab.TYRO_FLAGS)

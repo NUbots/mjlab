@@ -104,6 +104,8 @@ def create_raycast_sensor_scene(device: str, num_envs: int = 2):
   sim_cfg = SimulationCfg(njmax=20)
   sim = Simulation(num_envs=num_envs, cfg=sim_cfg, model=model, device=device)
   scene.initialize(sim.mj_model, sim.model, sim.data)
+  if scene.sensor_context is not None:
+    sim.set_sensor_context(scene.sensor_context)
 
   return scene, sim
 
@@ -185,6 +187,7 @@ def test_data_reflects_physics_after_step_and_update(device):
   # Initial position at z=2.
   sim.step()
   scene.update(dt=sim.cfg.mujoco.timestep)
+  sim.sense()
   data1 = sensor.data
 
   # All rays should hit floor ~2m away.
@@ -200,6 +203,7 @@ def test_data_reflects_physics_after_step_and_update(device):
 
   sim.step()
   scene.update(dt=sim.cfg.mujoco.timestep)
+  sim.sense()
 
   data2 = sensor.data
 
@@ -221,6 +225,7 @@ def test_stale_cache_without_update(device):
   # Initial step + update.
   sim.step()
   scene.update(dt=sim.cfg.mujoco.timestep)
+  sim.sense()
 
   # Access data to populate cache.
   data1 = sensor.data

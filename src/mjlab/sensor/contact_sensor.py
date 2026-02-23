@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import mujoco
 import mujoco_warp as mjwarp
@@ -556,7 +556,7 @@ class ContactSensor(Sensor[ContactData]):
     else:
       prefixed_primary = primary_name
 
-    kwargs = {
+    kwargs: dict[str, Any] = {
       "name": sensor_name,
       "type": mujoco.mjtSensor.mjSENS_CONTACT,
       "objtype": _MODE_TO_OBJTYPE[self.cfg.primary.mode],
