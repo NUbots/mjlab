@@ -131,28 +131,28 @@ NUGUS_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
 ##
 
 STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
-    pos=(0, 0, 0.473774),  # TODO: adjust height
-    joint_pos={ # TODO: check these
-        "right_shoulder_pitch": 1.714,
-        "left_shoulder_pitch": 1.714,
-        "right_shoulder_roll": -0.198,
-        "left_shoulder_roll": 0.198,
-        "right_elbow_pitch": -0.720,
-        "left_elbow_pitch": -0.715,
-        "right_hip_yaw": -0.033,
-        "left_hip_yaw": 0.034,
+    pos=(0, 0, 0.473774),  
+    joint_pos={
+        "right_shoulder_pitch": 1.71,
+        "left_shoulder_pitch": 1.71,
+        "right_shoulder_roll": -0.197,
+        "left_shoulder_roll": 0.197,
+        "right_elbow_pitch": -0.718,
+        "left_elbow_pitch": -0.713,
+        "right_hip_yaw": -0.0329,
+        "left_hip_yaw": 0.0339,
         "right_hip_roll": -0.162,
         "left_hip_roll": 0.163,
-        "right_hip_pitch": -0.905,
-        "left_hip_pitch": -0.905,
-        "right_knee_pitch": 1.206,
-        "left_knee_pitch": 1.206,
-        "right_ankle_pitch": -0.510,
-        "left_ankle_pitch": -0.512,
-        "right_ankle_roll": 0.168,
-        "left_ankle_roll": -0.167,
+        "right_hip_pitch": -0.904,
+        "left_hip_pitch": -0.904,
+        "right_knee_pitch": 1.20,
+        "left_knee_pitch": 1.20,
+        "right_ankle_pitch": -0.508,
+        "left_ankle_pitch": -0.510,
+        "right_ankle_roll": 0.167,
+        "left_ankle_roll": -0.166,
         "neck_yaw": 0.0,
-        "head_pitch": 0.0,
+        "head_pitch": 0.0000645,
     },
     joint_vel={".*": 0.0},
 )
@@ -210,7 +210,7 @@ def get_nugus_robot_cfg() -> EntityCfg:
     """
     return EntityCfg(
         init_state=STAND_BENT_KNEES_KEYFRAME,
-        collisions=(FEET_COLLISION,),
+        collisions=(FULL_COLLISION_GND_ONLY,),
         spec_fn=get_spec, 
         articulation=NUGUS_ARTICULATION,
     )
