@@ -210,7 +210,7 @@ def get_nugus_robot_cfg() -> EntityCfg:
     """
     return EntityCfg(
         init_state=STAND_BENT_KNEES_KEYFRAME,
-        collisions=(FULL_COLLISION_GND_ONLY,),
+        collisions=(FEET_COLLISION,),
         spec_fn=get_spec, 
         articulation=NUGUS_ARTICULATION,
     )
