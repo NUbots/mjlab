@@ -32,6 +32,7 @@
   </asset>
 
   <default>
+    <!-- Default: no collisions -->
     <geom contype="0" conaffinity="0" condim="1" solref="0.005 1"/>
     <site group="5" type="sphere"/>
     <default class="collision">

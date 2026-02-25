@@ -178,6 +178,15 @@ FULL_COLLISION = CollisionCfg(
     friction=(1.0,),
 )
 
+# Full body collision with ground only
+FULL_COLLISION_GND_ONLY = CollisionCfg(
+     geom_names_expr=(".*_collision",),
+     contype=1,
+     conaffinity=1,
+     condim=3,
+     friction=(1.0,),
+)
+
 
 ##
 # Final config.

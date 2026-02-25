@@ -18,6 +18,12 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     """Create NUbots Nugus rough terrain velocity configuration."""
     cfg = make_velocity_env_cfg()
 
+    # Remove height_scan observation since terrain_scan sensor isn't configured (TODO)
+    if "height_scan" in cfg.observations["actor"].terms:
+        cfg.observations["actor"].terms.pop("height_scan")
+    if "height_scan" in cfg.observations["critic"].terms:
+        cfg.observations["critic"].terms.pop("height_scan")
+
     cfg.sim.mujoco.ccd_iterations = 500
     cfg.sim.contact_sensor_maxmatch = 500
     cfg.sim.nconmax = 45
@@ -119,7 +125,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         # Effectively infinite episode length.
         cfg.episode_length_s = int(1e9)
 
-        cfg.observations["policy"].enable_corruption = False
+        cfg.observations["actor"].enable_corruption = False
         cfg.events.pop("push_robot", None)
         cfg.events["randomize_terrain"] = EventTermCfg(
         func=envs_mdp.randomize_terrain,
@@ -149,6 +155,11 @@ def nubots_nugus_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     assert cfg.scene.terrain is not None
     cfg.scene.terrain.terrain_type = "plane"
     cfg.scene.terrain.terrain_generator = None
+
+    # Remove raycast sensor and height scan (no terrain to scan).
+    cfg.scene.sensors = tuple(
+        s for s in (cfg.scene.sensors or ()) if s.name != "terrain_scan"
+    )
 
     # Disable terrain curriculum.
     assert "terrain_levels" in cfg.curriculum
