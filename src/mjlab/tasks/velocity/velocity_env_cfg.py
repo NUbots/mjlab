@@ -152,7 +152,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       heading_control_stiffness=0.5,
       debug_vis=True,
       ranges=UniformVelocityCommandCfg.Ranges(
-        lin_vel_x=(-1.0, 1.0),  # Target x velocity range
+        lin_vel_x=(0, 1.0),  # Target x velocity range
         lin_vel_y=(-1.0, 1.0),  # Target y velocity range
         ang_vel_z=(-0.5, 0.5),  # Target yaw velocity range
         heading=(-math.pi, math.pi),  # Target heading range
@@ -193,7 +193,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       interval_range_s=(1.0, 3.0),
       params={
         "velocity_range": {
-          "x": (-0.5, 0.5),
+          "x": (0, 0.5),
           "y": (-0.5, 0.5),
           "z": (-0.4, 0.4),
           "roll": (-0.52, 0.52),
@@ -366,9 +366,9 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "command_name": "twist",
         "velocity_stages": [
-          {"step": 0, "lin_vel_x": (-1.0, 1.0), "ang_vel_z": (-0.5, 0.5)},
-          {"step": 5000 * 24, "lin_vel_x": (-1.5, 2.0), "ang_vel_z": (-0.7, 0.7)},
-          {"step": 10000 * 24, "lin_vel_x": (-2.0, 3.0)},
+          {"step": 0, "lin_vel_x": (0.0, 1.0), "ang_vel_z": (-0.5, 0.5)},
+          {"step": 5000 * 24, "lin_vel_x": (0.0, 2.0), "ang_vel_z": (-0.7, 0.7)},
+          {"step": 10000 * 24, "lin_vel_x": (0.0, 3.0)},
         ],
       },
     ),
