@@ -13,14 +13,14 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
         actor=RslRlModelCfg(
           hidden_dims=(512, 256, 128),
           activation="elu",
-          obs_normalization=False,
+          obs_normalization=True,
           stochastic=True,
           init_noise_std=1.0,
         ),
         critic=RslRlModelCfg(
           hidden_dims=(512, 256, 128),
           activation="elu",
-          obs_normalization=False,
+          obs_normalization=True,
           stochastic=False,
           init_noise_std=1.0,
         ),
@@ -41,5 +41,5 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
         experiment_name="nugus_velocity",
         save_interval=500,
         num_steps_per_env=24,
-        max_iterations=500,
+        max_iterations=40_000,
     )
