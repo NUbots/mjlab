@@ -192,6 +192,7 @@ FULL_COLLISION_GND_ONLY = CollisionCfg(
 # Final config.
 ##
 
+# Note: The order of the actuators in the inference will be as they appear in the XML (inside the <worldbody> section)
 NUGUS_ARTICULATION = EntityArticulationInfoCfg(
     actuators=(
         NUGUS_ACTUATOR_ARMS,
