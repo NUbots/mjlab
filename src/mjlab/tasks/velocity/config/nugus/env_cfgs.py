@@ -9,6 +9,7 @@ from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
@@ -68,6 +69,86 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
     cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
     cfg.events["base_com"].params["asset_cfg"].body_names = ("torso",)
+    cfg.events["servo_gains"] = EventTermCfg(
+        mode="startup",
+        func=envs_mdp.randomize_pd_gains,
+        params={
+            "kp_range": (0.8, 1.2),
+            "kd_range": (0.8, 1.2),
+            "operation": "scale",
+        },
+    )
+    cfg.events["servo_effort_limits"] = EventTermCfg(
+        mode="startup",
+        func=envs_mdp.randomize_effort_limits,
+        params={
+            "effort_limit_range": (0.85, 1.15),
+            "operation": "scale",
+        },
+    )
+
+    # Per-episode servo jitter by motor family.
+    # Actuator order follows NUGUS_ARTICULATION in nugus_constants.py:
+    # 0=arms(MX64), 1=hips(MX106), 2=legs(XH540), 3=head(MX64).
+    cfg.events["servo_gains_jitter_mx64"] = EventTermCfg(
+        mode="reset",
+        func=envs_mdp.randomize_pd_gains,
+        params={
+            "kp_range": (0.8, 1.2),
+            "kd_range": (0.8, 1.2),
+            "operation": "scale",
+            "asset_cfg": SceneEntityCfg("robot", actuator_ids=[0, 3]),
+        },
+    )
+    cfg.events["servo_effort_jitter_mx64"] = EventTermCfg(
+        mode="reset",
+        func=envs_mdp.randomize_effort_limits,
+        params={
+            "effort_limit_range": (0.8, 1.2),
+            "operation": "scale",
+            "asset_cfg": SceneEntityCfg("robot", actuator_ids=[0, 3]),
+        },
+    )
+
+    cfg.events["servo_gains_jitter_mx106"] = EventTermCfg(
+        mode="reset",
+        func=envs_mdp.randomize_pd_gains,
+        params={
+            "kp_range": (0.8, 1.2),
+            "kd_range": (0.8, 1.2),
+            "operation": "scale",
+            "asset_cfg": SceneEntityCfg("robot", actuator_ids=[1]),
+        },
+    )
+    cfg.events["servo_effort_jitter_mx106"] = EventTermCfg(
+        mode="reset",
+        func=envs_mdp.randomize_effort_limits,
+        params={
+            "effort_limit_range": (0.8, 1.2),
+            "operation": "scale",
+            "asset_cfg": SceneEntityCfg("robot", actuator_ids=[1]),
+        },
+    )
+
+    cfg.events["servo_gains_jitter_xh540"] = EventTermCfg(
+        mode="reset",
+        func=envs_mdp.randomize_pd_gains,
+        params={
+            "kp_range": (0.8, 1.2),
+            "kd_range": (0.8, 1.2),
+            "operation": "scale",
+            "asset_cfg": SceneEntityCfg("robot", actuator_ids=[2]),
+        },
+    )
+    cfg.events["servo_effort_jitter_xh540"] = EventTermCfg(
+        mode="reset",
+        func=envs_mdp.randomize_effort_limits,
+        params={
+            "effort_limit_range": (0.8, 1.2),
+            "operation": "scale",
+            "asset_cfg": SceneEntityCfg("robot", actuator_ids=[2]),
+        },
+    )
 
     # Rationale for std values:
     # - Knees/hip_pitch get the loosest std to allow natural leg bending during stride.

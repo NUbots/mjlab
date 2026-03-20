@@ -142,3 +142,78 @@ def test_play_mode_disables_push_robot(all_task_ids: list[str]) -> None:
     assert "push_robot" not in cfg.events, (
       f"Play mode task {task_id} has push_robot event, expected it to be removed"
     )
+
+
+@pytest.mark.parametrize(
+  "task_id",
+  [
+    "Mjlab-Velocity-Rough-Nubots-Nugus",
+    "Mjlab-Velocity-Flat-Nubots-Nugus",
+  ],
+)
+def test_nugus_has_servo_domain_randomization(task_id: str) -> None:
+  """Nugus velocity tasks should randomize servo gains and effort limits."""
+  cfg = load_env_cfg(task_id)
+
+  assert "servo_gains" in cfg.events
+  assert "servo_effort_limits" in cfg.events
+
+  servo_gains = cfg.events["servo_gains"]
+  assert servo_gains.mode == "startup"
+  assert servo_gains.params["kp_range"] == (0.8, 1.2)
+  assert servo_gains.params["kd_range"] == (0.75, 1.25)
+  assert servo_gains.params["operation"] == "scale"
+
+  servo_effort_limits = cfg.events["servo_effort_limits"]
+  assert servo_effort_limits.mode == "startup"
+  assert servo_effort_limits.params["effort_limit_range"] == (0.85, 1.15)
+  assert servo_effort_limits.params["operation"] == "scale"
+
+  jitter_cfg = {
+    "servo_gains_jitter_mx64": {
+      "mode": "reset",
+      "kp_range": (0.8, 1.2),
+      "kd_range": (0.8, 1.2),
+      "actuator_ids": [0, 3],
+    },
+    "servo_effort_jitter_mx64": {
+      "mode": "reset",
+      "effort_limit_range": (0.8, 1.2),
+      "actuator_ids": [0, 3],
+    },
+    "servo_gains_jitter_mx106": {
+      "mode": "reset",
+      "kp_range": (0.8, 1.2),
+      "kd_range": (0.8, 1.2),
+      "actuator_ids": [1],
+    },
+    "servo_effort_jitter_mx106": {
+      "mode": "reset",
+      "effort_limit_range": (0.8, 1.2),
+      "actuator_ids": [1],
+    },
+    "servo_gains_jitter_xh540": {
+      "mode": "reset",
+      "kp_range": (0.8, 1.2),
+      "kd_range": (0.8, 1.2),
+      "actuator_ids": [2],
+    },
+    "servo_effort_jitter_xh540": {
+      "mode": "reset",
+      "effort_limit_range": (0.8, 1.2),
+      "actuator_ids": [2],
+    },
+  }
+
+  for event_name, expected in jitter_cfg.items():
+    assert event_name in cfg.events
+    event = cfg.events[event_name]
+    assert event.mode == expected["mode"]
+    assert event.params["operation"] == "scale"
+    assert event.params["asset_cfg"].actuator_ids == expected["actuator_ids"]
+    if "kp_range" in expected:
+      assert event.params["kp_range"] == expected["kp_range"]
+    if "kd_range" in expected:
+      assert event.params["kd_range"] == expected["kd_range"]
+    if "effort_limit_range" in expected:
+      assert event.params["effort_limit_range"] == expected["effort_limit_range"]
