@@ -116,8 +116,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
 
     cfg.rewards["body_ang_vel"].weight = -0.05
-    cfg.rewards["angular_momentum"].weight = -0.02
-    cfg.rewards["air_time"].weight = 0.02
+    cfg.rewards["angular_momentum"].weight = -0.01
+    cfg.rewards["air_time"].weight = 0.08
 
     # Apply play mode overrides.
     if play:
