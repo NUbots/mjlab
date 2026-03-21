@@ -61,6 +61,17 @@ Evaluate a policy while training (fetches latest checkpoint from Weights & Biase
 uv run play Mjlab-Velocity-Flat-Unitree-G1 --wandb-run-path your-org/mjlab/run-id
 ```
 
+Log actor observations passed to the policy at play/inference time to TensorBoard
+(Nugus-only by default):
+
+```bash
+uv run play Mjlab-Velocity-Flat-Nubots-Nugus \
+  --wandb-run-path your-org/mjlab/run-id \
+  --log-inference-observations
+```
+
+To log for non-Nugus tasks too, add `--log-inference-obs-only-nugus False`.
+
 ### 2. Motion Imitation
 
 Train a humanoid to mimic reference motions. mjlab uses WandB to manage motion datasets.

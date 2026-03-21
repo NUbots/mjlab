@@ -3,6 +3,7 @@
 import os
 import sys
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -13,6 +14,9 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
+from mjlab.utils.inference_observation_logger import (
+  InferenceObservationTensorboardLogger,
+)
 from mjlab.utils.os import get_wandb_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
@@ -36,6 +40,18 @@ class PlayConfig:
   viewer: Literal["auto", "native", "viser"] = "auto"
   no_terminations: bool = False
   """Disable all termination conditions (useful for viewing motions with dummy agents)."""
+  log_inference_observations: bool = False
+  """Log actor observations passed to the policy during play to TensorBoard."""
+  log_inference_obs_only_nugus: bool = True
+  """When enabled, only logs inference observations for Nugus tasks."""
+  inference_obs_tb_dir: str | None = None
+  """Override TensorBoard directory for inference observation logs."""
+  inference_obs_log_interval: int = 10
+  """Log every N policy calls during play."""
+  inference_obs_max_dims: int = 80
+  """Maximum number of observation dimensions to log per step."""
+  inference_obs_env_index: int = 0
+  """Environment index used for per-dimension observation scalar logging."""
 
   # Internal flag used by demo script.
   _demo_mode: tyro.conf.Suppress[bool] = False
@@ -192,6 +208,44 @@ def run_play(task_id: str, cfg: PlayConfig):
     )
     policy = runner.get_inference_policy(device=device)
 
+  is_nugus_task = "nugus" in task_id.lower()
+  should_log_obs = cfg.log_inference_observations and (
+    is_nugus_task or not cfg.log_inference_obs_only_nugus
+  )
+  if cfg.log_inference_observations and not should_log_obs:
+    print("[INFO]: Inference observation logging skipped (non-Nugus task)")
+
+  obs_logger: InferenceObservationTensorboardLogger | None = None
+  if should_log_obs:
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+    if cfg.inference_obs_tb_dir is not None:
+      base_obs_log_dir = Path(cfg.inference_obs_tb_dir)
+    elif log_dir is not None:
+      base_obs_log_dir = log_dir / "tensorboard" / "inference_obs"
+    else:
+      safe_task_id = task_id.replace("/", "-")
+      base_obs_log_dir = Path("logs") / "tensorboard" / "play" / safe_task_id
+
+    obs_log_dir = base_obs_log_dir / f"run_{timestamp}"
+    obs_log_dir.mkdir(parents=True, exist_ok=True)
+    obs_logger = InferenceObservationTensorboardLogger(
+      log_dir=obs_log_dir,
+      enabled=True,
+      interval=cfg.inference_obs_log_interval,
+      env_index=cfg.inference_obs_env_index,
+      max_dims=cfg.inference_obs_max_dims,
+    )
+    print(f"[INFO]: Logging inference observations to TensorBoard: {obs_log_dir}")
+
+    base_policy = policy
+
+    class PolicyWithObservationLogging:
+      def __call__(self, obs) -> torch.Tensor:
+        obs_logger.log(obs)
+        return base_policy(obs)
+
+    policy = PolicyWithObservationLogging()
+
   # Handle "auto" viewer selection.
   if cfg.viewer == "auto":
     has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
@@ -200,14 +254,17 @@ def run_play(task_id: str, cfg: PlayConfig):
   else:
     resolved_viewer = cfg.viewer
 
-  if resolved_viewer == "native":
-    NativeMujocoViewer(env, policy).run()
-  elif resolved_viewer == "viser":
-    ViserPlayViewer(env, policy).run()
-  else:
-    raise RuntimeError(f"Unsupported viewer backend: {resolved_viewer}")
-
-  env.close()
+  try:
+    if resolved_viewer == "native":
+      NativeMujocoViewer(env, policy).run()
+    elif resolved_viewer == "viser":
+      ViserPlayViewer(env, policy).run()
+    else:
+      raise RuntimeError(f"Unsupported viewer backend: {resolved_viewer}")
+  finally:
+    if obs_logger is not None:
+      obs_logger.close()
+    env.close()
 
 
 def main():
