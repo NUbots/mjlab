@@ -4,6 +4,7 @@ import os
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from math import prod
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +17,7 @@ from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_run
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.utils.inference_observation_logger import (
   InferenceObservationTensorboardLogger,
+  build_observation_dimension_labels,
 )
 from mjlab.utils.os import get_wandb_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
@@ -228,14 +230,34 @@ def run_play(task_id: str, cfg: PlayConfig):
 
     obs_log_dir = base_obs_log_dir / f"run_{timestamp}"
     obs_log_dir.mkdir(parents=True, exist_ok=True)
+
+    actor_term_names = env.unwrapped.observation_manager.active_terms["actor"]
+    actor_term_dims = env.unwrapped.observation_manager.group_obs_term_dim["actor"]
+    actor_dim_labels = build_observation_dimension_labels(
+      term_names=actor_term_names,
+      term_dims=actor_term_dims,
+    )
+    actor_total_dims = sum(prod(dims) if len(dims) > 0 else 1 for dims in actor_term_dims)
+    if len(actor_dim_labels) != actor_total_dims:
+      raise RuntimeError(
+        "Actor observation label mapping mismatch: "
+        f"labels={len(actor_dim_labels)} vs dims={actor_total_dims}"
+      )
+
     obs_logger = InferenceObservationTensorboardLogger(
       log_dir=obs_log_dir,
       enabled=True,
       interval=cfg.inference_obs_log_interval,
       env_index=cfg.inference_obs_env_index,
       max_dims=cfg.inference_obs_max_dims,
+      dim_labels=actor_dim_labels,
     )
     print(f"[INFO]: Logging inference observations to TensorBoard: {obs_log_dir}")
+    print(
+      "[INFO]: Actor observation mapping loaded "
+      f"({len(actor_dim_labels)} dims, "
+      f"logging up to {min(cfg.inference_obs_max_dims, len(actor_dim_labels))})"
+    )
 
     base_policy = policy
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import prod
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -13,6 +14,30 @@ class TensorboardWriterProtocol(Protocol):
   def add_histogram(self, tag: str, values: torch.Tensor, global_step: int) -> None: ...
   def add_scalar(self, tag: str, scalar_value: float, global_step: int) -> None: ...
   def close(self) -> None: ...
+
+
+def build_observation_dimension_labels(
+  term_names: list[str], term_dims: list[tuple[int, ...]]
+) -> list[str]:
+  """Build flat observation-dimension labels in exact concatenation order.
+
+  Labels follow term-major order and match concatenated observation vectors:
+  [term_a[0], term_a[1], ..., term_b[0], ...].
+  """
+  if len(term_names) != len(term_dims):
+    raise ValueError(
+      "term_names and term_dims must have the same length. "
+      f"Got {len(term_names)} and {len(term_dims)}."
+    )
+
+  labels: list[str] = []
+  for term_name, dims in zip(term_names, term_dims, strict=True):
+    flat_dim = prod(dims) if len(dims) > 0 else 1
+    if flat_dim <= 1:
+      labels.append(term_name)
+      continue
+    labels.extend(f"{term_name}[{index}]" for index in range(flat_dim))
+  return labels
 
 
 def extract_actor_observations(observations: Any) -> torch.Tensor:
@@ -45,6 +70,7 @@ class InferenceObservationTensorboardLogger:
     env_index: int = 0,
     max_dims: int = 80,
     tag_prefix: str = "inference/actor_obs",
+    dim_labels: list[str] | None = None,
     writer: TensorboardWriterProtocol | None = None,
   ) -> None:
     self.enabled = enabled
@@ -52,6 +78,7 @@ class InferenceObservationTensorboardLogger:
     self.env_index = max(0, env_index)
     self.max_dims = max(1, max_dims)
     self.tag_prefix = tag_prefix
+    self.dim_labels = dim_labels
     self.step = 0
     self._writer = writer
 
@@ -105,8 +132,12 @@ class InferenceObservationTensorboardLogger:
     )
 
     for dim in range(dim_count):
+      if self.dim_labels is not None and dim < len(self.dim_labels):
+        dim_tag = f"dim_{dim:03d}_{self.dim_labels[dim]}"
+      else:
+        dim_tag = f"dim_{dim:03d}"
       self._writer.add_scalar(
-        f"{self.tag_prefix}/dim_{dim:03d}", float(obs_slice[dim].item()), self.step
+        f"{self.tag_prefix}/{dim_tag}", float(obs_slice[dim].item()), self.step
       )
 
     self.step += 1
