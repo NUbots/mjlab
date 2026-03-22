@@ -73,8 +73,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         mode="startup",
         func=envs_mdp.randomize_pd_gains,
         params={
-            "kp_range": (0.8, 1.2),
-            "kd_range": (0.8, 1.2),
+            "kp_range": (0.95, 1.05),
+            "kd_range": (0.95, 1.05),
             "operation": "scale",
         },
     )
@@ -82,20 +82,20 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         mode="startup",
         func=envs_mdp.randomize_effort_limits,
         params={
-            "effort_limit_range": (0.85, 1.15),
+            "effort_limit_range": (0.95, 1.05),
             "operation": "scale",
         },
     )
 
     # Per-episode servo jitter by motor family.
-    # Actuator order follows NUGUS_ARTICULATION in nugus_constants.py:
+    # Actuator order follows NUGUS_ARTICULATION in nugus_constants.py:=
     # 0=arms(MX64), 1=hips(MX106), 2=legs(XH540), 3=head(MX64).
     cfg.events["servo_gains_jitter_mx64"] = EventTermCfg(
         mode="reset",
         func=envs_mdp.randomize_pd_gains,
         params={
-            "kp_range": (0.8, 1.2),
-            "kd_range": (0.8, 1.2),
+            "kp_range": (0.95, 1.05),
+            "kd_range": (0.95, 1.05),
             "operation": "scale",
             "asset_cfg": SceneEntityCfg("robot", actuator_ids=[0, 3]),
         },
@@ -104,7 +104,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         mode="reset",
         func=envs_mdp.randomize_effort_limits,
         params={
-            "effort_limit_range": (0.8, 1.2),
+            "effort_limit_range": (0.95, 1.05),
             "operation": "scale",
             "asset_cfg": SceneEntityCfg("robot", actuator_ids=[0, 3]),
         },
@@ -114,8 +114,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         mode="reset",
         func=envs_mdp.randomize_pd_gains,
         params={
-            "kp_range": (0.8, 1.2),
-            "kd_range": (0.8, 1.2),
+            "kp_range": (0.95, 1.05),
+            "kd_range": (0.95, 1.05),
             "operation": "scale",
             "asset_cfg": SceneEntityCfg("robot", actuator_ids=[1]),
         },
@@ -124,7 +124,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         mode="reset",
         func=envs_mdp.randomize_effort_limits,
         params={
-            "effort_limit_range": (0.8, 1.2),
+            "effort_limit_range": (0.95, 1.05),
             "operation": "scale",
             "asset_cfg": SceneEntityCfg("robot", actuator_ids=[1]),
         },
@@ -134,8 +134,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         mode="reset",
         func=envs_mdp.randomize_pd_gains,
         params={
-            "kp_range": (0.8, 1.2),
-            "kd_range": (0.8, 1.2),
+            "kp_range": (0.95, 1.05),
+            "kd_range": (0.95, 1.05),
             "operation": "scale",
             "asset_cfg": SceneEntityCfg("robot", actuator_ids=[2]),
         },
@@ -144,7 +144,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         mode="reset",
         func=envs_mdp.randomize_effort_limits,
         params={
-            "effort_limit_range": (0.8, 1.2),
+            "effort_limit_range": (0.95, 1.05),
             "operation": "scale",
             "asset_cfg": SceneEntityCfg("robot", actuator_ids=[2]),
         },
