@@ -18,6 +18,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     """Create NUbots Nugus rough terrain velocity configuration."""
     cfg = make_velocity_env_cfg()
 
+    # Remove linear velocity from observation
+    cfg.observations["actor"].terms.pop("base_lin_vel")
+
     # Remove height_scan observation since terrain_scan sensor isn't configured (TODO)
     if "height_scan" in cfg.observations["actor"].terms:
         cfg.observations["actor"].terms.pop("height_scan")
@@ -167,8 +170,8 @@ def nubots_nugus_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     if play:
         twist_cmd = cfg.commands["twist"]
         assert isinstance(twist_cmd, UniformVelocityCommandCfg)
-        twist_cmd.ranges.lin_vel_x = (-5.0, -4.0)
-        twist_cmd.ranges.lin_vel_y = (0, 0.0)
+        twist_cmd.ranges.lin_vel_x = (-2.0, 0.0)
+        twist_cmd.ranges.lin_vel_y = (-1.0, 1.0)
         twist_cmd.ranges.ang_vel_z = (-0.7, 0.7)
 
     return cfg
