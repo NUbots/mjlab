@@ -161,30 +161,46 @@ STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
 #  Collision Config.
 ##
 
+FOOT_COLLISION_REGEX = r".*foot_collision$"
+
+# Increase this to raise foot-ground traction.
+FOOT_GROUND_FRICTION = 2.0
+
+# Keep non-foot contact friction lower to reduce limb sticking.
+NON_FOOT_COLLISION_FRICTION = 0.2
+
 # Basic collision
 FEET_COLLISION = CollisionCfg(
     geom_names_expr=(".*foot_collision",),
     contype=1,
     conaffinity=2,
     condim=3,
-    friction=(1.0,),
+    friction=(FOOT_GROUND_FRICTION,),
 )
 
 FULL_COLLISION = CollisionCfg(
     geom_names_expr=(".*_collision",),
     contype=1,
-    conaffinity=2,
+    # Enable robot-robot and robot-ground contacts for collision geoms.
+    conaffinity=1,
     condim=3,
-    friction=(1.0,),
+    friction={
+        FOOT_COLLISION_REGEX: (FOOT_GROUND_FRICTION,),
+        ".*_collision": (NON_FOOT_COLLISION_FRICTION,),
+    },
 )
 
 # Full body collision with ground only
 FULL_COLLISION_GND_ONLY = CollisionCfg(
-     geom_names_expr=(".*_collision",),
-     contype=1,
-     conaffinity=1,
-     condim=3,
-     friction=(1.0,),
+    geom_names_expr=(".*_collision",),
+    contype=1,
+    # Ground/environment contacts only (no self-collisions).
+    conaffinity=0,
+    condim=3,
+    friction={
+        FOOT_COLLISION_REGEX: (FOOT_GROUND_FRICTION,),
+        ".*_collision": (NON_FOOT_COLLISION_FRICTION,),
+    },
 )
 
 
@@ -211,7 +227,7 @@ def get_nugus_robot_cfg() -> EntityCfg:
     """
     return EntityCfg(
         init_state=STAND_BENT_KNEES_KEYFRAME,
-        collisions=(FEET_COLLISION,),
+        collisions=(FULL_COLLISION,),
         spec_fn=get_spec, 
         articulation=NUGUS_ARTICULATION,
     )
