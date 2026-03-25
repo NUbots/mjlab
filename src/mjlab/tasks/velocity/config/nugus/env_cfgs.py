@@ -18,6 +18,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     """Create NUbots Nugus rough terrain velocity configuration."""
     cfg = make_velocity_env_cfg()
 
+    # Nugus policy should not observe base linear velocity.
+    cfg.observations["actor"].terms.pop("base_lin_vel", None)
+
     # Remove height_scan observation since terrain_scan sensor isn't configured (TODO)
     if "height_scan" in cfg.observations["actor"].terms:
         cfg.observations["actor"].terms.pop("height_scan")
