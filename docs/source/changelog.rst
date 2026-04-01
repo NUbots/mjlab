@@ -22,6 +22,8 @@ Changed
   optional left-right limb symmetry and actuation power cost rewards, and
   slowed velocity command curriculum ramp-up. Enabled/tuned these rewards for
   NUbots Nugus.
+- Added an optional feet-separation penalty for velocity tasks to discourage
+  feet from getting too close; enabled and tuned for NUbots Nugus.
 
 Fixed
 ^^^^^

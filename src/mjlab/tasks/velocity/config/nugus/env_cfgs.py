@@ -117,12 +117,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   for reward_name in ["foot_clearance", "foot_swing_height", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
+  cfg.rewards["feet_too_close"].params["asset_cfg"].site_names = site_names
+  cfg.rewards["feet_too_close"].params["min_distance"] = 0.14
 
   cfg.rewards["body_ang_vel"].weight = -0.05
   cfg.rewards["angular_momentum"].weight = -0.01
   cfg.rewards["air_time"].weight = 0.2
   cfg.rewards["limb_symmetry"].weight = -0.35
   cfg.rewards["actuation_power"].weight = -0.002
+  cfg.rewards["feet_too_close"].weight = -2.0
 
   # Apply play mode overrides.
   if play:

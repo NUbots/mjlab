@@ -343,6 +343,15 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
       },
     ),
+    "feet_too_close": RewardTermCfg(
+      func=mdp.feet_too_close_cost,
+      weight=0.0,  # Override per-robot.
+      params={
+        "min_distance": 0.00, # Set per-robot.
+        "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
+        "use_xy_distance": True,
+      },
+    ),
     "soft_landing": RewardTermCfg(
       func=mdp.soft_landing,
       weight=-1e-5,

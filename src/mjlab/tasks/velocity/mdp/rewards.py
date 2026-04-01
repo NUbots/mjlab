@@ -260,6 +260,41 @@ def feet_slip(
   return cost
 
 
+def feet_too_close_cost(
+  env: ManagerBasedRlEnv,
+  min_distance: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  use_xy_distance: bool = True,
+) -> torch.Tensor:
+  """Penalize feet that are closer than a minimum separation distance.
+
+  This is computed over all unique foot-site pairs and returns the sum of
+  squared hinge losses: max(0, min_distance - pair_distance)^2.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
+
+  num_feet = foot_pos_w.shape[1]
+  if num_feet < 2:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+  pair_i, pair_j = torch.triu_indices(num_feet, num_feet, offset=1)
+  foot_a = foot_pos_w[:, pair_i, :]
+  foot_b = foot_pos_w[:, pair_j, :]
+
+  if use_xy_distance:
+    pair_distance = torch.norm(foot_a[..., :2] - foot_b[..., :2], dim=-1)
+  else:
+    pair_distance = torch.norm(foot_a - foot_b, dim=-1)
+
+  too_close = torch.clamp(min_distance - pair_distance, min=0.0)
+  cost = torch.sum(torch.square(too_close), dim=1)
+
+  min_pair_distance = torch.amin(pair_distance, dim=1)
+  env.extras["log"]["Metrics/min_foot_distance_mean"] = torch.mean(min_pair_distance)
+  return cost
+
+
 def soft_landing(
   env: ManagerBasedRlEnv,
   sensor_name: str,
