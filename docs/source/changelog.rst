@@ -18,6 +18,10 @@ Changed
 - Replaced the single ``scale`` parameter in ``DifferentialIKActionCfg`` with
   separate ``delta_pos_scale`` and ``delta_ori_scale`` for independent scaling
   of position and orientation components.
+- Updated velocity task training defaults to improve gait naturalness: added
+  optional left-right limb symmetry and actuation power cost rewards, and
+  slowed velocity command curriculum ramp-up. Enabled/tuned these rewards for
+  NUbots Nugus.
 
 Fixed
 ^^^^^

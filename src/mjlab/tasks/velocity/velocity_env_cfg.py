@@ -116,7 +116,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "actor": ObservationGroupCfg(
       terms=actor_terms,
       concatenate_terms=True,
-      enable_corruption=True, # Domain randomisation
+      enable_corruption=True,  # Domain randomisation
     ),
     "critic": ObservationGroupCfg(
       terms=critic_terms,
@@ -145,9 +145,9 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
   commands: dict[str, CommandTermCfg] = {
     "twist": UniformVelocityCommandCfg(
       entity_name="robot",
-      resampling_time_range=(3.0, 8.0),   # Resample every 3-8s
-      rel_standing_envs=0.1,              # 10% of envs get zero velocity
-      rel_heading_envs=0.3,               # 30% use heading control
+      resampling_time_range=(3.0, 8.0),  # Resample every 3-8s
+      rel_standing_envs=0.1,  # 10% of envs get zero velocity
+      rel_heading_envs=0.3,  # 30% use heading control
       heading_command=True,
       heading_control_stiffness=0.5,
       debug_vis=True,
@@ -287,6 +287,20 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
+    "actuation_power": RewardTermCfg(
+      func=mdp.electrical_power_cost,
+      weight=0.0,  # Override per-robot.
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    "limb_symmetry": RewardTermCfg(
+      func=mdp.left_right_joint_symmetry_cost,
+      weight=0.0,  # Override per-robot.
+      params={
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+        "position_weight": 1.0,
+        "velocity_weight": 0.1,
+      },
+    ),
     "air_time": RewardTermCfg(
       func=mdp.feet_air_time,
       weight=0.0,  # Override per-robot.
@@ -321,7 +335,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "foot_slip": RewardTermCfg(
       func=mdp.feet_slip,
-      weight=-0.1,
+      weight=-1.0,
       params={
         "sensor_name": "feet_ground_contact",
         "command_name": "twist",
@@ -366,10 +380,30 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "command_name": "twist",
         "velocity_stages": [
-          {"step": 0, "lin_vel_x": (-0.5, 0.5), "lin_vel_y": (-0.1, 0.1), "ang_vel_z": (-0.2, 0.2)}, 
-          {"step": 5000 * 24, "lin_vel_x": (-1.0, 1.0), "lin_vel_y": (-0.5, 0.5), "ang_vel_z": (-0.5, 0.5)},
-          {"step": 15000 * 24, "lin_vel_x": (-1.5, 2.0), "lin_vel_y": (-1.0, 1.0), "ang_vel_z": (-0.7, 0.7)},
-          {"step": 25000 * 24, "lin_vel_x": (-2.0, 3.0), "lin_vel_y": (-1.0, 1.0), "ang_vel_z": (-1.0, 1.0)},
+          {
+            "step": 0,
+            "lin_vel_x": (-0.5, 0.5),
+            "lin_vel_y": (-0.1, 0.1),
+            "ang_vel_z": (-0.2, 0.2),
+          },
+          {
+            "step": 9000 * 24,
+            "lin_vel_x": (-1.0, 1.0),
+            "lin_vel_y": (-0.5, 0.5),
+            "ang_vel_z": (-0.5, 0.5),
+          },
+          {
+            "step": 24000 * 24,
+            "lin_vel_x": (-1.5, 2.0),
+            "lin_vel_y": (-1.0, 1.0),
+            "ang_vel_z": (-0.7, 0.7),
+          },
+          {
+            "step": 40000 * 24,
+            "lin_vel_x": (-2.0, 3.0),
+            "lin_vel_y": (-1.0, 1.0),
+            "ang_vel_z": (-1.0, 1.0),
+          },
         ],
       },
     ),
