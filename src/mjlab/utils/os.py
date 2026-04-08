@@ -104,17 +104,63 @@ def get_wandb_checkpoint_path(log_path: Path, run_path: Path) -> tuple[Path, boo
   # Query wandb API to find the latest checkpoint.
   api = wandb.Api()
   wandb_run = api.run(str(run_path))
-  files = [
-    file.name for file in wandb_run.files() if re.match(r"^model_\d+\.pt$", file.name)
-  ]
-  checkpoint_file = max(files, key=lambda x: int(x.split("_")[1].split(".")[0]))
-  checkpoint_path = download_dir / checkpoint_file
+  checkpoint_candidates: list[str] = []
+  try:
+    files = [
+      file.name
+      for file in wandb_run.files()
+      if re.match(r"^model_\d+\.pt$", file.name)
+    ]
+    if len(files) > 0:
+      checkpoint_candidates.append(
+        max(files, key=lambda x: int(x.split("_")[1].split(".")[0]))
+      )
+  except TypeError:
+    # Some runs expose direct file access but fail when listing files due to
+    # W&B API pagination returning null edges.
+    pass
 
-  # If this checkpoint is not cached locally, download it.
-  was_cached = checkpoint_path.exists()
-  if not was_cached:
-    download_dir.mkdir(parents=True, exist_ok=True)
+  if len(checkpoint_candidates) == 0:
+    # Fallback for runs where listing files fails but direct file lookup works.
+    summary_step = None
+    summary = getattr(wandb_run, "summary", None)
+    if summary is not None and hasattr(summary, "get"):
+      summary_step = summary.get("_step")
+    if isinstance(summary_step, int):
+      checkpoint_candidates.append(f"model_{summary_step}.pt")
+    checkpoint_candidates.extend(["last.pt", "model.pt"])
+
+  # Keep order while deduplicating candidates.
+  checkpoint_candidates = list(dict.fromkeys(checkpoint_candidates))
+
+  if len(checkpoint_candidates) == 0:
+    raise ValueError(
+      f"Could not resolve checkpoint from W&B run '{run_path}'. "
+      "Run file listing failed and no checkpoint candidates could be derived."
+    )
+
+  download_dir.mkdir(parents=True, exist_ok=True)
+  last_error: Exception | None = None
+  for checkpoint_file in checkpoint_candidates:
+    checkpoint_path = download_dir / checkpoint_file
+    if checkpoint_path.exists():
+      return checkpoint_path, True
+
     wandb_file = wandb_run.file(str(checkpoint_file))
-    wandb_file.download(str(download_dir), replace=True)
+    if wandb_file is None:
+      continue
 
-  return checkpoint_path, was_cached
+    try:
+      wandb_file.download(str(download_dir), replace=True)
+      return checkpoint_path, False
+    except Exception as exc:
+      last_error = exc
+      continue
+
+  message = (
+    f"Could not download any checkpoint from W&B run '{run_path}'. "
+    f"Tried: {checkpoint_candidates}."
+  )
+  if last_error is not None:
+    raise ValueError(message) from last_error
+  raise ValueError(message)

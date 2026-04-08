@@ -31,6 +31,9 @@ Fixed
 - Bundled ``ffmpeg`` for ``mediapy`` via ``imageio-ffmpeg``, removing the
   requirement for a system ``ffmpeg`` install. Thanks to
   `@rdeits-bd <https://github.com/rdeits-bd>`_ for the suggestion.
+- Fixed W&B checkpoint resume for runs where ``run.files()`` fails but direct
+  file lookup still works, by trying ``model_<summary_step>.pt`` and then
+  fallback names such as ``last.pt``/``model.pt``.
 - Fixed ``height_scan`` returning ~0 for missed rays; now defaults to
   ``max_distance``. Replaced ``clip=(-1, 1)`` with ``scale`` normalization
   in the velocity task config. Thanks to `@eufrizz <https://github.com/eufrizz>`_
