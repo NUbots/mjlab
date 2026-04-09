@@ -123,7 +123,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["body_ang_vel"].weight = -0.05
   cfg.rewards["angular_momentum"].weight = -0.01
   cfg.rewards["air_time"].weight = 0.2
-  cfg.rewards["limb_symmetry"].weight = -1.0
+  cfg.rewards["limb_symmetry"].weight = -2.0
   cfg.rewards["actuation_power"].weight = -0.002
   cfg.rewards["feet_too_close"].weight = -2.0
 
