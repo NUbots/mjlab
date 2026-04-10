@@ -24,6 +24,9 @@ Changed
   NUbots Nugus.
 - Added an optional feet-separation penalty for velocity tasks to discourage
   feet from getting too close; enabled and tuned for NUbots Nugus.
+- Added optional ``cot_proxy`` and ``gait_phase_regularity`` rewards for
+  velocity tasks to improve locomotion efficiency and left-right gait timing.
+  Enabled and tuned these for NUbots Nugus.
 
 Fixed
 ^^^^^

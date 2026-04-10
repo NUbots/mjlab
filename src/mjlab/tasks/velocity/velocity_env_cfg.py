@@ -292,6 +292,16 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=0.0,  # Override per-robot.
       params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
     ),
+    "cot_proxy": RewardTermCfg(
+      func=mdp.cost_of_transport_proxy,
+      weight=0.0,  # Override per-robot.
+      params={
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+        "speed_floor": 0.1,
+        "command_name": "twist",
+        "command_threshold": 0.05,
+      },
+    ),
     "limb_symmetry": RewardTermCfg(
       func=mdp.left_right_joint_symmetry_cost,
       weight=0.0,  # Override per-robot.
@@ -310,6 +320,15 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "threshold_max": 0.5,
         "command_name": "twist",
         "command_threshold": 0.5,
+      },
+    ),
+    "gait_phase_regularity": RewardTermCfg(
+      func=mdp.gait_phase_regularity_cost,
+      weight=0.0,  # Override per-robot.
+      params={
+        "sensor_name": "feet_ground_contact",
+        "command_name": "twist",
+        "command_threshold": 0.05,
       },
     ),
     "foot_clearance": RewardTermCfg(
@@ -347,7 +366,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.feet_too_close_cost,
       weight=0.0,  # Override per-robot.
       params={
-        "min_distance": 0.00, # Set per-robot.
+        "min_distance": 0.00,  # Set per-robot.
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
         "use_xy_distance": True,
       },
