@@ -78,12 +78,12 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["pose"].params["std_standing"] = {".*": 0.05}
   cfg.rewards["pose"].params["std_walking"] = {
     # Lower body.
-    r".*hip_pitch.*": 0.3,
+    r".*hip_pitch.*": 0.6,
     r".*hip_roll.*": 0.15,
     r".*hip_yaw.*": 0.15,
-    r".*knee.*": 0.35,
-    r".*ankle_pitch.*": 0.25,
-    r".*ankle_roll.*": 0.1,
+    r".*knee.*": 0.7,
+    r".*ankle_pitch.*": 0.5,
+    r".*ankle_roll.*": 0.2,
     # Arms.
     r".*shoulder_pitch.*": 0.15,
     r".*shoulder_roll.*": 0.15,
@@ -94,12 +94,12 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   }
   cfg.rewards["pose"].params["std_running"] = {
     # Lower body.
-    r".*hip_pitch.*": 0.5,
+    r".*hip_pitch.*": 1.0,
     r".*hip_roll.*": 0.2,
     r".*hip_yaw.*": 0.2,
-    r".*knee.*": 0.6,
-    r".*ankle_pitch.*": 0.35,
-    r".*ankle_roll.*": 0.15,
+    r".*knee.*": 1.2,
+    r".*ankle_pitch.*": 0.7,
+    r".*ankle_roll.*": 0.3,
     # Arms.
     r".*shoulder_pitch.*": 0.5,
     r".*shoulder_roll.*": 0.2,
@@ -131,7 +131,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["angular_momentum"].weight = -0.01
   cfg.rewards["air_time"].weight = 0.2
   cfg.rewards["actuation_power"].weight = 0.0 # Disable (use CoT instead)
-  cfg.rewards["cot_proxy"].weight = -0.1
+  cfg.rewards["cot_proxy"].weight = -0.01
   cfg.rewards["gait_phase_regularity"].weight = -1.0
   cfg.rewards["limb_symmetry"].weight = -0.5
   cfg.rewards["feet_too_close"].weight = -1.0
