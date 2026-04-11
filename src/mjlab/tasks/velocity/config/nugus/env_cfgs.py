@@ -112,15 +112,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("torso",)
   cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("torso",)
   cfg.rewards["limb_symmetry"].params["asset_cfg"].joint_names = (
-    r"^(left|right)_(hip_yaw|hip_roll|hip_pitch|knee_pitch|ankle_pitch|ankle_roll)$",
+    r"^(left|right)_(hip_pitch|knee_pitch|ankle_pitch)$",
   )
   cfg.rewards["limb_symmetry"].params["velocity_weight"] = 0.2
 
   cfg.rewards["cot_proxy"].params["asset_cfg"].joint_names = (".*",)
   cfg.rewards["cot_proxy"].params["speed_floor"] = 0.12
-  cfg.rewards["cot_proxy"].params["command_threshold"] = 0.08
+  cfg.rewards["cot_proxy"].params["command_threshold"] = 0.02
 
-  cfg.rewards["gait_phase_regularity"].params["command_threshold"] = 0.08
+  cfg.rewards["gait_phase_regularity"].params["command_threshold"] = 0.02
 
   for reward_name in ["foot_clearance", "foot_swing_height", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
@@ -130,11 +130,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["body_ang_vel"].weight = -0.05
   cfg.rewards["angular_momentum"].weight = -0.01
   cfg.rewards["air_time"].weight = 0.2
-  cfg.rewards["limb_symmetry"].weight = -1.0
-  cfg.rewards["actuation_power"].weight = -0.001
-  cfg.rewards["cot_proxy"].weight = -0.001
-  cfg.rewards["gait_phase_regularity"].weight = -0.3
-  cfg.rewards["feet_too_close"].weight = -2.0
+  cfg.rewards["actuation_power"].weight = 0.0 # Disable (use CoT instead)
+  cfg.rewards["cot_proxy"].weight = -0.1
+  cfg.rewards["gait_phase_regularity"].weight = -1.0
+  cfg.rewards["limb_symmetry"].weight = -0.5
+  cfg.rewards["feet_too_close"].weight = -1.0
 
   # Apply play mode overrides.
   if play:
