@@ -59,7 +59,7 @@
     <link rel="prev" title="Migrating from Isaac Lab" href="migration_isaac_lab.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-    <meta name="docbuild:last-update" content="Feb 27, 2026"/>
+    <meta name="docbuild:last-update" content="Apr 18, 2026"/>
   </head>
   
   
@@ -178,7 +178,10 @@
         <p aria-level="2" class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="tutorials.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/cartpole.html">Cartpole: Building Your First Environment</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Concepts</span></p>
@@ -209,14 +212,19 @@
 <li class="toctree-l1"><a class="reference internal" href="randomization.html">Domain Randomization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="curriculum.html">Curriculum</a></li>
 <li class="toctree-l1"><a class="reference internal" href="metrics.html">Metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="recorders.html">Recorders</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Training &amp; Debugging</span></p>
 <ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="training/rsl_rl.html">Training with RSL-RL</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="training/rsl_rl.html">Training with RSL-RL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="training/motion_imitation.html">Motion Imitation</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="viewers.html">Viewers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="training/distributed_training.html">Distributed Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="training/cloud.html">Cloud Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="debugging/nan_guard.html">NaN Guard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="debugging/export_scene.html">Export Scene</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="nav bd-sidenav">
@@ -468,14 +476,15 @@ document.write(`
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#training-debugging">Training &amp; Debugging</a><ul class="visible nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#my-training-crashes-with-nan-errors">My training crashes with NaN errors</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#how-can-i-inspect-the-generated-scene-xml">How can I inspect the generated scene XML?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#my-contact-sensor-misses-collisions-when-using-decimation">My contact sensor misses collisions when using decimation</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#when-do-i-need-to-call-sim-forward">When do I need to call <code class="docutils literal notranslate"><span class="pre">sim.forward()</span></code>?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#why-aren-t-my-training-runs-reproducible-even-with-a-fixed-seed">Why aren’t my training runs reproducible even with a fixed seed?</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#my-xml-option-flags-are-not-taking-effect">My XML <code class="docutils literal notranslate"><span class="pre">&lt;option&gt;</span></code> flags are not taking effect</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#rendering-visualization">Rendering &amp; Visualization</a><ul class="visible nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#what-visualization-options-are-available">What visualization options are available?</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#what-about-camera-pixel-rendering-for-vision-based-rl">What about camera/pixel rendering for vision-based RL?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#how-many-environments-can-i-visualize-at-once">How many environments can I visualize at once?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#why-are-my-fixed-base-robots-all-stacked-at-the-origin-instead-of-in-a-grid">Why are my fixed-base robots all stacked at the origin instead of in a grid?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#how-does-env-origins-determine-robot-layout">How does env_origins determine robot layout?</a></li>
@@ -567,7 +576,7 @@ faster</strong> than Isaac Lab.</p>
 <p>Yes, mjlab supports <strong>multi-GPU distributed training</strong> using
 <a class="reference external" href="https://github.com/apoorvkh/torchrunx">torchrunx</a>.</p>
 <ul class="simple">
-<li><p>Use <code class="docutils literal notranslate"><span class="pre">--gpu-ids</span> <span class="pre">0</span> <span class="pre">1</span></code> (or <code class="docutils literal notranslate"><span class="pre">--gpu-ids</span> <span class="pre">all</span></code>) when running the <code class="docutils literal notranslate"><span class="pre">train</span></code>
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">--gpu-ids</span> <span class="pre">&quot;[0,</span> <span class="pre">1]&quot;</span></code> (or <code class="docutils literal notranslate"><span class="pre">--gpu-ids</span> <span class="pre">all</span></code>) when running the <code class="docutils literal notranslate"><span class="pre">train</span></code>
 command.</p></li>
 <li><p>See the <a class="reference internal" href="training/distributed_training.html"><span class="doc">Distributed Training</span></a> for configuration details and examples.</p></li>
 </ul>
@@ -590,20 +599,14 @@ you handle this:</p>
 <li><p><strong>For training stability</strong> - NaN termination</p></li>
 </ol>
 <p>Add a <code class="docutils literal notranslate"><span class="pre">nan_detection</span></code> termination to reset environments that hit NaN:</p>
-<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span><span class="p">,</span> <span class="n">field</span>
-
-<span class="kn">from</span><span class="w"> </span><span class="nn">mjlab.envs.mdp.terminations</span><span class="w"> </span><span class="kn">import</span> <span class="n">nan_detection</span>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">mjlab.envs.mdp</span><span class="w"> </span><span class="kn">import</span> <span class="n">terminations</span> <span class="k">as</span> <span class="n">mdp_term</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">mjlab.managers.termination_manager</span><span class="w"> </span><span class="kn">import</span> <span class="n">TerminationTermCfg</span>
 
-<span class="nd">@dataclass</span>
-<span class="k">class</span><span class="w"> </span><span class="nc">TerminationCfg</span><span class="p">:</span>
+<span class="c1"># In your ManagerBasedRlEnvCfg subclass:</span>
+<span class="n">terminations</span> <span class="o">=</span> <span class="p">{</span>
    <span class="c1"># Your other terminations...</span>
-   <span class="n">nan_term</span><span class="p">:</span> <span class="n">TerminationTermCfg</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span>
-      <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">TerminationTermCfg</span><span class="p">(</span>
-            <span class="n">func</span><span class="o">=</span><span class="n">nan_detection</span><span class="p">,</span>
-            <span class="n">time_out</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-      <span class="p">)</span>
-   <span class="p">)</span>
+   <span class="s2">&quot;nan_term&quot;</span><span class="p">:</span> <span class="n">TerminationTermCfg</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">mdp_term</span><span class="o">.</span><span class="n">nan_detection</span><span class="p">),</span>
+<span class="p">}</span>
 </pre></div>
 </div>
 <p>This marks NaN environments as terminated so they can reset while training
@@ -633,6 +636,20 @@ termination.</p>
 <a class="reference external" href="https://github.com/google-deepmind/mujoco_warp/issues">MuJoCo Warp team</a>.</p></li>
 </ul>
 <p>Reporting well-isolated issues helps improve the framework for everyone.</p>
+</section>
+<section id="how-can-i-inspect-the-generated-scene-xml">
+<h3>How can I inspect the generated scene XML?<a class="headerlink" href="#how-can-i-inspect-the-generated-scene-xml" title="Link to this heading">#</a></h3>
+<p>Use the <code class="docutils literal notranslate"><span class="pre">export-scene</span></code> script to write the full scene (XML and mesh assets)
+to a directory:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>uv<span class="w"> </span>run<span class="w"> </span>export-scene<span class="w"> </span>g1<span class="w"> </span>--output-dir<span class="w"> </span>/tmp/g1
+</pre></div>
+</div>
+<p>The exported <code class="docutils literal notranslate"><span class="pre">scene.xml</span></code> can be loaded directly in MuJoCo for visual
+inspection or diffing. This is useful for verifying that task configuration
+and physics are set up correctly, and for creating minimal reproducible
+examples to share with mjlab or MuJoCo Warp developers. The script accepts task IDs,
+entity aliases (<code class="docutils literal notranslate"><span class="pre">g1</span></code>, <code class="docutils literal notranslate"><span class="pre">go1</span></code>, <code class="docutils literal notranslate"><span class="pre">yam</span></code>), or arbitrary import paths. See
+<a class="reference internal" href="debugging/export_scene.html"><span class="doc">Export Scene</span></a> for full details.</p>
 </section>
 <section id="my-contact-sensor-misses-collisions-when-using-decimation">
 <h3>My contact sensor misses collisions when using decimation<a class="headerlink" href="#my-contact-sensor-misses-collisions-when-using-decimation" title="Link to this heading">#</a></h3>
@@ -706,6 +723,31 @@ This is a known limitation being tracked in
 <p>Until determinism is implemented upstream, mjlab training runs will not be
 perfectly reproducible even when setting a seed.</p>
 </section>
+<section id="my-xml-option-flags-are-not-taking-effect">
+<h3>My XML <code class="docutils literal notranslate"><span class="pre">&lt;option&gt;</span></code> flags are not taking effect<a class="headerlink" href="#my-xml-option-flags-are-not-taking-effect" title="Link to this heading">#</a></h3>
+<p>If you set simulation options like <code class="docutils literal notranslate"><span class="pre">&lt;flag</span> <span class="pre">contact=&quot;disable&quot;/&gt;</span></code> in your
+entity XML, they will be silently ignored. This is because mjlab composes
+scenes by attaching entity specs into a parent scene spec using
+<code class="docutils literal notranslate"><span class="pre">MjSpec.attach()</span></code>, which does not propagate <code class="docutils literal notranslate"><span class="pre">&lt;option&gt;</span></code> settings from
+the child to the parent. This is a MuJoCo design decision: there is no
+sensible way to merge engine options (timestep, gravity, solver settings,
+etc.) across multiple attached models.</p>
+<p>To configure simulation options, use <a class="reference internal" href="api/sim.html#mjlab.sim.MujocoCfg" title="mjlab.sim.sim.MujocoCfg"><code class="xref py py-class docutils literal notranslate"><span class="pre">MujocoCfg</span></code></a> in
+your task’s Python config:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">mjlab.sim.sim</span><span class="w"> </span><span class="kn">import</span> <span class="n">MujocoCfg</span><span class="p">,</span> <span class="n">SimulationCfg</span>
+
+<span class="n">sim</span><span class="o">=</span><span class="n">SimulationCfg</span><span class="p">(</span>
+    <span class="n">mujoco</span><span class="o">=</span><span class="n">MujocoCfg</span><span class="p">(</span>
+        <span class="n">disableflags</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;contact&quot;</span><span class="p">,),</span>
+        <span class="c1"># timestep=0.01, gravity=(0, 0, -9.81), etc.</span>
+    <span class="p">),</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">MujocoCfg</span></code> applies options directly to the compiled model, so they
+always take effect. mjlab will emit a warning if it detects non-default
+<code class="docutils literal notranslate"><span class="pre">&lt;option&gt;</span></code> fields on an attached entity spec.</p>
+</section>
 </section>
 <section id="rendering-visualization">
 <h2>Rendering &amp; Visualization<a class="headerlink" href="#rendering-visualization" title="Link to this heading">#</a></h2>
@@ -723,23 +765,17 @@ but this is not yet available.</p>
 <p>As an alternative, mjlab supports <strong>video logging to Weights &amp; Biases
 (W&amp;B)</strong>, so you can monitor rollout videos directly in the experiment dashboard.</p>
 </section>
-<section id="what-about-camera-pixel-rendering-for-vision-based-rl">
-<h3>What about camera/pixel rendering for vision-based RL?<a class="headerlink" href="#what-about-camera-pixel-rendering-for-vision-based-rl" title="Link to this heading">#</a></h3>
-<p>Camera rendering for <strong>pixel-based agents</strong> is not yet available.</p>
-<p>The MuJoCo Warp team is actively developing <strong>camera support</strong>. Once mature, it
-will be integrated into mjlab for vision-based RL workflows.</p>
-</section>
 <section id="how-many-environments-can-i-visualize-at-once">
 <h3>How many environments can I visualize at once?<a class="headerlink" href="#how-many-environments-can-i-visualize-at-once" title="Link to this heading">#</a></h3>
-<p>Visualizers are <strong>limited to 32 environments maximum</strong> for performance reasons.</p>
+<p>Viewers render a small number of environments for performance reasons.</p>
 <ul class="simple">
-<li><p><strong>Offscreen renderer</strong> (for video recording): Hard-capped at 32 envs
-(see <code class="docutils literal notranslate"><span class="pre">_MAX_ENVS</span></code> in <code class="docutils literal notranslate"><span class="pre">viewer/offscreen_renderer.py:12</span></code>)</p></li>
+<li><p><strong>Offscreen renderer</strong> (for video recording): Renders the tracked
+environment plus its nearest neighbors. The count is controlled by
+<code class="docutils literal notranslate"><span class="pre">ViewerConfig.max_extra_envs</span></code> (default 2).</p></li>
 <li><p><strong>Native/Viser viewers</strong>: Limited by MuJoCo’s geometry buffer
-(default 10,000 geoms, configurable via <code class="docutils literal notranslate"><span class="pre">max_geom</span></code> parameter)</p></li>
+(default 10,000 geoms). The viewer shows whichever environments fit
+within the geometry budget.</p></li>
 </ul>
-<p>With thousands of environments, only a subset will be rendered. The viewer
-shows whichever environments fit within the geometry budget.</p>
 </section>
 <section id="why-are-my-fixed-base-robots-all-stacked-at-the-origin-instead-of-in-a-grid">
 <h3>Why are my fixed-base robots all stacked at the origin instead of in a grid?<a class="headerlink" href="#why-are-my-fixed-base-robots-all-stacked-at-the-origin-instead-of-in-a-grid" title="Link to this heading">#</a></h3>
@@ -769,11 +805,11 @@ they’ll be clustered in a tiny area that looks like a line from a distance.</p
 <span class="p">}</span>
 </pre></div>
 </div>
-<p>This pattern is used in the example manipulation task (see <code class="docutils literal notranslate"><span class="pre">lift_cube_env_cfg.py:84-93</span></code>).</p>
+<p>This pattern is used in the example manipulation task (see <code class="docutils literal notranslate"><span class="pre">lift_cube_env_cfg.py:85-94</span></code>).</p>
 <p><strong>Why this is needed</strong>: Fixed-base robots are automatically wrapped in mocap
 bodies by <code class="docutils literal notranslate"><span class="pre">auto_wrap_fixed_base_mocap()</span></code>, but mocap positioning only happens
 when you explicitly call a reset event. The <code class="docutils literal notranslate"><span class="pre">env_origins</span></code> offset is applied
-inside <code class="docutils literal notranslate"><span class="pre">reset_root_state_uniform()</span></code> at line 127 of <code class="docutils literal notranslate"><span class="pre">envs/mdp/events.py</span></code>.</p>
+inside <code class="docutils literal notranslate"><span class="pre">reset_root_state_uniform()</span></code> at line 131 of <code class="docutils literal notranslate"><span class="pre">envs/mdp/events.py</span></code>.</p>
 <p>See <a class="reference external" href="https://github.com/mujocolab/mjlab/issues/560">issue #560</a> for examples.</p>
 </section>
 <section id="how-does-env-origins-determine-robot-layout">
@@ -1013,14 +1049,15 @@ being worked on.</p>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#training-debugging">Training &amp; Debugging</a><ul class="visible nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#my-training-crashes-with-nan-errors">My training crashes with NaN errors</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#how-can-i-inspect-the-generated-scene-xml">How can I inspect the generated scene XML?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#my-contact-sensor-misses-collisions-when-using-decimation">My contact sensor misses collisions when using decimation</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#when-do-i-need-to-call-sim-forward">When do I need to call <code class="docutils literal notranslate"><span class="pre">sim.forward()</span></code>?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#why-aren-t-my-training-runs-reproducible-even-with-a-fixed-seed">Why aren’t my training runs reproducible even with a fixed seed?</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#my-xml-option-flags-are-not-taking-effect">My XML <code class="docutils literal notranslate"><span class="pre">&lt;option&gt;</span></code> flags are not taking effect</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#rendering-visualization">Rendering &amp; Visualization</a><ul class="visible nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#what-visualization-options-are-available">What visualization options are available?</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#what-about-camera-pixel-rendering-for-vision-based-rl">What about camera/pixel rendering for vision-based RL?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#how-many-environments-can-i-visualize-at-once">How many environments can I visualize at once?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#why-are-my-fixed-base-robots-all-stacked-at-the-origin-instead-of-in-a-grid">Why are my fixed-base robots all stacked at the origin instead of in a grid?</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#how-does-env-origins-determine-robot-layout">How does env_origins determine robot layout?</a></li>
@@ -1076,7 +1113,7 @@ By The mjlab Developers
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Feb 27, 2026.
+  Last updated on Apr 18, 2026.
   <br/>
 </p>
   </div>

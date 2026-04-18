@@ -59,7 +59,7 @@
     <link rel="prev" title="mjlab.actuator" href="actuator.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-    <meta name="docbuild:last-update" content="Feb 27, 2026"/>
+    <meta name="docbuild:last-update" content="Apr 18, 2026"/>
   </head>
   
   
@@ -178,7 +178,10 @@
         <p aria-level="2" class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation Guide</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../tutorials.html">Tutorials</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../tutorials.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/cartpole.html">Cartpole: Building Your First Environment</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="../contributing.html">Contributing</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Concepts</span></p>
@@ -209,14 +212,19 @@
 <li class="toctree-l1"><a class="reference internal" href="../randomization.html">Domain Randomization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../curriculum.html">Curriculum</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../metrics.html">Metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../recorders.html">Recorders</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Training &amp; Debugging</span></p>
 <ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../training/rsl_rl.html">Training with RSL-RL</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../training/rsl_rl.html">Training with RSL-RL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../training/motion_imitation.html">Motion Imitation</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="../viewers.html">Viewers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../training/distributed_training.html">Distributed Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../training/cloud.html">Cloud Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../debugging/nan_guard.html">NaN Guard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../debugging/export_scene.html">Export Scene</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="current nav bd-sidenav">
@@ -468,6 +476,7 @@ document.write(`
 </li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorCfg"><code class="docutils literal notranslate"><span class="pre">SensorCfg</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorCfg.name"><code class="docutils literal notranslate"><span class="pre">SensorCfg.name</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorCfg.prefixed_name"><code class="docutils literal notranslate"><span class="pre">SensorCfg.prefixed_name</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorCfg.build"><code class="docutils literal notranslate"><span class="pre">SensorCfg.build()</span></code></a></li>
 </ul>
 </li>
@@ -478,6 +487,7 @@ document.write(`
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.finalize"><code class="docutils literal notranslate"><span class="pre">SensorContext.finalize()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.get_rgb"><code class="docutils literal notranslate"><span class="pre">SensorContext.get_rgb()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.get_depth"><code class="docutils literal notranslate"><span class="pre">SensorContext.get_depth()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.get_segmentation"><code class="docutils literal notranslate"><span class="pre">SensorContext.get_segmentation()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.unpack_rgb"><code class="docutils literal notranslate"><span class="pre">SensorContext.unpack_rgb()</span></code></a></li>
 </ul>
 </li>
@@ -496,6 +506,7 @@ document.write(`
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.obj"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.obj</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.ref"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.ref</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.cutoff"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.cutoff</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.prefixed_name"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.prefixed_name</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.build"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.build()</span></code></a></li>
 </ul>
 </li>
@@ -511,6 +522,7 @@ document.write(`
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#contact-sensor">Contact Sensor</a><ul class="visible nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor"><code class="docutils literal notranslate"><span class="pre">ContactSensor</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.__init__"><code class="docutils literal notranslate"><span class="pre">ContactSensor.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.primary_names"><code class="docutils literal notranslate"><span class="pre">ContactSensor.primary_names</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.edit_spec"><code class="docutils literal notranslate"><span class="pre">ContactSensor.edit_spec()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.initialize"><code class="docutils literal notranslate"><span class="pre">ContactSensor.initialize()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.reset"><code class="docutils literal notranslate"><span class="pre">ContactSensor.reset()</span></code></a></li>
@@ -567,6 +579,9 @@ document.write(`
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.edit_spec"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.edit_spec()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.initialize"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.initialize()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.set_context"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.set_context()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.num_rays"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.num_rays</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.num_frames"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.num_frames</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.num_rays_per_frame"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.num_rays_per_frame</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.debug_vis"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.debug_vis()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.prepare_rays"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.prepare_rays()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.raycast_kernel"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.raycast_kernel()</span></code></a></li>
@@ -602,6 +617,8 @@ document.write(`
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.hit_pos_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.hit_pos_w</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.pos_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.pos_w</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.quat_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.quat_w</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.frame_pos_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.frame_pos_w</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.frame_quat_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.frame_quat_w</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.__init__"><code class="docutils literal notranslate"><span class="pre">RayCastData.__init__()</span></code></a></li>
 </ul>
 </li>
@@ -650,8 +667,9 @@ document.write(`
 </li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData"><code class="docutils literal notranslate"><span class="pre">CameraSensorData</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.rgb"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.rgb</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.__init__"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.__init__()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.depth"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.depth</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.__init__"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.segmentation"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.segmentation</span></code></a></li>
 </ul>
 </li>
 </ul>
@@ -818,6 +836,12 @@ debug visualization.</p>
 <span class="sig-name descname"><span class="pre">name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></em><a class="headerlink" href="#mjlab.sensor.SensorCfg.name" title="Link to this definition">#</a></dt>
 <dd></dd></dl>
 
+<dl class="py property">
+<dt class="sig sig-object py" id="mjlab.sensor.SensorCfg.prefixed_name">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">prefixed_name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></em><a class="headerlink" href="#mjlab.sensor.SensorCfg.prefixed_name" title="Link to this definition">#</a></dt>
+<dd><p>The sensor name as it appears in the MuJoCo model.</p>
+</dd></dl>
+
 <dl class="py method">
 <dt class="sig sig-object py" id="mjlab.sensor.SensorCfg.build">
 <em class="property"><span class="k"><span class="pre">abstractmethod</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">build</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#mjlab.sensor.Sensor" title="mjlab.sensor.sensor.Sensor"><span class="pre">Sensor</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="../../_modules/mjlab/sensor/sensor.html#SensorCfg.build"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.SensorCfg.build" title="Link to this definition">#</a></dt>
@@ -835,7 +859,7 @@ sensors (for BVH-accelerated ray intersection). The actual graph capture and
 execution is handled by Simulation.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="mjlab.sensor.SensorContext.__init__">
-<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mj_model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">mujoco.MjModel</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">mjwarp.Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">mjwarp.Data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">camera_sensors</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#mjlab.sensor.CameraSensor" title="mjlab.sensor.CameraSensor"><span class="pre">CameraSensor</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">raycast_sensors</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#mjlab.sensor.RayCastSensor" title="mjlab.sensor.RayCastSensor"><span class="pre">RayCastSensor</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/mjlab/sensor/sensor_context.html#SensorContext.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.SensorContext.__init__" title="Link to this definition">#</a></dt>
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mj_model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">mujoco.MjModel</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">model</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">mjwarp.Model</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">mjwarp.Data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">camera_sensors</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#mjlab.sensor.CameraSensor" title="mjlab.sensor.CameraSensor"><span class="pre">CameraSensor</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">raycast_sensors</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#mjlab.sensor.RayCastSensor" title="mjlab.sensor.RayCastSensor"><span class="pre">RayCastSensor</span></a><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="../../_modules/mjlab/sensor/sensor_context.html#SensorContext.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.SensorContext.__init__" title="Link to this definition">#</a></dt>
 <dd></dd></dl>
 
 <dl class="py method">
@@ -881,6 +905,21 @@ execution is handled by Simulation.</p>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
 <dd class="field-even"><p>Tensor of shape [num_envs, height, width, 1] (float32).</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="mjlab.sensor.SensorContext.get_segmentation">
+<span class="sig-name descname"><span class="pre">get_segmentation</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cam_idx</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="reference internal" href="../../_modules/mjlab/sensor/sensor_context.html#SensorContext.get_segmentation"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.SensorContext.get_segmentation" title="Link to this definition">#</a></dt>
+<dd><p>Get per-pixel geom ID data for a camera.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>cam_idx</strong> – MuJoCo camera ID.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Tensor of shape [num_envs, height, width, 1] (int32).
+Values: &gt;= 0 for geom IDs, -1 for background, -2 for flex.</p>
 </dd>
 </dl>
 </dd></dl>
@@ -982,6 +1021,12 @@ is ready to run. Use this to cache sensor indices, allocate buffers, etc.</p>
 <dd><p>When this value is positive, it limits the absolute value of the sensor output.</p>
 </dd></dl>
 
+<dl class="py property">
+<dt class="sig sig-object py" id="mjlab.sensor.BuiltinSensorCfg.prefixed_name">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">prefixed_name</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></em><a class="headerlink" href="#mjlab.sensor.BuiltinSensorCfg.prefixed_name" title="Link to this definition">#</a></dt>
+<dd><p>The sensor name with entity prefix if applicable.</p>
+</dd></dl>
+
 <dl class="py method">
 <dt class="sig sig-object py" id="mjlab.sensor.BuiltinSensorCfg.build">
 <span class="sig-name descname"><span class="pre">build</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#mjlab.sensor.BuiltinSensor" title="mjlab.sensor.builtin_sensor.BuiltinSensor"><span class="pre">BuiltinSensor</span></a></span></span><a class="reference internal" href="../../_modules/mjlab/sensor/builtin_sensor.html#BuiltinSensorCfg.build"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.BuiltinSensorCfg.build" title="Link to this definition">#</a></dt>
@@ -1035,6 +1080,15 @@ The entity field allows scoping objects to specific entity namespaces.</p>
 <span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cfg</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#mjlab.sensor.ContactSensorCfg" title="mjlab.sensor.contact_sensor.ContactSensorCfg"><span class="pre">ContactSensorCfg</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="../../_modules/mjlab/sensor/contact_sensor.html#ContactSensor.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.ContactSensor.__init__" title="Link to this definition">#</a></dt>
 <dd></dd></dl>
 
+<dl class="py property">
+<dt class="sig sig-object py" id="mjlab.sensor.ContactSensor.primary_names">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">primary_names</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#mjlab.sensor.ContactSensor.primary_names" title="Link to this definition">#</a></dt>
+<dd><p>Primary names in the order they appear along the per-contact dim.</p>
+<p>Per-contact fields ([B, N, …]) are laid out primary-major, so primary
+<cite>primary_names[i]</cite> occupies indices [i * num_slots : (i + 1) * num_slots].
+Per-primary fields ([B, P, …]) have one entry per name in this list.</p>
+</dd></dl>
+
 <dl class="py method">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactSensor.edit_spec">
 <span class="sig-name descname"><span class="pre">edit_spec</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">scene_spec</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">MjSpec</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">entities</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="entity.html#mjlab.entity.Entity" title="mjlab.entity.entity.Entity"><span class="pre">Entity</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="../../_modules/mjlab/sensor/contact_sensor.html#ContactSensor.edit_spec"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.ContactSensor.edit_spec" title="Link to this definition">#</a></dt>
@@ -1076,13 +1130,13 @@ per-step updates, but call <cite>super().update(dt)</cite> FIRST.</p>
 <dl class="py method">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactSensor.compute_first_contact">
 <span class="sig-name descname"><span class="pre">compute_first_contact</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dt</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">abs_tol</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1e-08</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="reference internal" href="../../_modules/mjlab/sensor/contact_sensor.html#ContactSensor.compute_first_contact"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.ContactSensor.compute_first_contact" title="Link to this definition">#</a></dt>
-<dd><p>Returns [B, N] bool: True for contacts established within last dt seconds.</p>
+<dd><p>Returns [B, P] bool: True for primaries that landed within the last dt seconds.</p>
 </dd></dl>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactSensor.compute_first_air">
 <span class="sig-name descname"><span class="pre">compute_first_air</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dt</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">abs_tol</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">1e-08</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Tensor</span></span></span><a class="reference internal" href="../../_modules/mjlab/sensor/contact_sensor.html#ContactSensor.compute_first_air"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.ContactSensor.compute_first_air" title="Link to this definition">#</a></dt>
-<dd><p>Returns [B, N] bool: True for contacts broken within last dt seconds.</p>
+<dd><p>Returns [B, P] bool: True for primaries that took off within the last dt seconds.</p>
 </dd></dl>
 
 </dd></dl>
@@ -1090,26 +1144,62 @@ per-step updates, but call <cite>super().update(dt)</cite> FIRST.</p>
 <dl class="py class">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactSensorCfg">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">mjlab.sensor.</span></span><span class="sig-name descname"><span class="pre">ContactSensorCfg</span></span><a class="reference internal" href="../../_modules/mjlab/sensor/contact_sensor.html#ContactSensorCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.ContactSensorCfg" title="Link to this definition">#</a></dt>
-<dd><p>Tracks contacts between primary and secondary patterns.</p>
-<p>Output shape: [B, N * num_slots] or [B, N * num_slots, 3] where N = # of primaries</p>
-<dl class="simple">
-<dt>Fields (choose subset):</dt><dd><ul class="simple">
-<li><p>found: 0=no contact, &gt;0=match count before reduction</p></li>
-<li><p>force, torque: 3D vectors in contact frame (or global if reduce=”netforce”)</p></li>
-<li><p>dist: penetration depth</p></li>
-<li><p>pos, normal, tangent: 3D vectors in global frame (normal: primary→secondary)</p></li>
+<dd><p>Configuration for a <a class="reference internal" href="#mjlab.sensor.ContactSensor" title="mjlab.sensor.ContactSensor"><code class="xref py py-class docutils literal notranslate"><span class="pre">ContactSensor</span></code></a>.</p>
+<p>A contact sensor watches contacts between a <code class="docutils literal notranslate"><span class="pre">primary</span></code> set of elements and
+an optional <code class="docutils literal notranslate"><span class="pre">secondary</span></code> element. Patterns expand to multiple primaries
+(e.g. all four feet on a quadruped); each primary becomes one column on the
+per-contact axis of the output tensors.</p>
+<p>See the module docstring for shape conventions (<code class="docutils literal notranslate"><span class="pre">P</span></code>, <code class="docutils literal notranslate"><span class="pre">N</span></code>, primary-major
+layout) and <a class="reference internal" href="#mjlab.sensor.ContactSensor.primary_names" title="mjlab.sensor.ContactSensor.primary_names"><code class="xref py py-attr docutils literal notranslate"><span class="pre">ContactSensor.primary_names</span></code></a> for index→name lookup.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>primary</strong> – Elements to measure (e.g. the robot’s feet). Typically a regex
+that resolves to multiple elements.</p></li>
+<li><p><strong>secondary</strong> – Optional filter on what the primary may contact (e.g. terrain).
+<code class="docutils literal notranslate"><span class="pre">None</span></code> means “any contact with a primary counts”.</p></li>
+<li><p><strong>fields</strong> – <p>Which contact quantities to extract. Only requested fields are
+allocated and computed; the rest are <code class="docutils literal notranslate"><span class="pre">None</span></code> on <code class="docutils literal notranslate"><span class="pre">ContactData</span></code>.</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;found&quot;</span></code>: 0 = no contact; &gt;0 = number of matched contacts.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;force&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;torque&quot;</span></code>: 3D vectors in the contact frame (or in the
+global frame when <code class="docutils literal notranslate"><span class="pre">reduce=&quot;netforce&quot;</span></code> or <code class="docutils literal notranslate"><span class="pre">global_frame=True</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;dist&quot;</span></code>: penetration depth (scalar).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;pos&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;normal&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;tangent&quot;</span></code>: 3D vectors in the global
+frame (normal points primary → secondary).</p></li>
 </ul>
-</dd>
-<dt>Reduction modes (selects top num_slots from all matches):</dt><dd><ul class="simple">
-<li><p>“none”: fast, non-deterministic</p></li>
-<li><p>“mindist”, “maxforce”: closest/strongest contacts</p></li>
-<li><p>“netforce”: sum all forces (global frame)</p></li>
+</p></li>
+<li><p><strong>reduce</strong> – <p>How to collapse simultaneous contacts on the same primary down to
+<code class="docutils literal notranslate"><span class="pre">num_slots</span></code> representative contacts.</p>
+<ul>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;none&quot;</span></code>: fast, non-deterministic ordering.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;mindist&quot;</span></code>: keep the closest (deepest) contacts.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;maxforce&quot;</span></code>: keep the strongest contacts.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&quot;netforce&quot;</span></code>: sum all contacts into a single net wrench (always
+produces one slot per primary regardless of <code class="docutils literal notranslate"><span class="pre">num_slots</span></code>).</p></li>
 </ul>
-</dd>
-<dt>Policies:</dt><dd><ul class="simple">
-<li><p>secondary_policy: “first”, “any”, or “error” when secondary matches multiple</p></li>
-<li><p>track_air_time: enables landing/takeoff detection</p></li>
-<li><p>global_frame: rotates force/torque to global (requires normal+tangent fields)</p></li>
+</p></li>
+<li><p><strong>num_slots</strong> – Number of contacts to retain per primary after reduction.
+Almost always <code class="docutils literal notranslate"><span class="pre">1</span></code>: most policies want one representative contact per
+primary, and pattern expansion already gives you many primaries. Only
+raise this when a single primary may have multiple distinct contacts
+you want to inspect separately, paired with <code class="docutils literal notranslate"><span class="pre">reduce</span></code> in
+<code class="docutils literal notranslate"><span class="pre">{&quot;none&quot;,</span> <span class="pre">&quot;mindist&quot;,</span> <span class="pre">&quot;maxforce&quot;}</span></code>. Ignored by <code class="docutils literal notranslate"><span class="pre">reduce=&quot;netforce&quot;</span></code>.</p></li>
+<li><p><strong>secondary_policy</strong> – How to handle a secondary pattern that resolves to
+multiple elements: <code class="docutils literal notranslate"><span class="pre">&quot;first&quot;</span></code> picks the first match, <code class="docutils literal notranslate"><span class="pre">&quot;any&quot;</span></code> drops
+the secondary filter entirely, <code class="docutils literal notranslate"><span class="pre">&quot;error&quot;</span></code> raises.</p></li>
+<li><p><strong>track_air_time</strong> – Allocate per-primary air/contact time accumulators
+(useful for gait rewards). Requires <code class="docutils literal notranslate"><span class="pre">&quot;found&quot;</span></code> in <code class="docutils literal notranslate"><span class="pre">fields</span></code>. Slot
+reduction within a primary uses an “any slot in contact” rule.</p></li>
+<li><p><strong>global_frame</strong> – Rotate <code class="docutils literal notranslate"><span class="pre">force</span></code>/<code class="docutils literal notranslate"><span class="pre">torque</span></code> from the contact frame to the
+global frame. Requires <code class="docutils literal notranslate"><span class="pre">&quot;normal&quot;</span></code> and <code class="docutils literal notranslate"><span class="pre">&quot;tangent&quot;</span></code> in <code class="docutils literal notranslate"><span class="pre">fields</span></code>.
+Implicit when <code class="docutils literal notranslate"><span class="pre">reduce=&quot;netforce&quot;</span></code>.</p></li>
+<li><p><strong>history_length</strong> – If &gt;0, keep a rolling buffer of the last N substeps of
+<code class="docutils literal notranslate"><span class="pre">force</span></code>/<code class="docutils literal notranslate"><span class="pre">torque</span></code>/<code class="docutils literal notranslate"><span class="pre">dist</span></code> data. Set to your decimation value so the
+buffer covers exactly one policy step; useful for catching brief
+collisions that resolve mid-substep. <code class="docutils literal notranslate"><span class="pre">0</span></code> disables the buffer.</p></li>
+<li><p><strong>debug</strong> – Print each MuJoCo sensor as it is added to the spec. Useful for
+checking that pattern expansion produced the elements you expected.</p></li>
 </ul>
 </dd>
 </dl>
@@ -1156,16 +1246,7 @@ per-step updates, but call <cite>super().update(dt)</cite> FIRST.</p>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactSensorCfg.history_length">
 <span class="sig-name descname"><span class="pre">history_length</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></em><a class="headerlink" href="#mjlab.sensor.ContactSensorCfg.history_length" title="Link to this definition">#</a></dt>
-<dd><p>Number of substeps to store in history buffer for force/torque/dist fields.</p>
-<p>When 0 (default): No history buffer is allocated. History fields (force_history,
-torque_history, dist_history) are None. Use the regular fields (force, torque, dist)
-for the current instantaneous values.</p>
-<p>When &gt;0: Allocates a history buffer that stores the last N substeps of contact data.
-Shape is [B, N, history_length, …] where index 0 is the most recent substep.
-Set to your decimation value to capture all substeps within one policy step.</p>
-<p>Note: history_length=1 is redundant with the regular fields but provides a consistent
-[B, N, H, …] shape if your code expects a history dimension.</p>
-</dd></dl>
+<dd></dd></dl>
 
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactSensorCfg.debug">
@@ -1184,6 +1265,9 @@ Set to your decimation value to capture all substeps within one policy step.</p>
 <dt class="sig sig-object py" id="mjlab.sensor.ContactData">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">mjlab.sensor.</span></span><span class="sig-name descname"><span class="pre">ContactData</span></span><a class="reference internal" href="../../_modules/mjlab/sensor/contact_sensor.html#ContactData"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.ContactData" title="Link to this definition">#</a></dt>
 <dd><p>Contact sensor output (only requested fields are populated).</p>
+<p>Shape conventions: P = number of primaries; N = P * num_slots (per-contact
+fields are laid out primary-major). Air-time fields are per-primary and
+reduce across slots (any slot in contact → primary in contact).</p>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactData.found">
 <span class="sig-name descname"><span class="pre">found</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#mjlab.sensor.ContactData.found" title="Link to this definition">#</a></dt>
@@ -1229,25 +1313,25 @@ Set to your decimation value to capture all substeps within one policy step.</p>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactData.current_air_time">
 <span class="sig-name descname"><span class="pre">current_air_time</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#mjlab.sensor.ContactData.current_air_time" title="Link to this definition">#</a></dt>
-<dd><p>[B, N] time in air (if track_air_time=True)</p>
+<dd><p>[B, P] time in air per primary (if track_air_time=True)</p>
 </dd></dl>
 
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactData.last_air_time">
 <span class="sig-name descname"><span class="pre">last_air_time</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#mjlab.sensor.ContactData.last_air_time" title="Link to this definition">#</a></dt>
-<dd><p>[B, N] duration of last air phase (if track_air_time=True)</p>
+<dd><p>[B, P] duration of last air phase per primary (if track_air_time=True)</p>
 </dd></dl>
 
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactData.current_contact_time">
 <span class="sig-name descname"><span class="pre">current_contact_time</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#mjlab.sensor.ContactData.current_contact_time" title="Link to this definition">#</a></dt>
-<dd><p>[B, N] time in contact (if track_air_time=True)</p>
+<dd><p>[B, P] time in contact per primary (if track_air_time=True)</p>
 </dd></dl>
 
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactData.last_contact_time">
 <span class="sig-name descname"><span class="pre">last_contact_time</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#mjlab.sensor.ContactData.last_contact_time" title="Link to this definition">#</a></dt>
-<dd><p>[B, N] duration of last contact phase (if track_air_time=True)</p>
+<dd><p>[B, P] duration of last contact phase per primary (if track_air_time=True)</p>
 </dd></dl>
 
 <dl class="py attribute">
@@ -1279,10 +1363,21 @@ Set to your decimation value to capture all substeps within one policy step.</p>
 <dt class="sig sig-object py" id="mjlab.sensor.ContactMatch">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">mjlab.sensor.</span></span><span class="sig-name descname"><span class="pre">ContactMatch</span></span><a class="reference internal" href="../../_modules/mjlab/sensor/contact_sensor.html#ContactMatch"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.ContactMatch" title="Link to this definition">#</a></dt>
 <dd><p>Specifies what to match on one side of a contact.</p>
-<p>mode: “geom”, “body”, or “subtree”
-pattern: Regex or tuple of regexes (expands within entity if specified)
-entity: Entity name to search within (None = treat pattern as literal MuJoCo name)
-exclude: Filter out matches using these regex patterns or exact names.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>mode</strong> – MuJoCo element type to match against (“geom”, “body”, or “subtree”).</p></li>
+<li><p><strong>pattern</strong> – A regex (or tuple of regexes) matched against element names within
+<code class="docutils literal notranslate"><span class="pre">entity</span></code>. If <code class="docutils literal notranslate"><span class="pre">entity</span></code> is unset, the pattern is treated as a literal
+MuJoCo name (no regex expansion).</p></li>
+<li><p><strong>entity</strong> – Entity name to scope the pattern to. If <code class="docutils literal notranslate"><span class="pre">None</span></code>/<code class="docutils literal notranslate"><span class="pre">&quot;&quot;</span></code>, the
+pattern is taken as a literal MuJoCo name.</p></li>
+<li><p><strong>exclude</strong> – Names to filter out of the match. Each entry is treated as a
+regex if it contains any regex metacharacters, otherwise as an exact
+name.</p></li>
+</ul>
+</dd>
+</dl>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.ContactMatch.mode">
 <span class="sig-name descname"><span class="pre">mode</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><span class="pre">Literal</span></a><span class="p"><span class="pre">[</span></span><span class="s"><span class="pre">'geom'</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'body'</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'subtree'</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#mjlab.sensor.ContactMatch.mode" title="Link to this definition">#</a></dt>
@@ -1364,6 +1459,24 @@ is ready to run. Use this to cache sensor indices, allocate buffers, etc.</p>
 <dd><p>Wire this sensor to a SensorContext for BVH-accelerated raycasting.</p>
 </dd></dl>
 
+<dl class="py property">
+<dt class="sig sig-object py" id="mjlab.sensor.RayCastSensor.num_rays">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">num_rays</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></em><a class="headerlink" href="#mjlab.sensor.RayCastSensor.num_rays" title="Link to this definition">#</a></dt>
+<dd><p>Total number of rays (num_frames * num_rays_per_frame).</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="mjlab.sensor.RayCastSensor.num_frames">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">num_frames</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></em><a class="headerlink" href="#mjlab.sensor.RayCastSensor.num_frames" title="Link to this definition">#</a></dt>
+<dd><p>Number of attachment frames.</p>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="mjlab.sensor.RayCastSensor.num_rays_per_frame">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">num_rays_per_frame</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></em><a class="headerlink" href="#mjlab.sensor.RayCastSensor.num_rays_per_frame" title="Link to this definition">#</a></dt>
+<dd><p>Number of rays per attachment frame.</p>
+</dd></dl>
+
 <dl class="py method">
 <dt class="sig sig-object py" id="mjlab.sensor.RayCastSensor.debug_vis">
 <span class="sig-name descname"><span class="pre">debug_vis</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">visualizer</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">DebugVisualizer</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="../../_modules/mjlab/sensor/raycast_sensor.html#RayCastSensor.debug_vis"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.RayCastSensor.debug_vis" title="Link to this definition">#</a></dt>
@@ -1404,7 +1517,7 @@ world-frame tensors for postprocess_rays().</p>
 <dt class="sig sig-object py" id="mjlab.sensor.RayCastSensorCfg">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">mjlab.sensor.</span></span><span class="sig-name descname"><span class="pre">RayCastSensorCfg</span></span><a class="reference internal" href="../../_modules/mjlab/sensor/raycast_sensor.html#RayCastSensorCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.RayCastSensorCfg" title="Link to this definition">#</a></dt>
 <dd><p>Raycast sensor configuration.</p>
-<p>Supports multiple ray patterns (grid, pinhole camera) and alignment modes.</p>
+<p>Supports multiple ray patterns (grid, pinhole camera, ring) and alignment modes.</p>
 <dl class="py class">
 <dt class="sig sig-object py" id="mjlab.sensor.RayCastSensorCfg.VizCfg">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">VizCfg</span></span><a class="reference internal" href="../../_modules/mjlab/sensor/raycast_sensor.html#RayCastSensorCfg.VizCfg"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#mjlab.sensor.RayCastSensorCfg.VizCfg" title="Link to this definition">#</a></dt>
@@ -1461,8 +1574,11 @@ world-frame tensors for postprocess_rays().</p>
 
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.RayCastSensorCfg.frame">
-<span class="sig-name descname"><span class="pre">frame</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#mjlab.sensor.ObjRef" title="mjlab.sensor.ObjRef"><span class="pre">ObjRef</span></a></em><a class="headerlink" href="#mjlab.sensor.RayCastSensorCfg.frame" title="Link to this definition">#</a></dt>
-<dd><p>Body or site to attach rays to.</p>
+<span class="sig-name descname"><span class="pre">frame</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#mjlab.sensor.ObjRef" title="mjlab.sensor.ObjRef"><span class="pre">ObjRef</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#mjlab.sensor.ObjRef" title="mjlab.sensor.ObjRef"><span class="pre">ObjRef</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></em><a class="headerlink" href="#mjlab.sensor.RayCastSensorCfg.frame" title="Link to this definition">#</a></dt>
+<dd><p>Body, site, or geom to attach rays to.</p>
+<p>Pass a single <code class="docutils literal notranslate"><span class="pre">ObjRef</span></code> for one frame, or a tuple for multi-frame
+sensing (e.g. per-foot height sensors). Each frame’s parent body is
+excluded independently when <code class="docutils literal notranslate"><span class="pre">exclude_parent_body</span></code> is True.</p>
 </dd></dl>
 
 <dl class="py attribute">
@@ -1474,11 +1590,13 @@ world-frame tensors for postprocess_rays().</p>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.RayCastSensorCfg.ray_alignment">
 <span class="sig-name descname"><span class="pre">ray_alignment</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">RayAlignment</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'base'</span></em><a class="headerlink" href="#mjlab.sensor.RayCastSensorCfg.ray_alignment" title="Link to this definition">#</a></dt>
-<dd><p>How rays align with the frame.</p>
+<dd><p>How rays are oriented relative to the frame. Controls direction only;
+the ray origin is always the physical frame position (<code class="docutils literal notranslate"><span class="pre">site_xpos</span></code> /
+<code class="docutils literal notranslate"><span class="pre">geom_xpos</span></code> / <code class="docutils literal notranslate"><span class="pre">body_xpos</span></code>).</p>
 <ul class="simple">
-<li><p>“base”: Full position + rotation (default).</p></li>
-<li><p>“yaw”: Position + yaw only, ignores pitch/roll (good for height maps).</p></li>
-<li><p>“world”: Fixed in world frame, position only follows body.</p></li>
+<li><p>“base”: Full rotation (default). Rays rotate with the body.</p></li>
+<li><p>“yaw”: Yaw only, ignores pitch/roll (good for height maps).</p></li>
+<li><p>“world”: Fixed in world frame, rays always point the same direction.</p></li>
 </ul>
 </dd></dl>
 
@@ -1534,6 +1652,7 @@ world-frame tensors for postprocess_rays().</p>
 <dt class="sig sig-object py" id="mjlab.sensor.RayCastData.distances">
 <span class="sig-name descname"><span class="pre">distances</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#mjlab.sensor.RayCastData.distances" title="Link to this definition">#</a></dt>
 <dd><p>[B, N] Distance to hit point. -1 if no hit.</p>
+<p>N = num_frames * num_rays_per_frame.</p>
 </dd></dl>
 
 <dl class="py attribute">
@@ -1551,18 +1670,30 @@ world-frame tensors for postprocess_rays().</p>
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.RayCastData.pos_w">
 <span class="sig-name descname"><span class="pre">pos_w</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#mjlab.sensor.RayCastData.pos_w" title="Link to this definition">#</a></dt>
-<dd><p>[B, 3] Frame position in world coordinates.</p>
+<dd><p>[B, 3] First frame position in world coordinates.</p>
 </dd></dl>
 
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.RayCastData.quat_w">
 <span class="sig-name descname"><span class="pre">quat_w</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#mjlab.sensor.RayCastData.quat_w" title="Link to this definition">#</a></dt>
-<dd><p>[B, 4] Frame orientation quaternion (w, x, y, z) in world coordinates.</p>
+<dd><p>[B, 4] First frame orientation quaternion (w, x, y, z).</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="mjlab.sensor.RayCastData.frame_pos_w">
+<span class="sig-name descname"><span class="pre">frame_pos_w</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#mjlab.sensor.RayCastData.frame_pos_w" title="Link to this definition">#</a></dt>
+<dd><p>[B, F, 3] All frame positions in world coordinates.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="mjlab.sensor.RayCastData.frame_quat_w">
+<span class="sig-name descname"><span class="pre">frame_quat_w</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span></em><a class="headerlink" href="#mjlab.sensor.RayCastData.frame_quat_w" title="Link to this definition">#</a></dt>
+<dd><p>[B, F, 4] All frame orientations (w, x, y, z).</p>
 </dd></dl>
 
 <dl class="py method">
 <dt class="sig sig-object py" id="mjlab.sensor.RayCastData.__init__">
-<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">distances</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">normals_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hit_pos_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pos_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quat_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#mjlab.sensor.RayCastData.__init__" title="Link to this definition">#</a></dt>
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">distances</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">normals_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hit_pos_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pos_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">quat_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_pos_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">frame_quat_w</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#mjlab.sensor.RayCastData.__init__" title="Link to this definition">#</a></dt>
 <dd></dd></dl>
 
 </dd></dl>
@@ -1805,8 +1936,9 @@ parent body frame.</p>
 
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.CameraSensorCfg.data_types">
-<span class="sig-name descname"><span class="pre">data_types</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><span class="pre">Literal</span></a><span class="p"><span class="pre">[</span></span><span class="s"><span class="pre">'rgb'</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'depth'</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('rgb',)</span></em><a class="headerlink" href="#mjlab.sensor.CameraSensorCfg.data_types" title="Link to this definition">#</a></dt>
-<dd><p>any combination of “rgb” and “depth”.</p>
+<span class="sig-name descname"><span class="pre">data_types</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><span class="pre">Literal</span></a><span class="p"><span class="pre">[</span></span><span class="s"><span class="pre">'rgb'</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'depth'</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'segmentation'</span></span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">('rgb',)</span></em><a class="headerlink" href="#mjlab.sensor.CameraSensorCfg.data_types" title="Link to this definition">#</a></dt>
+<dd><p>any combination of “rgb”, “depth”,
+and “segmentation”.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Type<span class="colon">:</span></dt>
 <dd class="field-odd"><p>Data types to capture</p>
@@ -1861,6 +1993,7 @@ parent body frame.</p>
 <dt>Shapes:</dt><dd><ul class="simple">
 <li><p>rgb: [num_envs, height, width, 3] (uint8)</p></li>
 <li><p>depth: [num_envs, height, width, 1] (float32)</p></li>
+<li><p>segmentation: [num_envs, height, width, 1] (int32)</p></li>
 </ul>
 </dd>
 </dl>
@@ -1871,16 +2004,24 @@ parent body frame.</p>
 enabled.</p>
 </dd></dl>
 
-<dl class="py method">
-<dt class="sig sig-object py" id="mjlab.sensor.CameraSensorData.__init__">
-<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rgb</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">depth</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#mjlab.sensor.CameraSensorData.__init__" title="Link to this definition">#</a></dt>
-<dd></dd></dl>
-
 <dl class="py attribute">
 <dt class="sig sig-object py" id="mjlab.sensor.CameraSensorData.depth">
 <span class="sig-name descname"><span class="pre">depth</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#mjlab.sensor.CameraSensorData.depth" title="Link to this definition">#</a></dt>
 <dd><p>Depth image [num_envs, height, width, 1] (float32). None if not
 enabled.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="mjlab.sensor.CameraSensorData.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">rgb</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">depth</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">segmentation</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="headerlink" href="#mjlab.sensor.CameraSensorData.__init__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="mjlab.sensor.CameraSensorData.segmentation">
+<span class="sig-name descname"><span class="pre">segmentation</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="pre">Tensor</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#mjlab.sensor.CameraSensorData.segmentation" title="Link to this definition">#</a></dt>
+<dd><p>Per-pixel geom IDs [num_envs, height, width, 1] (int32).</p>
+<p>Values: &gt;= 0 for rigid geom IDs, -1 for background, -2 for flex
+bodies. None if not enabled.</p>
 </dd></dl>
 
 </dd></dl>
@@ -1947,6 +2088,7 @@ enabled.</p>
 </li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorCfg"><code class="docutils literal notranslate"><span class="pre">SensorCfg</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorCfg.name"><code class="docutils literal notranslate"><span class="pre">SensorCfg.name</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorCfg.prefixed_name"><code class="docutils literal notranslate"><span class="pre">SensorCfg.prefixed_name</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorCfg.build"><code class="docutils literal notranslate"><span class="pre">SensorCfg.build()</span></code></a></li>
 </ul>
 </li>
@@ -1957,6 +2099,7 @@ enabled.</p>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.finalize"><code class="docutils literal notranslate"><span class="pre">SensorContext.finalize()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.get_rgb"><code class="docutils literal notranslate"><span class="pre">SensorContext.get_rgb()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.get_depth"><code class="docutils literal notranslate"><span class="pre">SensorContext.get_depth()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.get_segmentation"><code class="docutils literal notranslate"><span class="pre">SensorContext.get_segmentation()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.SensorContext.unpack_rgb"><code class="docutils literal notranslate"><span class="pre">SensorContext.unpack_rgb()</span></code></a></li>
 </ul>
 </li>
@@ -1975,6 +2118,7 @@ enabled.</p>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.obj"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.obj</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.ref"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.ref</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.cutoff"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.cutoff</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.prefixed_name"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.prefixed_name</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.BuiltinSensorCfg.build"><code class="docutils literal notranslate"><span class="pre">BuiltinSensorCfg.build()</span></code></a></li>
 </ul>
 </li>
@@ -1990,6 +2134,7 @@ enabled.</p>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#contact-sensor">Contact Sensor</a><ul class="visible nav section-nav flex-column">
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor"><code class="docutils literal notranslate"><span class="pre">ContactSensor</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.__init__"><code class="docutils literal notranslate"><span class="pre">ContactSensor.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.primary_names"><code class="docutils literal notranslate"><span class="pre">ContactSensor.primary_names</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.edit_spec"><code class="docutils literal notranslate"><span class="pre">ContactSensor.edit_spec()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.initialize"><code class="docutils literal notranslate"><span class="pre">ContactSensor.initialize()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.ContactSensor.reset"><code class="docutils literal notranslate"><span class="pre">ContactSensor.reset()</span></code></a></li>
@@ -2046,6 +2191,9 @@ enabled.</p>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.edit_spec"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.edit_spec()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.initialize"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.initialize()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.set_context"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.set_context()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.num_rays"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.num_rays</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.num_frames"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.num_frames</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.num_rays_per_frame"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.num_rays_per_frame</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.debug_vis"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.debug_vis()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.prepare_rays"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.prepare_rays()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastSensor.raycast_kernel"><code class="docutils literal notranslate"><span class="pre">RayCastSensor.raycast_kernel()</span></code></a></li>
@@ -2081,6 +2229,8 @@ enabled.</p>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.hit_pos_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.hit_pos_w</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.pos_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.pos_w</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.quat_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.quat_w</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.frame_pos_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.frame_pos_w</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.frame_quat_w"><code class="docutils literal notranslate"><span class="pre">RayCastData.frame_quat_w</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.RayCastData.__init__"><code class="docutils literal notranslate"><span class="pre">RayCastData.__init__()</span></code></a></li>
 </ul>
 </li>
@@ -2129,8 +2279,9 @@ enabled.</p>
 </li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData"><code class="docutils literal notranslate"><span class="pre">CameraSensorData</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.rgb"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.rgb</span></code></a></li>
-<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.__init__"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.__init__()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.depth"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.depth</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.__init__"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.__init__()</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#mjlab.sensor.CameraSensorData.segmentation"><code class="docutils literal notranslate"><span class="pre">CameraSensorData.segmentation</span></code></a></li>
 </ul>
 </li>
 </ul>
@@ -2168,7 +2319,7 @@ By The mjlab Developers
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Feb 27, 2026.
+  Last updated on Apr 18, 2026.
   <br/>
 </p>
   </div>

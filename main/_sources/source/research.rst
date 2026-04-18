@@ -38,6 +38,10 @@ Papers that use mjlab. To add your work, open a pull request or post in
        Trajectory Optimization <https://arxiv.org/abs/2602.06827>`_
      - Dhedin, Taouil, Omar, Yu, Tao, Dai, Khadiv
      - 2026
+   * - `CLOT: Closed-Loop Global Motion Tracking for Whole-Body Humanoid
+       Teleoperation <https://arxiv.org/abs/2602.15060>`_
+     - Zhu, Cai, Yang, Ren, Xie, Wang, Wu, et al.
+     - 2026
 
 Projects
 --------
@@ -61,5 +65,11 @@ Projects built on mjlab. To add yours, open a pull request or post in
      - Velocity control for the Upkie wheeled biped.
    * - `unitreerobotics/unitree_rl_mjlab <https://github.com/unitreerobotics/unitree_rl_mjlab>`_
      - Official Unitree RL environments for Go2, G1, and H1\_2.
+   * - `pal-robotics/pal_mjlab <https://github.com/pal-robotics/pal_mjlab>`_
+     - PAL Robotics robots and tasks.
    * - `Msornerrrr/in-hand-rotation-mjlab <https://github.com/Msornerrrr/in-hand-rotation-mjlab>`_
      - Sim to real RL for in hand cube rotation with the LEAP Hand.
+   * - `project-instinct/InstinctMJ <https://github.com/project-instinct/InstinctMJ>`_
+     - mjlab version of Project-Instinct, a whole-body control toolchain to study Instinct-Level intelligence.
+   * - `lzyang2000/twist2_mjlab <https://github.com/lzyang2000/twist2_mjlab>`_
+     - mjlab port of `TWIST2 <https://arxiv.org/abs/2511.02832>`_.

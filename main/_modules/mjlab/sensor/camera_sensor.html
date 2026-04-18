@@ -56,7 +56,7 @@
     <link rel="search" title="Search" href="../../../search.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-    <meta name="docbuild:last-update" content="Feb 27, 2026"/>
+    <meta name="docbuild:last-update" content="Apr 18, 2026"/>
   </head>
   
   
@@ -177,7 +177,10 @@
         <p aria-level="2" class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../../../source/installation.html">Installation Guide</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../../source/tutorials.html">Tutorials</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../source/tutorials.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../source/tutorials/cartpole.html">Cartpole: Building Your First Environment</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/contributing.html">Contributing</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Concepts</span></p>
@@ -208,14 +211,19 @@
 <li class="toctree-l1"><a class="reference internal" href="../../../source/randomization.html">Domain Randomization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/curriculum.html">Curriculum</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/metrics.html">Metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../source/recorders.html">Recorders</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Training &amp; Debugging</span></p>
 <ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../../../source/training/rsl_rl.html">Training with RSL-RL</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../source/training/rsl_rl.html">Training with RSL-RL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../source/training/motion_imitation.html">Motion Imitation</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/viewers.html">Viewers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/training/distributed_training.html">Distributed Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/training/cloud.html">Cloud Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/debugging/nan_guard.html">NaN Guard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../source/debugging/export_scene.html">Export Scene</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="nav bd-sidenav">
@@ -408,7 +416,7 @@ document.write(`
 <span class="k">if</span> <span class="n">TYPE_CHECKING</span><span class="p">:</span>
   <span class="kn">from</span><span class="w"> </span><span class="nn">mjlab.sensor.sensor_context</span><span class="w"> </span><span class="kn">import</span> <span class="n">SensorContext</span>
 
-<span class="n">CameraDataType</span> <span class="o">=</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;rgb&quot;</span><span class="p">,</span> <span class="s2">&quot;depth&quot;</span><span class="p">]</span>
+<span class="n">CameraDataType</span> <span class="o">=</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;rgb&quot;</span><span class="p">,</span> <span class="s2">&quot;depth&quot;</span><span class="p">,</span> <span class="s2">&quot;segmentation&quot;</span><span class="p">]</span>
 
 <span class="c1"># Default MuJoCo fov, in degrees.</span>
 <span class="n">_DEFAULT_CAM_FOVY</span> <span class="o">=</span> <span class="mf">45.0</span>
@@ -467,7 +475,8 @@ document.write(`
 <span class="w">  </span><span class="sd">&quot;&quot;&quot;Image height in pixels.&quot;&quot;&quot;</span>
 
   <span class="n">data_types</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">CameraDataType</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;rgb&quot;</span><span class="p">,)</span>
-<span class="w">  </span><span class="sd">&quot;&quot;&quot;Data types to capture: any combination of &quot;rgb&quot; and &quot;depth&quot;.&quot;&quot;&quot;</span>
+<span class="w">  </span><span class="sd">&quot;&quot;&quot;Data types to capture: any combination of &quot;rgb&quot;, &quot;depth&quot;,</span>
+<span class="sd">  and &quot;segmentation&quot;.&quot;&quot;&quot;</span>
 
   <span class="n">use_textures</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
 <span class="w">  </span><span class="sd">&quot;&quot;&quot;Whether to use textures in rendering.&quot;&quot;&quot;</span>
@@ -488,7 +497,7 @@ document.write(`
 <span class="sd">  &quot;&quot;&quot;</span>
 
   <span class="k">def</span><span class="w"> </span><span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-    <span class="n">valid</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;rgb&quot;</span><span class="p">,</span> <span class="s2">&quot;depth&quot;</span><span class="p">}</span>
+    <span class="n">valid</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;rgb&quot;</span><span class="p">,</span> <span class="s2">&quot;depth&quot;</span><span class="p">,</span> <span class="s2">&quot;segmentation&quot;</span><span class="p">}</span>
     <span class="n">invalid</span> <span class="o">=</span> <span class="p">{</span><span class="n">dt</span> <span class="k">for</span> <span class="n">dt</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_types</span> <span class="k">if</span> <span class="n">dt</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">valid</span><span class="p">}</span>
     <span class="k">if</span> <span class="n">invalid</span><span class="p">:</span>
       <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid camera data types: </span><span class="si">{</span><span class="n">invalid</span><span class="si">}</span><span class="s2">. Valid types: </span><span class="si">{</span><span class="n">valid</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
@@ -512,6 +521,7 @@ document.write(`
 <span class="sd">  Shapes:</span>
 <span class="sd">    - rgb: [num_envs, height, width, 3] (uint8)</span>
 <span class="sd">    - depth: [num_envs, height, width, 1] (float32)</span>
+<span class="sd">    - segmentation: [num_envs, height, width, 1] (int32)</span>
 <span class="sd">  &quot;&quot;&quot;</span>
 
   <span class="n">rgb</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
@@ -520,7 +530,14 @@ document.write(`
 
   <span class="n">depth</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
 <span class="w">  </span><span class="sd">&quot;&quot;&quot;Depth image [num_envs, height, width, 1] (float32). None if not</span>
-<span class="sd">  enabled.&quot;&quot;&quot;</span></div>
+<span class="sd">  enabled.&quot;&quot;&quot;</span>
+
+  <span class="n">segmentation</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">  </span><span class="sd">&quot;&quot;&quot;Per-pixel geom IDs [num_envs, height, width, 1] (int32).</span>
+
+<span class="sd">  Values: &gt;= 0 for rigid geom IDs, -1 for background, -2 for flex</span>
+<span class="sd">  bodies. None if not enabled.</span>
+<span class="sd">  &quot;&quot;&quot;</span></div>
 
 
 
@@ -621,13 +638,17 @@ document.write(`
       <span class="p">)</span>
     <span class="n">rgb_data</span> <span class="o">=</span> <span class="kc">None</span>
     <span class="n">depth_data</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">seg_data</span> <span class="o">=</span> <span class="kc">None</span>
     <span class="k">if</span> <span class="s2">&quot;rgb&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">data_types</span><span class="p">:</span>
       <span class="n">rgb</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span><span class="o">.</span><span class="n">get_rgb</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_camera_idx</span><span class="p">)</span>
       <span class="n">rgb_data</span> <span class="o">=</span> <span class="n">rgb</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">clone_data</span> <span class="k">else</span> <span class="n">rgb</span>
     <span class="k">if</span> <span class="s2">&quot;depth&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">data_types</span><span class="p">:</span>
       <span class="n">depth</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span><span class="o">.</span><span class="n">get_depth</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_camera_idx</span><span class="p">)</span>
       <span class="n">depth_data</span> <span class="o">=</span> <span class="n">depth</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">clone_data</span> <span class="k">else</span> <span class="n">depth</span>
-    <span class="k">return</span> <span class="n">CameraSensorData</span><span class="p">(</span><span class="n">rgb</span><span class="o">=</span><span class="n">rgb_data</span><span class="p">,</span> <span class="n">depth</span><span class="o">=</span><span class="n">depth_data</span><span class="p">)</span></div>
+    <span class="k">if</span> <span class="s2">&quot;segmentation&quot;</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">data_types</span><span class="p">:</span>
+      <span class="n">seg</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ctx</span><span class="o">.</span><span class="n">get_segmentation</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_camera_idx</span><span class="p">)</span>
+      <span class="n">seg_data</span> <span class="o">=</span> <span class="n">seg</span><span class="o">.</span><span class="n">clone</span><span class="p">()</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">cfg</span><span class="o">.</span><span class="n">clone_data</span> <span class="k">else</span> <span class="n">seg</span>
+    <span class="k">return</span> <span class="n">CameraSensorData</span><span class="p">(</span><span class="n">rgb</span><span class="o">=</span><span class="n">rgb_data</span><span class="p">,</span> <span class="n">depth</span><span class="o">=</span><span class="n">depth_data</span><span class="p">,</span> <span class="n">segmentation</span><span class="o">=</span><span class="n">seg_data</span><span class="p">)</span></div>
 
 </pre></div>
 
@@ -676,7 +697,7 @@ By The mjlab Developers
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Feb 27, 2026.
+  Last updated on Apr 18, 2026.
   <br/>
 </p>
   </div>

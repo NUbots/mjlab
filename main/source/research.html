@@ -59,7 +59,7 @@
     <link rel="prev" title="FAQ &amp; Troubleshooting" href="faq.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-    <meta name="docbuild:last-update" content="Feb 27, 2026"/>
+    <meta name="docbuild:last-update" content="Apr 18, 2026"/>
   </head>
   
   
@@ -178,7 +178,10 @@
         <p aria-level="2" class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="installation.html">Installation Guide</a></li>
-<li class="toctree-l1"><a class="reference internal" href="tutorials.html">Tutorials</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="tutorials.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/cartpole.html">Cartpole: Building Your First Environment</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Concepts</span></p>
@@ -209,14 +212,19 @@
 <li class="toctree-l1"><a class="reference internal" href="randomization.html">Domain Randomization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="curriculum.html">Curriculum</a></li>
 <li class="toctree-l1"><a class="reference internal" href="metrics.html">Metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="recorders.html">Recorders</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Training &amp; Debugging</span></p>
 <ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="training/rsl_rl.html">Training with RSL-RL</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="training/rsl_rl.html">Training with RSL-RL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="training/motion_imitation.html">Motion Imitation</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="viewers.html">Viewers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="training/distributed_training.html">Distributed Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="training/cloud.html">Cloud Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="debugging/nan_guard.html">NaN Guard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="debugging/export_scene.html">Export Scene</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="nav bd-sidenav">
@@ -508,6 +516,11 @@ Trajectory Optimization</a></p></td>
 <td><p>Dhedin, Taouil, Omar, Yu, Tao, Dai, Khadiv</p></td>
 <td><p>2026</p></td>
 </tr>
+<tr class="row-even"><td><p><a class="reference external" href="https://arxiv.org/abs/2602.15060">CLOT: Closed-Loop Global Motion Tracking for Whole-Body Humanoid
+Teleoperation</a></p></td>
+<td><p>Zhu, Cai, Yang, Ren, Xie, Wang, Wu, et al.</p></td>
+<td><p>2026</p></td>
+</tr>
 </tbody>
 </table>
 </div>
@@ -542,8 +555,17 @@ Trajectory Optimization</a></p></td>
 <tr class="row-even"><td><p><a class="reference external" href="https://github.com/unitreerobotics/unitree_rl_mjlab">unitreerobotics/unitree_rl_mjlab</a></p></td>
 <td><p>Official Unitree RL environments for Go2, G1, and H1_2.</p></td>
 </tr>
-<tr class="row-odd"><td><p><a class="reference external" href="https://github.com/Msornerrrr/in-hand-rotation-mjlab">Msornerrrr/in-hand-rotation-mjlab</a></p></td>
+<tr class="row-odd"><td><p><a class="reference external" href="https://github.com/pal-robotics/pal_mjlab">pal-robotics/pal_mjlab</a></p></td>
+<td><p>PAL Robotics robots and tasks.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference external" href="https://github.com/Msornerrrr/in-hand-rotation-mjlab">Msornerrrr/in-hand-rotation-mjlab</a></p></td>
 <td><p>Sim to real RL for in hand cube rotation with the LEAP Hand.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference external" href="https://github.com/project-instinct/InstinctMJ">project-instinct/InstinctMJ</a></p></td>
+<td><p>mjlab version of Project-Instinct, a whole-body control toolchain to study Instinct-Level intelligence.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference external" href="https://github.com/lzyang2000/twist2_mjlab">lzyang2000/twist2_mjlab</a></p></td>
+<td><p>mjlab port of <a class="reference external" href="https://arxiv.org/abs/2511.02832">TWIST2</a>.</p></td>
 </tr>
 </tbody>
 </table>
@@ -632,7 +654,7 @@ By The mjlab Developers
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Feb 27, 2026.
+  Last updated on Apr 18, 2026.
   <br/>
 </p>
   </div>

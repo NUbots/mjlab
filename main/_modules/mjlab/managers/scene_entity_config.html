@@ -56,7 +56,7 @@
     <link rel="search" title="Search" href="../../../search.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-    <meta name="docbuild:last-update" content="Feb 27, 2026"/>
+    <meta name="docbuild:last-update" content="Apr 18, 2026"/>
   </head>
   
   
@@ -177,7 +177,10 @@
         <p aria-level="2" class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../../../source/installation.html">Installation Guide</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../../../source/tutorials.html">Tutorials</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../source/tutorials.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../source/tutorials/cartpole.html">Cartpole: Building Your First Environment</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/contributing.html">Contributing</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Concepts</span></p>
@@ -208,14 +211,19 @@
 <li class="toctree-l1"><a class="reference internal" href="../../../source/randomization.html">Domain Randomization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/curriculum.html">Curriculum</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/metrics.html">Metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../source/recorders.html">Recorders</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Training &amp; Debugging</span></p>
 <ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../../../source/training/rsl_rl.html">Training with RSL-RL</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../../../source/training/rsl_rl.html">Training with RSL-RL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../source/training/motion_imitation.html">Motion Imitation</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/viewers.html">Viewers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/training/distributed_training.html">Distributed Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/training/cloud.html">Cloud Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../../../source/debugging/nan_guard.html">NaN Guard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../source/debugging/export_scene.html">Export Scene</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="nav bd-sidenav">
@@ -440,6 +448,7 @@ document.write(`
     <span class="s2">&quot;num_materials&quot;</span><span class="p">,</span>
     <span class="s2">&quot;material&quot;</span><span class="p">,</span>
   <span class="p">),</span>
+  <span class="n">_FieldConfig</span><span class="p">(</span><span class="s2">&quot;pair_names&quot;</span><span class="p">,</span> <span class="s2">&quot;pair_ids&quot;</span><span class="p">,</span> <span class="s2">&quot;find_pairs&quot;</span><span class="p">,</span> <span class="s2">&quot;num_pairs&quot;</span><span class="p">,</span> <span class="s2">&quot;pair&quot;</span><span class="p">),</span>
 <span class="p">]</span>
 
 
@@ -511,6 +520,12 @@ document.write(`
   <span class="n">material_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="nb">slice</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">))</span>
 <span class="w">  </span><span class="sd">&quot;&quot;&quot;IDs of materials to include. Can be a list or slice.&quot;&quot;&quot;</span>
 
+  <span class="n">pair_names</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="w">  </span><span class="sd">&quot;&quot;&quot;Names of contact pairs to include. Can be a single string or tuple.&quot;&quot;&quot;</span>
+
+  <span class="n">pair_ids</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="nb">slice</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">))</span>
+<span class="w">  </span><span class="sd">&quot;&quot;&quot;IDs of contact pairs to include. Can be a list or slice.&quot;&quot;&quot;</span>
+
   <span class="n">preserve_order</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
 <span class="w">  </span><span class="sd">&quot;&quot;&quot;If True, maintains the order of components as specified.&quot;&quot;&quot;</span>
 
@@ -559,32 +574,37 @@ document.write(`
 
     <span class="c1"># Normalize single values to lists for uniform processing.</span>
     <span class="n">names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_normalize_to_list</span><span class="p">(</span><span class="n">names</span><span class="p">)</span>
-    <span class="k">if</span> <span class="n">names</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-      <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">names_attr</span><span class="p">,</span> <span class="n">names</span><span class="p">)</span>
-
     <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ids</span><span class="p">,</span> <span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="nb">list</span><span class="p">)):</span>
       <span class="n">ids</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_normalize_to_list</span><span class="p">(</span><span class="n">ids</span><span class="p">)</span>
       <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">ids_attr</span><span class="p">,</span> <span class="n">ids</span><span class="p">)</span>
 
     <span class="c1"># Handle three resolution cases.</span>
     <span class="k">if</span> <span class="n">names</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ids</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+      <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">names_attr</span><span class="p">,</span> <span class="n">names</span><span class="p">)</span>
       <span class="bp">self</span><span class="o">.</span><span class="n">_validate_consistency</span><span class="p">(</span>
         <span class="n">names</span><span class="p">,</span> <span class="n">ids</span><span class="p">,</span> <span class="n">entity_all_names</span><span class="p">,</span> <span class="n">find_method</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">kind_label</span>
       <span class="p">)</span>
     <span class="k">elif</span> <span class="n">names</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
       <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_names_to_ids</span><span class="p">(</span>
-        <span class="n">names</span><span class="p">,</span> <span class="n">entity_all_names</span><span class="p">,</span> <span class="n">entity_count</span><span class="p">,</span> <span class="n">find_method</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">ids_attr</span>
+        <span class="n">names</span><span class="p">,</span>
+        <span class="n">entity_all_names</span><span class="p">,</span>
+        <span class="n">entity_count</span><span class="p">,</span>
+        <span class="n">find_method</span><span class="p">,</span>
+        <span class="n">config</span><span class="o">.</span><span class="n">names_attr</span><span class="p">,</span>
+        <span class="n">config</span><span class="o">.</span><span class="n">ids_attr</span><span class="p">,</span>
       <span class="p">)</span>
     <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">ids</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
       <span class="bp">self</span><span class="o">.</span><span class="n">_resolve_ids_to_names</span><span class="p">(</span><span class="n">ids</span><span class="p">,</span> <span class="n">entity_all_names</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">names_attr</span><span class="p">)</span>
 
-  <span class="k">def</span><span class="w"> </span><span class="nf">_normalize_to_list</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">list</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+  <span class="k">def</span><span class="w"> </span><span class="nf">_normalize_to_list</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">value</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">int</span> <span class="o">|</span> <span class="nb">tuple</span> <span class="o">|</span> <span class="nb">list</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Convert single values to lists for uniform processing.&quot;&quot;&quot;</span>
     <span class="k">if</span> <span class="n">value</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
       <span class="k">return</span> <span class="kc">None</span>
     <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="p">(</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">)):</span>
       <span class="k">return</span> <span class="p">[</span><span class="n">value</span><span class="p">]</span>
-    <span class="k">return</span> <span class="n">value</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+      <span class="k">return</span> <span class="n">value</span>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">value</span><span class="p">)</span>
 
   <span class="k">def</span><span class="w"> </span><span class="nf">_validate_consistency</span><span class="p">(</span>
     <span class="bp">self</span><span class="p">,</span>
@@ -615,13 +635,17 @@ document.write(`
     <span class="n">entity_all_names</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
     <span class="n">entity_count</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
     <span class="n">find_method</span><span class="p">,</span>
+    <span class="n">names_attr</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
     <span class="n">ids_attr</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
   <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Resolve names to IDs, optimizing to slice(None) when all are selected.&quot;&quot;&quot;</span>
-    <span class="n">found_ids</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">find_method</span><span class="p">(</span><span class="n">names</span><span class="p">,</span> <span class="n">preserve_order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">preserve_order</span><span class="p">)</span>
+    <span class="n">found_ids</span><span class="p">,</span> <span class="n">found_names</span> <span class="o">=</span> <span class="n">find_method</span><span class="p">(</span><span class="n">names</span><span class="p">,</span> <span class="n">preserve_order</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">preserve_order</span><span class="p">)</span>
+
+    <span class="c1"># Keep names and IDs in the same order.</span>
+    <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">names_attr</span><span class="p">,</span> <span class="n">found_names</span><span class="p">)</span>
 
     <span class="c1"># Optimize to slice(None) if all components are selected in order.</span>
-    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">found_ids</span><span class="p">)</span> <span class="o">==</span> <span class="n">entity_count</span> <span class="ow">and</span> <span class="n">names</span> <span class="o">==</span> <span class="n">entity_all_names</span><span class="p">:</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">found_ids</span><span class="p">)</span> <span class="o">==</span> <span class="n">entity_count</span> <span class="ow">and</span> <span class="n">found_names</span> <span class="o">==</span> <span class="nb">list</span><span class="p">(</span><span class="n">entity_all_names</span><span class="p">):</span>
       <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ids_attr</span><span class="p">,</span> <span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">))</span>
     <span class="k">else</span><span class="p">:</span>
       <span class="nb">setattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ids_attr</span><span class="p">,</span> <span class="n">found_ids</span><span class="p">)</span>
@@ -680,7 +704,7 @@ By The mjlab Developers
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Feb 27, 2026.
+  Last updated on Apr 18, 2026.
   <br/>
 </p>
   </div>

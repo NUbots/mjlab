@@ -59,7 +59,7 @@
     <link rel="prev" title="Architecture Overview" href="../architecture_overview.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-    <meta name="docbuild:last-update" content="Feb 27, 2026"/>
+    <meta name="docbuild:last-update" content="Apr 18, 2026"/>
   </head>
   
   
@@ -178,7 +178,10 @@
         <p aria-level="2" class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul class="nav bd-sidenav">
 <li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation Guide</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../tutorials.html">Tutorials</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../tutorials.html">Tutorials</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../tutorials/cartpole.html">Cartpole: Building Your First Environment</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="../contributing.html">Contributing</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Concepts</span></p>
@@ -209,14 +212,19 @@
 <li class="toctree-l1"><a class="reference internal" href="../randomization.html">Domain Randomization</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../curriculum.html">Curriculum</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../metrics.html">Metrics</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../recorders.html">Recorders</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Training &amp; Debugging</span></p>
 <ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="../training/rsl_rl.html">Training with RSL-RL</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../training/rsl_rl.html">Training with RSL-RL</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="../training/motion_imitation.html">Motion Imitation</a></li>
+</ul>
+</details></li>
 <li class="toctree-l1"><a class="reference internal" href="../viewers.html">Viewers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../training/distributed_training.html">Distributed Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../training/cloud.html">Cloud Training</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../debugging/nan_guard.html">NaN Guard</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../debugging/export_scene.html">Export Scene</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="nav bd-sidenav">
@@ -598,13 +606,11 @@ everything into a shared <code class="docutils literal notranslate"><span class=
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">spec_fn</span> <span class="o">=</span> <span class="k">lambda</span><span class="p">:</span> <span class="n">mujoco</span><span class="o">.</span><span class="n">MjSpec</span><span class="o">.</span><span class="n">from_file</span><span class="p">(</span><span class="s2">&quot;robot.xml&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
-<p>For anything more involved, use a regular function. The asset zoo robots
-all follow this pattern: load the XML, attach mesh assets, and return
-the spec.</p>
+<p>For anything more involved, use a regular function. MuJoCo resolves mesh
+assets from disk automatically, so <code class="docutils literal notranslate"><span class="pre">get_spec</span></code> only needs to load the
+XML:</p>
 <div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">get_spec</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">mujoco</span><span class="o">.</span><span class="n">MjSpec</span><span class="p">:</span>
-    <span class="n">spec</span> <span class="o">=</span> <span class="n">mujoco</span><span class="o">.</span><span class="n">MjSpec</span><span class="o">.</span><span class="n">from_file</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">ROBOT_XML</span><span class="p">))</span>
-    <span class="n">spec</span><span class="o">.</span><span class="n">assets</span> <span class="o">=</span> <span class="n">get_assets</span><span class="p">(</span><span class="n">spec</span><span class="o">.</span><span class="n">meshdir</span><span class="p">)</span>
-    <span class="k">return</span> <span class="n">spec</span>
+    <span class="k">return</span> <span class="n">mujoco</span><span class="o">.</span><span class="n">MjSpec</span><span class="o">.</span><span class="n">from_file</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">ROBOT_XML</span><span class="p">))</span>
 </pre></div>
 </div>
 <p>Because <code class="docutils literal notranslate"><span class="pre">spec_fn</span></code> is an arbitrary callable, you can perform any
@@ -890,7 +896,7 @@ By The mjlab Developers
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on Feb 27, 2026.
+  Last updated on Apr 18, 2026.
   <br/>
 </p>
   </div>
