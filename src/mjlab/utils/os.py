@@ -1,8 +1,37 @@
 import re
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 import yaml
+
+
+def update_assets(
+  assets: Dict[str, Any],
+  path: str | Path,
+  meshdir: str | None = None,
+  glob: str = "*",
+  recursive: bool = False,
+):
+  """Update assets dictionary with files from a directory.
+
+  This function reads files from a directory and adds them to an assets dictionary,
+  with keys formatted to include the meshdir prefix when specified.
+
+  Args:
+    assets: Dictionary to update with file contents. Keys are asset paths, values are
+      file contents as bytes.
+    path: Path to directory containing asset files.
+    meshdir: Optional mesh directory prefix, typically `spec.meshdir`. If provided,
+      will be prepended to asset keys (e.g., "mesh.obj" becomes "custom_dir/mesh.obj").
+    glob: Glob pattern for file matching. Defaults to "*" (all files).
+    recursive: If True, recursively search subdirectories.
+  """
+  for f in Path(path).glob(glob):
+    if f.is_file():
+      asset_key = f"{meshdir}/{f.name}" if meshdir else f.name
+      assets[asset_key] = f.read_bytes()
+    elif f.is_dir() and recursive:
+      update_assets(assets, f, meshdir, glob, recursive)
 
 
 def dump_yaml(filename: Path, data: Dict, sort_keys: bool = False) -> None:
@@ -73,28 +102,47 @@ def get_wandb_checkpoint_path(
   # Extract run_id from path (e.g., "entity/project/run_id" -> "run_id").
   run_id = str(run_path).split("/")[-1]
   download_dir = log_path / "wandb_checkpoints" / run_id
+  download_dir.mkdir(parents=True, exist_ok=True)
 
   # Query wandb API to find the latest checkpoint.
   api = wandb.Api()
   wandb_run = api.run(str(run_path))
-  files = [
-    file.name
-    for file in wandb_run.files(pattern="model_%.pt")
-    if re.match(r"^model_\d+\.pt$", file.name)
-  ]
-  if checkpoint_name is None:
-    checkpoint_file = max(files, key=lambda x: int(x.split("_")[1].split(".")[0]))
+
+  checkpoint_candidates: list[str] = []
+  if checkpoint_name is not None:
+    checkpoint_candidates.append(checkpoint_name)
   else:
-    if checkpoint_name not in files:
-      raise ValueError(
-        f"Checkpoint '{checkpoint_name}' not found in run {run_path}."
-        f" Available: {files}"
-      )
-    checkpoint_file = checkpoint_name
+    # Prefer the latest model_<step>.pt if listing files succeeds.
+    try:
+      files = [
+        file.name
+        for file in wandb_run.files()
+        if re.match(r"^model_\d+\.pt$", file.name)
+      ]
+      if files:
+        latest_model = max(files, key=lambda x: int(x.split("_")[1].split(".")[0]))
+        checkpoint_candidates.append(latest_model)
+    except Exception:
+      pass
 
-  checkpoint_path = download_dir / checkpoint_file
+    # If listing fails or misses artifacts, infer from run step and common names.
+    run_step = wandb_run.summary.get("_step") if wandb_run.summary else None
+    if isinstance(run_step, int):
+      checkpoint_candidates.append(f"model_{run_step}.pt")
+    elif isinstance(run_step, float) and run_step.is_integer():
+      checkpoint_candidates.append(f"model_{int(run_step)}.pt")
+    checkpoint_candidates.extend(["last.pt", "model.pt"])
 
-    wandb_file = wandb_run.file(str(checkpoint_file))
+  # De-duplicate candidates while preserving order.
+  checkpoint_candidates = list(dict.fromkeys(checkpoint_candidates))
+
+  last_error: Exception | None = None
+  for candidate in checkpoint_candidates:
+    checkpoint_path = download_dir / candidate
+    if checkpoint_path.exists():
+      return checkpoint_path, True
+
+    wandb_file = wandb_run.file(candidate)
     if wandb_file is None:
       continue
 
@@ -103,7 +151,6 @@ def get_wandb_checkpoint_path(
       return checkpoint_path, False
     except Exception as exc:
       last_error = exc
-      continue
 
   message = (
     f"Could not download any checkpoint from W&B run '{run_path}'. "
