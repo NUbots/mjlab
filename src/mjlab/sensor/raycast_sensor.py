@@ -1,159 +1,10 @@
 """Raycast sensor for terrain and obstacle detection.
 
-Ray Patterns
-------------
+Provides :class:`RayCastSensor` and :class:`RayCastSensorCfg` for BVH-accelerated
+raycasting with grid, pinhole camera, and ring patterns. Supports multi-frame
+attachment, configurable ray alignment, and geom group filtering.
 
-This module provides two ray pattern types for different use cases:
-
-**Grid Pattern** - Parallel rays in a 2D grid::
-
-    Camera at any height:
-          ↓   ↓   ↓   ↓   ↓      ← All rays point same direction
-          ↓   ↓   ↓   ↓   ↓
-          ↓   ↓   ↓   ↓   ↓
-        ──●───●───●───●───●──    ← Fixed spacing (e.g., 10cm apart)
-             Ground
-
-- Rays are parallel (all point in the same direction, e.g., -Z down)
-- Spacing is defined in world units (meters)
-- Height doesn't affect the hit pattern - same footprint regardless of altitude
-- Good for: height maps, terrain scanning with consistent spatial sampling
-
-**Pinhole Camera Pattern** - Diverging rays from a single point::
-
-    Camera LOW:                    Camera HIGH:
-             📷                            📷
-            /|\\                          /  |  \\
-           / | \\                        /   |   \\
-          /  |  \\                      /    |    \\
-        ─●───●───●─                 ───●─────●─────●───
-        (small footprint)           (large footprint)
-
-- Rays diverge from a single point (like light entering a camera)
-- FOV is fixed in angular units (degrees)
-- Higher altitude → wider ground coverage, more spread between hits
-- Lower altitude → tighter ground coverage, denser hits
-- Good for: simulating depth cameras, LiDAR with angular resolution
-
-**Pattern Comparison**:
-
-============== ==================== ==========================
-Aspect         Grid                 Pinhole
-============== ==================== ==========================
-Ray direction  All parallel         Diverge from origin
-Spacing        Meters               Degrees (FOV)
-Height affect  No                   Yes
-Real-world     Orthographic proj.   Perspective camera / LiDAR
-============== ==================== ==========================
-
-The pinhole behavior matches real depth sensors (RealSense, LiDAR) - when
-you're farther from an object, each pixel covers more area.
-
-
-Frame Attachment
-----------------
-
-Rays are attached to a frame in the scene via ``ObjRef``. Supported frame types:
-
-- **body**: Attach to a body's origin. Rays follow body position and orientation.
-- **site**: Attach to a site. Useful for precise placement or offset from body.
-- **geom**: Attach to a geometry. Useful for sensors mounted on specific parts.
-
-Example::
-
-    from mjlab.sensor import ObjRef, RayCastSensorCfg, GridPatternCfg
-
-    cfg = RayCastSensorCfg(
-        name="terrain_scan",
-        frame=ObjRef(type="body", name="base", entity="robot"),
-        pattern=GridPatternCfg(size=(1.0, 1.0), resolution=0.1),
-    )
-
-The ``exclude_parent_body`` option (default: True) prevents rays from hitting
-the body they're attached to.
-
-
-Ray Alignment
--------------
-
-The ``ray_alignment`` setting controls how rays orient relative to the frame::
-
-    Robot tilted 30°:
-
-    "base" (default)          "yaw"                    "world"
-    Rays tilt with body       Rays stay level          Rays fixed to world
-          ↘ ↓ ↙                    ↓ ↓ ↓                    ↓ ↓ ↓
-           \\|/                     |||                      |||
-            🤖  ← tilted            🤖  ← tilted             🤖  ← tilted
-           /                       /                        /
-
-- **base**: Full position + rotation. Rays rotate with the body. Good for
-  body-mounted sensors that should scan relative to the robot's orientation.
-
-- **yaw**: Position + yaw only, ignores pitch/roll. Rays always point straight
-  down regardless of body tilt. Good for height maps where you want consistent
-  vertical sampling even when the robot is on a slope.
-
-- **world**: Fixed in world frame, only position follows body. Rays always
-  point in a fixed world direction. Good for gravity-aligned measurements.
-
-
-Debug Visualization
--------------------
-
-Enable visualization with ``debug_vis=True`` and customize via ``VizCfg``::
-
-    cfg = RayCastSensorCfg(
-        name="scan",
-        frame=ObjRef(type="body", name="base", entity="robot"),
-        pattern=GridPatternCfg(),
-        debug_vis=True,
-        viz=RayCastSensorCfg.VizCfg(
-            hit_color=(0, 1, 0, 0.8),      # Green for hits
-            miss_color=(1, 0, 0, 0.4),     # Red for misses
-            show_rays=True,                 # Draw ray arrows
-            show_normals=True,              # Draw surface normals
-            normal_color=(1, 1, 0, 1),     # Yellow normals
-        ),
-    )
-
-Visualization options:
-
-- ``hit_color`` / ``miss_color``: RGBA colors for ray arrows
-- ``hit_sphere_color`` / ``hit_sphere_radius``: Spheres at hit points
-- ``show_rays``: Draw arrows from origin to hit/miss points
-- ``show_normals`` / ``normal_color`` / ``normal_length``: Surface normal arrows
-
-
-Geom Group Filtering
---------------------
-
-MuJoCo geoms can be assigned to groups 0-5. Use ``include_geom_groups`` to
-filter which groups the rays can hit::
-
-    cfg = RayCastSensorCfg(
-        name="terrain_only",
-        frame=ObjRef(type="body", name="base", entity="robot"),
-        pattern=GridPatternCfg(),
-        include_geom_groups=(0, 1),  # Only hit geoms in groups 0 and 1
-    )
-
-This is useful for ignoring certain geometry (e.g., visual-only geoms in
-group 3) while still detecting collisions with terrain (group 0).
-
-
-Output Data
------------
-
-Access sensor data via the ``data`` property, which returns ``RayCastData``:
-
-- ``distances``: [B, N] Distance to hit, or -1 if no hit / beyond max_distance
-- ``hit_pos_w``: [B, N, 3] World-space hit positions
-- ``normals_w``: [B, N, 3] Surface normals at hit points (world frame)
-- ``pos_w``: [B, 3] Sensor frame position
-- ``quat_w``: [B, 4] Sensor frame orientation (w, x, y, z)
-
-Where B = number of environments, N = number of rays.
+See :doc:`/sensors/raycast_sensor` for usage guide and examples.
 """
 
 from __future__ import annotations
@@ -177,12 +28,25 @@ if TYPE_CHECKING:
   from mjlab.sensor.sensor_context import SensorContext
   from mjlab.viewer.debug_visualizer import DebugVisualizer
 
-
-# NOTE: Need to define this here because it's not publicly exposed by mujoco_warp.
-vec6 = wp.types.vector(length=6, dtype=float)
-
-# Type aliases for configuration choices.
 RayAlignment = Literal["base", "yaw", "world"]
+
+# NOTE: Not publicly exposed by mujoco_warp.
+_vec6 = wp.types.vector(length=6, dtype=float)
+_ALL_GROUPS = _vec6(-1, -1, -1, -1, -1, -1)
+
+
+def _geom_groups_to_vec6(groups: tuple[int, ...] | None):  # -> _vec6
+  """Convert geom group tuple to mujoco_warp vec6 format.
+
+  In the vec6 format, -1 means include and 0 means exclude.
+  """
+  if groups is None:
+    return _ALL_GROUPS
+  out = [0, 0, 0, 0, 0, 0]
+  for g in groups:
+    if 0 <= g <= 5:
+      out[g] = -1
+  return _vec6(*out)
 
 
 @dataclass
@@ -349,7 +213,102 @@ class PinholeCameraPatternCfg:
     return local_offsets, local_directions
 
 
-PatternCfg = GridPatternCfg | PinholeCameraPatternCfg
+@dataclass
+class RingPatternCfg:
+  """Ring pattern - rays in concentric rings around the origin.
+
+  Useful for per-site height sensing where you want to sample the
+  terrain around each attachment frame.
+  """
+
+  @dataclass
+  class Ring:
+    """A single ring in the pattern."""
+
+    radius: float
+    """Radius of this ring in meters."""
+
+    num_samples: int
+    """Number of evenly spaced sample points on this ring."""
+
+  rings: tuple[Ring, ...]
+  """Ring definitions. Multiple rings create a concentric pattern."""
+
+  include_center: bool = True
+  """Whether to include a ray at the center (zero offset)."""
+
+  direction: tuple[float, float, float] = (0.0, 0.0, -1.0)
+  """Ray direction in frame-local coordinates."""
+
+  @classmethod
+  def single_ring(
+    cls,
+    radius: float = 0.1,
+    num_samples: int = 8,
+    include_center: bool = True,
+    direction: tuple[float, float, float] = (0.0, 0.0, -1.0),
+  ) -> RingPatternCfg:
+    """Create a single-ring pattern.
+
+    Args:
+      radius: Ring radius in meters.
+      num_samples: Number of evenly spaced points on the ring.
+      include_center: Whether to include a center ray.
+      direction: Ray direction in frame-local coordinates.
+
+    Returns:
+      RingPatternCfg with one ring.
+    """
+    return cls(
+      rings=(cls.Ring(radius, num_samples),),
+      include_center=include_center,
+      direction=direction,
+    )
+
+  def generate_rays(
+    self, mj_model: mujoco.MjModel | None, device: str
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Generate ray pattern.
+
+    Args:
+      mj_model: MuJoCo model (unused for ring pattern).
+      device: Device for tensor operations.
+
+    Returns:
+      Tuple of (local_offsets [N, 3], local_directions [N, 3]).
+    """
+    del mj_model
+    offsets: list[torch.Tensor] = []
+
+    if self.include_center:
+      offsets.append(torch.zeros(3, device=device, dtype=torch.float32))
+
+    for ring in self.rings:
+      for i in range(ring.num_samples):
+        angle = 2.0 * math.pi * i / ring.num_samples
+        offsets.append(
+          torch.tensor(
+            [
+              ring.radius * math.cos(angle),
+              ring.radius * math.sin(angle),
+              0.0,
+            ],
+            device=device,
+            dtype=torch.float32,
+          )
+        )
+
+    local_offsets = torch.stack(offsets)  # [N, 3]
+    num_rays = local_offsets.shape[0]
+
+    direction = torch.tensor(self.direction, device=device, dtype=torch.float32)
+    direction = direction / direction.norm()
+    local_directions = direction.unsqueeze(0).expand(num_rays, 3).clone()
+
+    return local_offsets, local_directions
+
+
+PatternCfg = GridPatternCfg | PinholeCameraPatternCfg | RingPatternCfg
 
 
 @dataclass
@@ -362,7 +321,10 @@ class RayCastData:
   """
 
   distances: torch.Tensor
-  """[B, N] Distance to hit point. -1 if no hit."""
+  """[B, N] Distance to hit point. -1 if no hit.
+
+  N = num_frames * num_rays_per_frame.
+  """
 
   normals_w: torch.Tensor
   """[B, N, 3] Surface normal at hit point (world frame). Zero if no hit."""
@@ -371,17 +333,23 @@ class RayCastData:
   """[B, N, 3] Hit position in world frame. Ray origin if no hit."""
 
   pos_w: torch.Tensor
-  """[B, 3] Frame position in world coordinates."""
+  """[B, 3] First frame position in world coordinates."""
 
   quat_w: torch.Tensor
-  """[B, 4] Frame orientation quaternion (w, x, y, z) in world coordinates."""
+  """[B, 4] First frame orientation quaternion (w, x, y, z)."""
+
+  frame_pos_w: torch.Tensor
+  """[B, F, 3] All frame positions in world coordinates."""
+
+  frame_quat_w: torch.Tensor
+  """[B, F, 4] All frame orientations (w, x, y, z)."""
 
 
 @dataclass
 class RayCastSensorCfg(SensorCfg):
   """Raycast sensor configuration.
 
-  Supports multiple ray patterns (grid, pinhole camera) and alignment modes.
+  Supports multiple ray patterns (grid, pinhole camera, ring) and alignment modes.
   """
 
   @dataclass
@@ -412,18 +380,25 @@ class RayCastSensorCfg(SensorCfg):
     normal_length: float = 5.0
     """Length of surface normal arrows (multiplier of meansize)."""
 
-  frame: ObjRef
-  """Body or site to attach rays to."""
+  frame: ObjRef | tuple[ObjRef, ...]
+  """Body, site, or geom to attach rays to.
+
+  Pass a single ``ObjRef`` for one frame, or a tuple for multi-frame
+  sensing (e.g. per-foot height sensors). Each frame's parent body is
+  excluded independently when ``exclude_parent_body`` is True.
+  """
 
   pattern: PatternCfg = field(default_factory=GridPatternCfg)
   """Ray pattern configuration. Defaults to GridPatternCfg."""
 
   ray_alignment: RayAlignment = "base"
-  """How rays align with the frame.
+  """How rays are oriented relative to the frame. Controls direction only;
+  the ray origin is always the physical frame position (``site_xpos`` /
+  ``geom_xpos`` / ``body_xpos``).
 
-  - "base": Full position + rotation (default).
-  - "yaw": Position + yaw only, ignores pitch/roll (good for height maps).
-  - "world": Fixed in world frame, position only follows body.
+  - "base": Full rotation (default). Rays rotate with the body.
+  - "yaw": Yaw only, ignores pitch/roll (good for height maps).
+  - "world": Fixed in world frame, rays always point the same direction.
   """
 
   max_distance: float = 10.0
@@ -462,13 +437,13 @@ class RayCastSensor(Sensor[RayCastData]):
     self._device: str | None = None
     self._wp_device: wp.context.Device | None = None
 
-    self._frame_body_id: int | None = None
-    self._frame_site_id: int | None = None
-    self._frame_geom_id: int | None = None
-    self._frame_type: Literal["body", "site", "geom"] = "body"
+    # Per-frame info: list of (frame_type, obj_id, body_id).
+    self._frame_infos: list[tuple[Literal["body", "site", "geom"], int, int]] = []
+    self._num_frames: int = 0
+    self._num_rays_per_frame: int = 0
 
     self._local_offsets: torch.Tensor | None = None
-    self._local_directions: torch.Tensor | None = None  # [N, 3] per-ray directions
+    self._local_directions: torch.Tensor | None = None  # [rays_per_frame, 3]
     self._num_rays: int = 0
 
     self._ray_pnt: wp.array | None = None
@@ -477,19 +452,22 @@ class RayCastSensor(Sensor[RayCastData]):
     self._ray_geomid: wp.array | None = None
     self._ray_normal: wp.array | None = None
     self._ray_bodyexclude: wp.array | None = None
-    self._geomgroup = vec6(-1, -1, -1, -1, -1, -1)
+    self._geomgroup = _vec6(-1, -1, -1, -1, -1, -1)
 
     self._distances: torch.Tensor | None = None
     self._normals_w: torch.Tensor | None = None
     self._hit_pos_w: torch.Tensor | None = None
     self._pos_w: torch.Tensor | None = None
     self._quat_w: torch.Tensor | None = None
+    self._frame_pos_w: torch.Tensor | None = None
+    self._frame_quat_w: torch.Tensor | None = None
 
     self._cached_world_origins: torch.Tensor | None = None
     self._cached_world_rays: torch.Tensor | None = None
     self._cached_frame_pos: torch.Tensor | None = None
     self._cached_frame_mat: torch.Tensor | None = None
 
+    self._debug_vis_enabled: bool = True
     self._ctx: SensorContext | None = None
 
   def edit_spec(
@@ -513,33 +491,39 @@ class RayCastSensor(Sensor[RayCastData]):
     self._wp_device = wp.get_device(device)
     num_envs = data.nworld
 
-    frame = self.cfg.frame
-    frame_name = frame.prefixed_name()
+    # Normalize frame to tuple.
+    frames = self.cfg.frame
+    if isinstance(frames, ObjRef):
+      frames = (frames,)
 
-    if frame.type == "body":
-      self._frame_body_id = mj_model.body(frame_name).id
-      self._frame_type = "body"
-    elif frame.type == "site":
-      self._frame_site_id = mj_model.site(frame_name).id
-      # Look up parent body for exclusion.
-      self._frame_body_id = int(mj_model.site_bodyid[self._frame_site_id])
-      self._frame_type = "site"
-    elif frame.type == "geom":
-      self._frame_geom_id = mj_model.geom(frame_name).id
-      # Look up parent body for exclusion.
-      self._frame_body_id = int(mj_model.geom_bodyid[self._frame_geom_id])
-      self._frame_type = "geom"
-    else:
-      raise ValueError(
-        f"RayCastSensor frame must be 'body', 'site', or 'geom', got '{frame.type}'"
-      )
+    # Resolve per-frame IDs.
+    self._frame_infos = []
+    for frame in frames:
+      frame_name = frame.prefixed_name()
+      info: tuple[Literal["body", "site", "geom"], int, int]
+      if frame.type == "body":
+        bid = mj_model.body(frame_name).id
+        info = ("body", bid, bid)
+      elif frame.type == "site":
+        sid = mj_model.site(frame_name).id
+        info = ("site", sid, int(mj_model.site_bodyid[sid]))
+      elif frame.type == "geom":
+        gid = mj_model.geom(frame_name).id
+        info = ("geom", gid, int(mj_model.geom_bodyid[gid]))
+      else:
+        raise ValueError(
+          f"RayCastSensor frame must be 'body', 'site', or 'geom', got '{frame.type}'"
+        )
+      self._frame_infos.append(info)
+    self._num_frames = len(self._frame_infos)
 
     # Generate ray pattern.
     pattern = self.cfg.pattern
     self._local_offsets, self._local_directions = pattern.generate_rays(
       mj_model, device
     )
-    self._num_rays = self._local_offsets.shape[0]
+    self._num_rays_per_frame = self._local_offsets.shape[0]
+    self._num_rays = self._num_frames * self._num_rays_per_frame
 
     self._ray_pnt = wp.zeros((num_envs, self._num_rays), dtype=wp.vec3, device=device)
     self._ray_vec = wp.zeros((num_envs, self._num_rays), dtype=wp.vec3, device=device)
@@ -549,37 +533,33 @@ class RayCastSensor(Sensor[RayCastData]):
       (num_envs, self._num_rays), dtype=wp.vec3, device=device
     )
 
-    body_exclude = (
-      self._frame_body_id
-      if self.cfg.exclude_parent_body and self._frame_body_id is not None
-      else -1
-    )
-    self._ray_bodyexclude = wp.full(
-      (self._num_rays,),
-      body_exclude,
-      dtype=int,  # pyright: ignore[reportArgumentType]
-      device=device,
-    )
-
-    # Convert include_geom_groups to vec6 format (-1 = include, 0 = exclude).
-    if self.cfg.include_geom_groups is not None:
-      groups = [0, 0, 0, 0, 0, 0]
-      for g in self.cfg.include_geom_groups:
-        if 0 <= g <= 5:
-          groups[g] = -1
-      self._geomgroup = vec6(*groups)
+    # Body exclusion: each frame's body_id repeated N times.
+    if self.cfg.exclude_parent_body:
+      body_excludes: list[int] = []
+      for _, _, body_id in self._frame_infos:
+        body_excludes.extend([body_id] * self._num_rays_per_frame)
     else:
-      self._geomgroup = vec6(-1, -1, -1, -1, -1, -1)  # All groups
+      body_excludes = [-1] * self._num_rays
+    self._ray_bodyexclude = wp.array(body_excludes, dtype=int, device=device)
+
+    self._geomgroup = _geom_groups_to_vec6(self.cfg.include_geom_groups)
 
     # Pre-allocate output tensors so shape inference works before
     # the first sense() call.
+    F = self._num_frames
     self._distances = torch.zeros(num_envs, self._num_rays, device=device)
     self._normals_w = torch.zeros(num_envs, self._num_rays, 3, device=device)
     self._hit_pos_w = torch.zeros(num_envs, self._num_rays, 3, device=device)
     self._pos_w = torch.zeros(num_envs, 3, device=device)
     self._quat_w = torch.zeros(num_envs, 4, device=device)
+    self._frame_pos_w = torch.zeros(num_envs, F, 3, device=device)
+    self._frame_quat_w = torch.zeros(num_envs, F, 4, device=device)
 
     assert self._wp_device is not None
+
+  @property
+  def include_geom_groups(self) -> tuple[int, ...] | None:
+    return self.cfg.include_geom_groups
 
   def set_context(self, ctx: SensorContext) -> None:
     """Wire this sensor to a SensorContext for BVH-accelerated raycasting."""
@@ -595,42 +575,61 @@ class RayCastSensor(Sensor[RayCastData]):
     assert self._distances is not None and self._normals_w is not None
     assert self._hit_pos_w is not None
     assert self._pos_w is not None and self._quat_w is not None
+    assert self._frame_pos_w is not None and self._frame_quat_w is not None
     return RayCastData(
       distances=self._distances,
       normals_w=self._normals_w,
       hit_pos_w=self._hit_pos_w,
       pos_w=self._pos_w,
       quat_w=self._quat_w,
+      frame_pos_w=self._frame_pos_w,
+      frame_quat_w=self._frame_quat_w,
     )
 
   @property
   def num_rays(self) -> int:
+    """Total number of rays (num_frames * num_rays_per_frame)."""
     return self._num_rays
 
+  @property
+  def num_frames(self) -> int:
+    """Number of attachment frames."""
+    return self._num_frames
+
+  @property
+  def num_rays_per_frame(self) -> int:
+    """Number of rays per attachment frame."""
+    return self._num_rays_per_frame
+
   def debug_vis(self, visualizer: DebugVisualizer) -> None:
-    if not self.cfg.debug_vis:
+    if not self.cfg.debug_vis or not self._debug_vis_enabled:
       return
     assert self._data is not None
     assert self._local_offsets is not None
     assert self._local_directions is not None
+    assert self._cached_frame_pos is not None
+    assert self._cached_frame_mat is not None
 
     data = self.data
     env_indices = list(visualizer.get_env_indices(data.distances.shape[0]))
     if not env_indices:
       return
 
-    # Gather frame poses for selected environments only.
-    if self._frame_type == "body":
-      frame_pos = self._data.xpos[env_indices, self._frame_body_id]
-      frame_mat = self._data.xmat[env_indices, self._frame_body_id]
-    elif self._frame_type == "site":
-      frame_pos = self._data.site_xpos[env_indices, self._frame_site_id]
-      frame_mat = self._data.site_xmat[env_indices, self._frame_site_id]
-    else:  # geom
-      frame_pos = self._data.geom_xpos[env_indices, self._frame_geom_id]
-      frame_mat = self._data.geom_xmat[env_indices, self._frame_geom_id]
+    F = self._num_frames
+    N = self._num_rays_per_frame
 
-    rot_mats = self._compute_alignment_rotation(frame_mat.view(-1, 3, 3)).cpu().numpy()
+    # Use cached frame poses [B, F, 3] / [B, F, 3, 3].
+    frame_pos = self._cached_frame_pos[env_indices]  # [K, F, 3]
+    frame_mat = self._cached_frame_mat[env_indices]  # [K, F, 3, 3]
+
+    K_envs = len(env_indices)
+    # Compute alignment rotation for all frames.
+    rot_mats = (
+      self._compute_alignment_rotation(frame_mat.view(K_envs * F, 3, 3))
+      .view(K_envs, F, 3, 3)
+      .cpu()
+      .numpy()
+    )
     origins = frame_pos.cpu().numpy()
     offsets = self._local_offsets.cpu().numpy()
     directions = self._local_directions.cpu().numpy()
@@ -646,45 +645,46 @@ class RayCastSensor(Sensor[RayCastData]):
     miss_extent = min(0.5, self.cfg.max_distance * 0.05)
     name = self.cfg.name
 
-    for k in range(len(env_indices)):
-      rot = rot_mats[k]
+    for k in range(K_envs):
+      for f in range(F):
+        rot = rot_mats[k, f]
+        for i in range(N):
+          ray_idx = f * N + i
+          origin = origins[k, f] + rot @ offsets[i]
+          hit = distances[k, ray_idx] >= 0
 
-      for i in range(self._num_rays):
-        origin = origins[k] + rot @ offsets[i]
-        hit = distances[k, i] >= 0
+          if hit:
+            end = hit_positions[k, ray_idx]
+            color = self.cfg.viz.hit_color
+          else:
+            end = origin + rot @ directions[i] * miss_extent
+            color = self.cfg.viz.miss_color
 
-        if hit:
-          end = hit_positions[k, i]
-          color = self.cfg.viz.hit_color
-        else:
-          end = origin + rot @ directions[i] * miss_extent
-          color = self.cfg.viz.miss_color
-
-        if self.cfg.viz.show_rays:
-          visualizer.add_arrow(
-            start=origin,
-            end=end,
-            color=color,
-            width=ray_width,
-            label=f"{name}_ray_{i}",
-          )
-
-        if hit:
-          visualizer.add_sphere(
-            center=end,
-            radius=sphere_radius,
-            color=self.cfg.viz.hit_sphere_color,
-            label=f"{name}_hit_{i}",
-          )
-          if self.cfg.viz.show_normals:
-            normal_end = end + normals[k, i] * normal_length
+          if self.cfg.viz.show_rays:
             visualizer.add_arrow(
-              start=end,
-              end=normal_end,
-              color=self.cfg.viz.normal_color,
-              width=normal_width,
-              label=f"{name}_normal_{i}",
+              start=origin,
+              end=end,
+              color=color,
+              width=ray_width,
+              label=f"{name}_ray_{ray_idx}",
             )
+
+          if hit:
+            visualizer.add_sphere(
+              center=end,
+              radius=sphere_radius,
+              color=self.cfg.viz.hit_sphere_color,
+              label=f"{name}_hit_{ray_idx}",
+            )
+            if self.cfg.viz.show_normals:
+              normal_end = end + normals[k, ray_idx] * normal_length
+              visualizer.add_arrow(
+                start=end,
+                end=normal_end,
+                color=self.cfg.viz.normal_color,
+                width=normal_width,
+                label=f"{name}_normal_{ray_idx}",
+              )
 
   # Private methods.
 
@@ -698,48 +698,73 @@ class RayCastSensor(Sensor[RayCastData]):
     assert self._data is not None and self._model is not None
     assert self._local_offsets is not None and self._local_directions is not None
 
-    if self._frame_type == "body":
-      frame_pos = self._data.xpos[:, self._frame_body_id]
-      frame_mat = self._data.xmat[:, self._frame_body_id].view(-1, 3, 3)
-    elif self._frame_type == "site":
-      frame_pos = self._data.site_xpos[:, self._frame_site_id]
-      frame_mat = self._data.site_xmat[:, self._frame_site_id].view(-1, 3, 3)
-    else:  # geom
-      frame_pos = self._data.geom_xpos[:, self._frame_geom_id]
-      frame_mat = self._data.geom_xmat[:, self._frame_geom_id].view(-1, 3, 3)
+    # Gather per-frame poses: [B, F, 3] and [B, F, 3, 3].
+    # Position is always the physical world position. Alignment only
+    # affects ray directions (applied to frame_mat below).
+    pos_list: list[torch.Tensor] = []
+    mat_list: list[torch.Tensor] = []
+    for frame_type, obj_id, _ in self._frame_infos:
+      if frame_type == "body":
+        pos_list.append(self._data.xpos[:, obj_id])
+        mat_list.append(self._data.xmat[:, obj_id].view(-1, 3, 3))
+      elif frame_type == "site":
+        pos_list.append(self._data.site_xpos[:, obj_id])
+        mat_list.append(self._data.site_xmat[:, obj_id].view(-1, 3, 3))
+      else:  # geom
+        pos_list.append(self._data.geom_xpos[:, obj_id])
+        mat_list.append(self._data.geom_xmat[:, obj_id].view(-1, 3, 3))
 
-    num_envs = frame_pos.shape[0]
-    rot_mat = self._compute_alignment_rotation(frame_mat)
+    frame_pos = torch.stack(pos_list, dim=1)  # [B, F, 3]
+    frame_mat = torch.stack(mat_list, dim=1)  # [B, F, 3, 3]
 
-    world_offsets = torch.einsum("bij,nj->bni", rot_mat, self._local_offsets)
-    world_origins = frame_pos.unsqueeze(1) + world_offsets
-    world_rays = torch.einsum("bij,nj->bni", rot_mat, self._local_directions)
+    B, F = frame_pos.shape[:2]
+    N = self._num_rays_per_frame
+
+    # Compute alignment rotation for all frames at once.
+    rot_mat = self._compute_alignment_rotation(frame_mat.reshape(B * F, 3, 3)).reshape(
+      B, F, 3, 3
+    )
+
+    # Compute world offsets and directions: [B, F, N, 3].
+    world_offsets = torch.einsum("bfij,nj->bfni", rot_mat, self._local_offsets)
+    world_origins = frame_pos[:, :, None, :] + world_offsets
+    world_rays = torch.einsum("bfij,nj->bfni", rot_mat, self._local_directions)
+
+    # Flatten to [B, F*N, 3] for raycasting.
+    world_origins_flat = world_origins.reshape(B, F * N, 3)
+    world_rays_flat = world_rays.reshape(B, F * N, 3)
 
     assert self._ray_pnt is not None and self._ray_vec is not None
-    pnt_torch = wp.to_torch(self._ray_pnt).view(num_envs, self._num_rays, 3)
-    vec_torch = wp.to_torch(self._ray_vec).view(num_envs, self._num_rays, 3)
-    pnt_torch.copy_(world_origins)
-    vec_torch.copy_(world_rays)
+    pnt_torch = wp.to_torch(self._ray_pnt).view(B, self._num_rays, 3)
+    vec_torch = wp.to_torch(self._ray_vec).view(B, self._num_rays, 3)
+    pnt_torch.copy_(world_origins_flat)
+    vec_torch.copy_(world_rays_flat)
 
-    # Cache for postprocess_rays().
-    self._cached_world_origins = world_origins
-    self._cached_world_rays = world_rays
-    self._cached_frame_pos = frame_pos
-    self._cached_frame_mat = frame_mat
+    # Cache for postprocess_rays() and debug_vis().
+    self._cached_world_origins = world_origins_flat
+    self._cached_world_rays = world_rays_flat
+    self._cached_frame_pos = frame_pos  # [B, F, 3]
+    self._cached_frame_mat = frame_mat  # [B, F, 3, 3]
 
   def raycast_kernel(self, rc: mjwarp.RenderContext) -> None:
     """IN-GRAPH: Execute BVH-accelerated raycast kernel."""
+    assert self._ray_pnt is not None
+    assert self._ray_vec is not None
+    assert self._ray_bodyexclude is not None
+    assert self._ray_dist is not None
+    assert self._ray_geomid is not None
+    assert self._ray_normal is not None
     rays(
       m=self._model.struct,  # type: ignore[attr-defined]
       d=self._data.struct,  # type: ignore[attr-defined]
-      pnt=self._ray_pnt,
-      vec=self._ray_vec,
+      pnt=self._ray_pnt,  # pyright: ignore[reportArgumentType]
+      vec=self._ray_vec,  # pyright: ignore[reportArgumentType]
       geomgroup=self._geomgroup,  # pyright: ignore[reportArgumentType]
       flg_static=True,
       bodyexclude=self._ray_bodyexclude,
-      dist=self._ray_dist,
-      geomid=self._ray_geomid,
-      normal=self._ray_normal,
+      dist=self._ray_dist,  # pyright: ignore[reportArgumentType]
+      geomid=self._ray_geomid,  # pyright: ignore[reportArgumentType]
+      normal=self._ray_normal,  # pyright: ignore[reportArgumentType]
       rc=rc,
     )
 
@@ -750,25 +775,36 @@ class RayCastSensor(Sensor[RayCastData]):
     assert self._cached_frame_pos is not None
     assert self._cached_frame_mat is not None
 
-    num_envs = self._cached_frame_pos.shape[0]
+    B = self._cached_frame_pos.shape[0]
+    F = self._num_frames
 
     assert self._ray_dist is not None and self._ray_normal is not None
-    self._distances = wp.to_torch(self._ray_dist)
-    self._normals_w = wp.to_torch(self._ray_normal).view(num_envs, self._num_rays, 3)
-    self._distances[self._distances > self.cfg.max_distance] = -1.0
+    distances = wp.to_torch(self._ray_dist)
+    normals_w = wp.to_torch(self._ray_normal).view(B, self._num_rays, 3)
+    distances[distances > self.cfg.max_distance] = -1.0
 
-    hit_mask = self._distances >= 0
+    hit_mask = distances >= 0
     hit_pos_w = self._cached_world_origins.clone()
     hit_pos_w[hit_mask] = self._cached_world_origins[
       hit_mask
-    ] + self._cached_world_rays[hit_mask] * self._distances[hit_mask].unsqueeze(-1)
+    ] + self._cached_world_rays[hit_mask] * distances[hit_mask].unsqueeze(-1)
     self._hit_pos_w = hit_pos_w
 
     # Zero out normals for misses.
-    self._normals_w[~hit_mask] = 0.0
+    normals_w[~hit_mask] = 0.0
+    self._distances = distances
+    self._normals_w = normals_w
 
-    self._pos_w = self._cached_frame_pos.clone()
-    self._quat_w = quat_from_matrix(self._cached_frame_mat)
+    # All frames: [B, F, 3] / [B, F, 4].
+    self._frame_pos_w = self._cached_frame_pos
+    self._frame_quat_w = quat_from_matrix(
+      self._cached_frame_mat.reshape(B * F, 3, 3)
+    ).reshape(B, F, 4)
+
+    # First frame for backward compat: [B, 3] / [B, 4].
+    assert self._frame_pos_w is not None and self._frame_quat_w is not None
+    self._pos_w = self._frame_pos_w[:, 0]
+    self._quat_w = self._frame_quat_w[:, 0]
 
   def _compute_alignment_rotation(self, frame_mat: torch.Tensor) -> torch.Tensor:
     """Compute rotation matrix based on ray_alignment setting."""

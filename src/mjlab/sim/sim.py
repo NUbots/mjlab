@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gc
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -8,6 +10,7 @@ import mujoco_warp as mjwarp
 import torch
 import warp as wp
 
+from mjlab.managers.event_manager import RecomputeLevel
 from mjlab.sim.randomization import expand_model_fields
 from mjlab.sim.sim_data import TorchArray, WarpBridge
 from mjlab.utils.nan_guard import NanGuard, NanGuardCfg
@@ -27,6 +30,23 @@ else:
 # Minimum CUDA driver version supported for conditional CUDA graphs.
 _GRAPH_CAPTURE_MIN_DRIVER = (12, 4)
 
+
+@contextmanager
+def _suspend_gc():
+  """Temporarily disable the garbage collector.
+
+  Prevents GC from finalizing stale Warp Graph objects during wp.ScopedCapture, which
+  would record their destructor calls into the new graph and corrupt it on replay.
+  """
+  enabled = gc.isenabled()
+  gc.disable()
+  try:
+    yield
+  finally:
+    if enabled:
+      gc.enable()
+
+
 _JACOBIAN_MAP = {
   "auto": mujoco.mjtJacobian.mjJAC_AUTO,
   "dense": mujoco.mjtJacobian.mjJAC_DENSE,
@@ -44,6 +64,19 @@ _SOLVER_MAP = {
   "newton": mujoco.mjtSolver.mjSOL_NEWTON,
   "cg": mujoco.mjtSolver.mjSOL_CG,
   "pgs": mujoco.mjtSolver.mjSOL_PGS,
+}
+
+# Maps short flag names to MuJoCo enum values.
+# Names match the XML <flag> attribute names (e.g. <flag contact="disable"/>).
+_DISABLE_FLAG_MAP: dict[str, int] = {
+  name.removeprefix("mjDSBL_").lower(): getattr(mujoco.mjtDisableBit, name).value
+  for name in dir(mujoco.mjtDisableBit)
+  if name.startswith("mjDSBL_")
+}
+_ENABLE_FLAG_MAP: dict[str, int] = {
+  name.removeprefix("mjENBL_").lower(): getattr(mujoco.mjtEnableBit, name).value
+  for name in dir(mujoco.mjtEnableBit)
+  if name.startswith("mjENBL_")
 }
 
 
@@ -69,8 +102,13 @@ class MujocoCfg:
   ccd_iterations: int = 50
 
   # Other.
-  gravity: tuple[float, float, float] = (0, 0, -9.81)
-  multiccd: bool = False
+  gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
+  # Global MuJoCo option flags. Names match the XML <flag> attributes
+  # (e.g. "contact", "gravity", "sensor"). See mjtDisableBit / mjtEnableBit.
+  disableflags: tuple[str, ...] = ()
+  """Disable flags to set (e.g. ``("contact",)`` to disable contacts)."""
+  enableflags: tuple[str, ...] = ()
+  """Enable flags to set (e.g. ``("energy",)`` to enable energy computation)."""
 
   def apply(self, model: mujoco.MjModel) -> None:
     """Apply configuration settings to a compiled MjModel."""
@@ -86,8 +124,18 @@ class MujocoCfg:
     model.opt.ls_iterations = self.ls_iterations
     model.opt.ls_tolerance = self.ls_tolerance
     model.opt.ccd_iterations = self.ccd_iterations
-    if self.multiccd:
-      model.opt.enableflags |= mujoco.mjtEnableBit.mjENBL_MULTICCD
+    for flag in self.disableflags:
+      if flag not in _DISABLE_FLAG_MAP:
+        raise ValueError(
+          f"Unknown disable flag {flag!r}. Valid flags: {sorted(_DISABLE_FLAG_MAP)}"
+        )
+      model.opt.disableflags |= _DISABLE_FLAG_MAP[flag]
+    for flag in self.enableflags:
+      if flag not in _ENABLE_FLAG_MAP:
+        raise ValueError(
+          f"Unknown enable flag {flag!r}. Valid flags: {sorted(_ENABLE_FLAG_MAP)}"
+        )
+      model.opt.enableflags |= _ENABLE_FLAG_MAP[flag]
 
 
 @dataclass(kw_only=True)
@@ -138,6 +186,7 @@ class Simulation:
     self.wp_device = wp.get_device(self.device)
     self.num_envs = num_envs
     self._default_model_fields: dict[str, torch.Tensor] = {}
+    self._expanded_fields: set[str] = set()
 
     # MuJoCo model and data.
     self._mj_model = model
@@ -190,7 +239,7 @@ class Simulation:
     self.reset_graph = None
     self.sense_graph = None
     if self.use_cuda_graph:
-      with wp.ScopedDevice(self.wp_device):
+      with _suspend_gc(), wp.ScopedDevice(self.wp_device):
         with wp.ScopedCapture() as capture:
           mjwarp.step(self.wp_model, self.wp_data)
         self.step_graph = capture.graph
@@ -236,6 +285,11 @@ class Simulation:
     """Default values for expanded model fields, used in domain randomization."""
     return self._default_model_fields
 
+  @property
+  def expanded_fields(self) -> set[str]:
+    """Names of model fields that have been expanded for per-env DR."""
+    return self._expanded_fields
+
   # Methods.
 
   def expand_model_fields(self, fields: tuple[str, ...]) -> None:
@@ -248,10 +302,11 @@ class Simulation:
       raise ValueError(f"Fields not found in model: {invalid_fields}")
 
     expand_model_fields(self._wp_model, self.num_envs, list(fields))
+    self._expanded_fields.update(fields)
     self._model_bridge.clear_cache()
 
     if self._sensor_context is not None:
-      self._sensor_context.recreate(self._mj_model)
+      self._sensor_context.recreate(self._mj_model, self._expanded_fields)
 
     # Field expansion allocates new arrays and replaces them via setattr. The
     # CUDA graph captured the old memory addresses, so we must recreate it.
@@ -274,6 +329,19 @@ class Simulation:
         default_value, dtype=model_field.dtype, device=self.device
       ).clone()
     return self._default_model_fields[field]
+
+  def recompute_constants(self, level: RecomputeLevel) -> None:
+    """Recompute derived model constants after domain randomization.
+
+    Args:
+      level: Which constants to recompute. ``set_const`` is the most
+        expensive (covers body_mass changes), ``set_const_0`` covers
+        qpos0/body_inertia/dof_armature changes, and ``set_const_fixed``
+        is the cheapest (covers body_gravcomp changes).
+    """
+    fn = getattr(mjwarp, level.name)
+    with wp.ScopedDevice(self.wp_device):
+      fn(self._wp_model, self._wp_data)
 
   def forward(self) -> None:
     with wp.ScopedDevice(self.wp_device):

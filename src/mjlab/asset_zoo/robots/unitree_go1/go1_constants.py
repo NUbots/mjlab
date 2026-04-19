@@ -8,7 +8,6 @@ from mjlab import MJLAB_SRC_PATH
 from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.utils.actuator import ElectricActuator, reflected_inertia
-from mjlab.utils.os import update_assets
 from mjlab.utils.spec_config import CollisionCfg
 
 ##
@@ -21,16 +20,8 @@ GO1_XML: Path = (
 assert GO1_XML.exists()
 
 
-def get_assets(meshdir: str) -> dict[str, bytes]:
-  assets: dict[str, bytes] = {}
-  update_assets(assets, GO1_XML.parent / "assets", meshdir)
-  return assets
-
-
 def get_spec() -> mujoco.MjSpec:
-  spec = mujoco.MjSpec.from_file(str(GO1_XML))
-  spec.assets = get_assets(spec.meshdir)
-  return spec
+  return mujoco.MjSpec.from_file(str(GO1_XML))
 
 
 ##
@@ -115,16 +106,16 @@ FEET_ONLY_COLLISION = CollisionCfg(
   solimp=(0.9, 0.95, 0.023),
 )
 
-# This enables all collisions, excluding self collisions.
-# Foot collisions are given custom condim, friction and solimp.
+# This enables all collisions.
+# Foot collisions are given custom condim, friction.
 FULL_COLLISION = CollisionCfg(
   geom_names_expr=(".*_collision",),
-  condim={_foot_regex: 3, ".*_collision": 1},
+  # Harden all collision geoms.
+  solref=(0.01, 1),
+  # Configure feet colliders. Other colliders are frictionless (condim=1).
+  condim={_foot_regex: 6, ".*_collision": 1},
   priority={_foot_regex: 1},
-  friction={_foot_regex: (0.6,)},
-  solimp={_foot_regex: (0.9, 0.95, 0.023)},
-  contype=1,
-  conaffinity=0,
+  friction={_foot_regex: (1, 5e-3, 5e-4)},
 )
 
 ##

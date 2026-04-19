@@ -1,37 +1,8 @@
 import re
 from pathlib import Path
-from typing import Any, Dict
+from typing import Dict
 
 import yaml
-
-
-def update_assets(
-  assets: Dict[str, Any],
-  path: str | Path,
-  meshdir: str | None = None,
-  glob: str = "*",
-  recursive: bool = False,
-):
-  """Update assets dictionary with files from a directory.
-
-  This function reads files from a directory and adds them to an assets dictionary,
-  with keys formatted to include the meshdir prefix when specified.
-
-  Args:
-    assets: Dictionary to update with file contents. Keys are asset paths, values are
-      file contents as bytes.
-    path: Path to directory containing asset files.
-    meshdir: Optional mesh directory prefix, typically `spec.meshdir`. If provided,
-      will be prepended to asset keys (e.g., "mesh.obj" becomes "custom_dir/mesh.obj").
-    glob: Glob pattern for file matching. Defaults to "*" (all files).
-    recursive: If True, recursively search subdirectories.
-  """
-  for f in Path(path).glob(glob):
-    if f.is_file():
-      asset_key = f"{meshdir}/{f.name}" if meshdir else f.name
-      assets[asset_key] = f.read_bytes()
-    elif f.is_dir() and recursive:
-      update_assets(assets, f, meshdir, glob, recursive)
 
 
 def dump_yaml(filename: Path, data: Dict, sort_keys: bool = False) -> None:
@@ -89,7 +60,9 @@ def get_checkpoint_path(
   return run_path / checkpoint_file
 
 
-def get_wandb_checkpoint_path(log_path: Path, run_path: Path) -> tuple[Path, bool]:
+def get_wandb_checkpoint_path(
+  log_path: Path, run_path: Path, checkpoint_name: str | None = None
+) -> tuple[Path, bool]:
   """Get checkpoint path from wandb, downloading if needed.
 
   Returns:
@@ -104,47 +77,22 @@ def get_wandb_checkpoint_path(log_path: Path, run_path: Path) -> tuple[Path, boo
   # Query wandb API to find the latest checkpoint.
   api = wandb.Api()
   wandb_run = api.run(str(run_path))
-  checkpoint_candidates: list[str] = []
-  try:
-    files = [
-      file.name
-      for file in wandb_run.files()
-      if re.match(r"^model_\d+\.pt$", file.name)
-    ]
-    if len(files) > 0:
-      checkpoint_candidates.append(
-        max(files, key=lambda x: int(x.split("_")[1].split(".")[0]))
+  files = [
+    file.name
+    for file in wandb_run.files(pattern="model_%.pt")
+    if re.match(r"^model_\d+\.pt$", file.name)
+  ]
+  if checkpoint_name is None:
+    checkpoint_file = max(files, key=lambda x: int(x.split("_")[1].split(".")[0]))
+  else:
+    if checkpoint_name not in files:
+      raise ValueError(
+        f"Checkpoint '{checkpoint_name}' not found in run {run_path}."
+        f" Available: {files}"
       )
-  except TypeError:
-    # Some runs expose direct file access but fail when listing files due to
-    # W&B API pagination returning null edges.
-    pass
+    checkpoint_file = checkpoint_name
 
-  if len(checkpoint_candidates) == 0:
-    # Fallback for runs where listing files fails but direct file lookup works.
-    summary_step = None
-    summary = getattr(wandb_run, "summary", None)
-    if summary is not None and hasattr(summary, "get"):
-      summary_step = summary.get("_step")
-    if isinstance(summary_step, int):
-      checkpoint_candidates.append(f"model_{summary_step}.pt")
-    checkpoint_candidates.extend(["last.pt", "model.pt"])
-
-  # Keep order while deduplicating candidates.
-  checkpoint_candidates = list(dict.fromkeys(checkpoint_candidates))
-
-  if len(checkpoint_candidates) == 0:
-    raise ValueError(
-      f"Could not resolve checkpoint from W&B run '{run_path}'. "
-      "Run file listing failed and no checkpoint candidates could be derived."
-    )
-
-  download_dir.mkdir(parents=True, exist_ok=True)
-  last_error: Exception | None = None
-  for checkpoint_file in checkpoint_candidates:
-    checkpoint_path = download_dir / checkpoint_file
-    if checkpoint_path.exists():
-      return checkpoint_path, True
+  checkpoint_path = download_dir / checkpoint_file
 
     wandb_file = wandb_run.file(str(checkpoint_file))
     if wandb_file is None:

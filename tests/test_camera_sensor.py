@@ -255,6 +255,147 @@ def test_camera_sensor_context_created(device):
   assert scene.sensor_context.has_cameras
 
 
+INTRINSIC_CAM_XML = """
+  <mujoco>
+    <worldbody>
+      <light pos="0 0 5" dir="0 0 -1"/>
+      <geom name="floor" type="plane" size="10 10 0.1" pos="0 0 0"
+            rgba="0.5 0.5 0.5 1"/>
+      <geom name="small_box" type="box" size="0.1 0.1 0.1" pos="0 0 0.1"
+            rgba="1 0 0 1"/>
+      <camera name="intrinsic_cam" pos="0 0 5" quat="1 0 0 0"
+              resolution="32 24" sensorsize="0.01 0.01"
+              focal="0.005 0.005"/>
+    </worldbody>
+  </mujoco>
+"""
+
+
+def test_expand_cam_intrinsic_disables_precomputed_rays(device):
+  """Expanding cam_intrinsic disables precomputed rays on the render context."""
+  cam_cfg = CameraSensorCfg(
+    name="test_cam",
+    camera_name="world/intrinsic_cam",
+    width=32,
+    height=24,
+    data_types=("rgb",),
+  )
+  scene, sim = _make_scene_and_sim(device, sensors=(cam_cfg,), xml=INTRINSIC_CAM_XML)
+  assert scene.sensor_context is not None
+
+  # Before expansion: precomputed rays enabled.
+  rc = scene.sensor_context.render_context
+  assert rc.use_precomputed_rays is True
+
+  sim.expand_model_fields(("cam_intrinsic",))
+
+  # After expansion: precomputed rays disabled.
+  rc = scene.sensor_context.render_context
+  assert rc.use_precomputed_rays is False
+
+
+def test_cam_intrinsic_dr_changes_rendered_image(device):
+  """Per-env cam_intrinsic DR produces different images across envs."""
+  cam_cfg = CameraSensorCfg(
+    name="test_cam",
+    camera_name="world/intrinsic_cam",
+    width=32,
+    height=24,
+    data_types=("rgb",),
+  )
+  scene, sim = _make_scene_and_sim(
+    device, sensors=(cam_cfg,), xml=INTRINSIC_CAM_XML, num_envs=2
+  )
+  sim.expand_model_fields(("cam_intrinsic",))
+
+  # Render baseline.
+  sim.forward()
+  sim.sense()
+  baseline = scene["test_cam"].data.rgb.clone()
+
+  # Set env 0 to a very different focal length (5x zoom).
+  cam_id = sim.mj_model.camera("world/intrinsic_cam").id
+  sim.model.cam_intrinsic[0, cam_id, :2] *= 5.0
+
+  sim.forward()
+  sim.sense()
+  after = scene["test_cam"].data.rgb
+
+  # Env 0 should differ (zoomed in), env 1 should be unchanged.
+  assert not torch.equal(after[0], baseline[0]), (
+    "Env 0 image unchanged after cam_intrinsic modification"
+  )
+  assert torch.equal(after[1], baseline[1]), "Env 1 image changed unexpectedly"
+
+
+def test_camera_segmentation_shape(device):
+  """Segmentation data has correct shape [num_envs, height, width, 1]."""
+  cam_cfg = CameraSensorCfg(
+    name="test_cam",
+    camera_name="world/overhead_cam",
+    width=32,
+    height=24,
+    data_types=("segmentation",),
+  )
+  scene, sim = _make_scene_and_sim(device, sensors=(cam_cfg,))
+
+  sim.forward()
+  sim.sense()
+  data = scene["test_cam"].data
+
+  assert isinstance(data, CameraSensorData)
+  assert data.segmentation is not None
+  assert data.segmentation.shape == (2, 24, 32, 1)
+  assert data.segmentation.dtype == torch.int32
+  assert data.rgb is None
+  assert data.depth is None
+
+
+def test_camera_segmentation_content(device):
+  """Segmentation contains background (-1) and geom hits (>= 0)."""
+  cam_cfg = CameraSensorCfg(
+    name="test_cam",
+    camera_name="world/overhead_cam",
+    width=32,
+    height=24,
+    data_types=("segmentation",),
+  )
+  scene, sim = _make_scene_and_sim(device, sensors=(cam_cfg,))
+
+  sim.forward()
+  sim.sense()
+  seg = scene["test_cam"].data.segmentation
+  assert seg is not None
+
+  seg_np = seg.cpu().numpy()
+  assert (seg_np >= 0).any(), "Expected at least one geom hit"
+  unique_ids = len(set(seg_np.flatten().tolist()))
+  assert unique_ids > 1, "Expected multiple distinct geom IDs"
+
+
+def test_camera_rgb_depth_segmentation(device):
+  """All three data types can be requested simultaneously."""
+  cam_cfg = CameraSensorCfg(
+    name="test_cam",
+    camera_name="world/overhead_cam",
+    width=32,
+    height=24,
+    data_types=("rgb", "depth", "segmentation"),
+  )
+  scene, sim = _make_scene_and_sim(device, sensors=(cam_cfg,))
+
+  sim.forward()
+  sim.sense()
+  data = scene["test_cam"].data
+
+  assert data.rgb is not None
+  assert data.depth is not None
+  assert data.segmentation is not None
+  assert data.rgb.shape == (2, 24, 32, 3)
+  assert data.depth.shape == (2, 24, 32, 1)
+  assert data.segmentation.shape == (2, 24, 32, 1)
+
+
 def test_camera_create_on_parent_body(device):
   """Camera sensor can create a new camera attached to a body."""
   xml = """

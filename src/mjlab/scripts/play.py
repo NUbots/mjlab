@@ -2,7 +2,9 @@
 
 import os
 import sys
+import time as _time
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -11,12 +13,21 @@ import tyro
 
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
+from mjlab.scripts._cli import maybe_print_top_level_help
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.utils.os import get_wandb_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
+from mjlab.viewer.viser.viewer import CheckpointManager, format_time_ago
+
+
+def _parse_wandb_dt(value: str | datetime) -> datetime:
+  """Parse a W&B datetime string (or pass through a datetime object)."""
+  if isinstance(value, str):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+  return value
 
 
 @dataclass(frozen=True)
@@ -24,6 +35,8 @@ class PlayConfig:
   agent: Literal["zero", "random", "trained"] = "trained"
   registry_name: str | None = None
   wandb_run_path: str | None = None
+  wandb_checkpoint_name: str | None = None
+  """Optional checkpoint name within the W&B run to load (e.g. 'model_4000.pt')."""
   checkpoint_file: str | None = None
   motion_file: str | None = None
   num_envs: int | None = None
@@ -129,7 +142,7 @@ def run_play(task_id: str, cfg: PlayConfig):
           "`wandb_run_path` is required when `checkpoint_file` is not provided."
         )
       resume_path, was_cached = get_wandb_checkpoint_path(
-        log_root_path, Path(cfg.wandb_run_path)
+        log_root_path, Path(cfg.wandb_run_path), cfg.wandb_checkpoint_name
       )
       # Extract run_id and checkpoint name from path for display.
       run_id = resume_path.parent.name
@@ -192,6 +205,78 @@ def run_play(task_id: str, cfg: PlayConfig):
     )
     policy = runner.get_inference_policy(device=device)
 
+  # Build checkpoint manager for hot-swapping checkpoints in the viewer.
+  ckpt_manager: CheckpointManager | None = None
+  if TRAINED_MODE and resume_path is not None:
+    _ckpt_runner = runner  # pyright: ignore[reportPossiblyUnboundVariable]
+
+    def _reload_policy(path: str):
+      _ckpt_runner.load(
+        path,
+        load_cfg={"actor": True},
+        strict=True,
+        map_location=device,
+      )
+      return _ckpt_runner.get_inference_policy(device=device)
+
+    if cfg.wandb_run_path is None:
+      ckpt_dir = resume_path.parent
+
+      def fetch_available_local() -> list[tuple[str, str]]:
+        now = _time.time()
+        entries: list[tuple[str, str, int]] = []
+        for f in sorted(ckpt_dir.glob("*.pt")):
+          try:
+            step = int(f.stem.split("_")[1])
+          except (IndexError, ValueError):
+            step = 0
+          ago = format_time_ago(int(now - f.stat().st_mtime))
+          entries.append((f.name, ago, step))
+        entries.sort(key=lambda x: x[2])
+        return [(name, t) for name, t, _ in entries]
+
+      ckpt_manager = CheckpointManager(
+        current_name=resume_path.name,
+        fetch_available=fetch_available_local,
+        load_checkpoint=lambda name: _reload_policy(str(ckpt_dir / name)),
+      )
+    else:
+      import wandb
+
+      api = wandb.Api()
+      run_path = str(cfg.wandb_run_path)
+      wandb_run = api.run(run_path)
+      _log_root = log_root_path  # pyright: ignore[reportPossiblyUnboundVariable]
+
+      def fetch_available_wandb() -> list[tuple[str, str]]:
+        wandb_run.load()
+        now = datetime.now(tz=timezone.utc)
+        entries: list[tuple[str, str, int]] = []
+        for f in wandb_run.files():
+          if not f.name.endswith(".pt"):
+            continue
+          try:
+            step = int(f.name.split("_")[1].split(".")[0])
+          except (IndexError, ValueError):
+            step = 0
+          ago = format_time_ago(
+            int((now - _parse_wandb_dt(f.updated_at)).total_seconds())
+          )
+          entries.append((f.name, ago, step))
+        entries.sort(key=lambda x: x[2])
+        return [(name, t) for name, t, _ in entries]
+
+      ckpt_manager = CheckpointManager(
+        current_name=resume_path.name,
+        fetch_available=fetch_available_wandb,
+        load_checkpoint=lambda name: _reload_policy(
+          str(get_wandb_checkpoint_path(_log_root, Path(run_path), name)[0])
+        ),
+        run_name=_parse_wandb_dt(wandb_run.created_at).strftime("%Y-%m-%d_%H-%M-%S"),
+        run_url=wandb_run.url,
+        run_status=wandb_run.state,
+      )
+
   # Handle "auto" viewer selection.
   if cfg.viewer == "auto":
     has_display = bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
@@ -203,7 +288,7 @@ def run_play(task_id: str, cfg: PlayConfig):
   if resolved_viewer == "native":
     NativeMujocoViewer(env, policy).run()
   elif resolved_viewer == "viser":
-    ViserPlayViewer(env, policy).run()
+    ViserPlayViewer(env, policy, checkpoint_manager=ckpt_manager).run()
   else:
     raise RuntimeError(f"Unsupported viewer backend: {resolved_viewer}")
 
@@ -211,6 +296,8 @@ def run_play(task_id: str, cfg: PlayConfig):
 
 
 def main():
+  maybe_print_top_level_help("play")
+
   # Parse first argument to choose the task.
   # Import tasks to populate the registry.
   import mjlab.tasks  # noqa: F401

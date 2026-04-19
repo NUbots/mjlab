@@ -7,7 +7,6 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 import numpy as np
-import torch
 
 if TYPE_CHECKING:
   import mujoco
@@ -54,8 +53,8 @@ class DebugVisualizer(ABC):
   @abstractmethod
   def add_arrow(
     self,
-    start: np.ndarray | torch.Tensor,
-    end: np.ndarray | torch.Tensor,
+    start: np.ndarray,
+    end: np.ndarray,
     color: tuple[float, float, float, float],
     width: float = 0.015,
     label: str | None = None,
@@ -74,10 +73,10 @@ class DebugVisualizer(ABC):
   @abstractmethod
   def add_ghost_mesh(
     self,
-    qpos: np.ndarray | torch.Tensor,
+    qpos: np.ndarray,
     model: mujoco.MjModel,
-    mocap_pos: np.ndarray | torch.Tensor | None = None,
-    mocap_quat: np.ndarray | torch.Tensor | None = None,
+    mocap_pos: np.ndarray | None = None,
+    mocap_quat: np.ndarray | None = None,
     alpha: float = 0.5,
     label: str | None = None,
   ) -> None:
@@ -97,8 +96,8 @@ class DebugVisualizer(ABC):
   @abstractmethod
   def add_frame(
     self,
-    position: np.ndarray | torch.Tensor,
-    rotation_matrix: np.ndarray | torch.Tensor,
+    position: np.ndarray,
+    rotation_matrix: np.ndarray,
     scale: float = 0.3,
     label: str | None = None,
     axis_radius: float = 0.01,
@@ -125,7 +124,7 @@ class DebugVisualizer(ABC):
   @abstractmethod
   def add_sphere(
     self,
-    center: np.ndarray | torch.Tensor,
+    center: np.ndarray,
     radius: float,
     color: tuple[float, float, float, float],
     label: str | None = None,
@@ -143,8 +142,8 @@ class DebugVisualizer(ABC):
   @abstractmethod
   def add_cylinder(
     self,
-    start: np.ndarray | torch.Tensor,
-    end: np.ndarray | torch.Tensor,
+    start: np.ndarray,
+    end: np.ndarray,
     radius: float,
     color: tuple[float, float, float, float],
     label: str | None = None,
@@ -157,6 +156,26 @@ class DebugVisualizer(ABC):
       radius: Cylinder radius.
       color: RGBA color (values 0-1).
       label: Optional label for this cylinder.
+    """
+    ...
+
+  @abstractmethod
+  def add_ellipsoid(
+    self,
+    center: np.ndarray,
+    size: np.ndarray,
+    mat: np.ndarray,
+    color: tuple[float, float, float, float],
+    label: str | None = None,
+  ) -> None:
+    """Add an ellipsoid visualization.
+
+    Args:
+      center: Center position (3D vector).
+      size: Semi-axes lengths (3D vector: a, b, c).
+      mat: 3x3 rotation matrix (or flattened 9-element array).
+      color: RGBA color (values 0-1).
+      label: Optional label for this ellipsoid.
     """
     ...
 
@@ -218,6 +237,9 @@ class NullDebugVisualizer:
     pass
 
   def add_cylinder(self, start, end, radius, color, label=None) -> None:
+    pass
+
+  def add_ellipsoid(self, center, size, mat, color, label=None) -> None:
     pass
 
   def clear(self) -> None:

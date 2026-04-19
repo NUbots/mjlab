@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -15,6 +16,8 @@ from mjlab.utils.lab_api.math import (
 )
 
 if TYPE_CHECKING:
+  import viser
+
   from mjlab.envs.manager_based_rl_env import ManagerBasedRlEnv
   from mjlab.viewer.debug_visualizer import DebugVisualizer
 
@@ -37,6 +40,8 @@ class UniformVelocityCommand(CommandTerm):
 
     # Initialize velocity command buffer (x, y linear + z angular)
     self.vel_command_b = torch.zeros(self.num_envs, 3, device=self.device)
+    # vel_command_w
+    self.vel_command_w = torch.zeros(self.num_envs, 3, device=self.device)
     # Target heading angle for heading control mode
     self.heading_target = torch.zeros(self.num_envs, device=self.device)
     # Current heading error from target
@@ -47,10 +52,17 @@ class UniformVelocityCommand(CommandTerm):
     )
     # Mask for environments that should stand still
     self.is_standing_env = torch.zeros_like(self.is_heading_env)
+    self.is_world_env = torch.zeros_like(self.is_heading_env)
+    self.is_forward_env = torch.zeros_like(self.is_heading_env)
 
     # Initialize tracking metrics
     self.metrics["error_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
+
+    # Set by create_gui() when the viewer is active.
+    self._joystick_enabled: viser.GuiCheckboxHandle | None = None
+    self._joystick_sliders: list[viser.GuiSliderHandle] = []
+    self._joystick_get_env_idx: Callable[[], int] | None = None
 
   @property
   def command(self) -> torch.Tensor:
@@ -91,6 +103,22 @@ class UniformVelocityCommand(CommandTerm):
     # Randomly select environments to stand still
     self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
 
+    
+    # Randomly assign world-frame envs.
+    self.is_world_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_world_envs
+    # Copy sampled velocities as world-frame reference for world envs.
+    self.vel_command_w[env_ids] = self.vel_command_b[env_ids]
+
+    # Forward-only envs: positive lin_vel_x, zero lateral and angular.
+    self.is_forward_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_forward_envs
+    fwd_ids = env_ids[self.is_forward_env[env_ids]]
+    if len(fwd_ids) > 0:
+      self.vel_command_b[fwd_ids, 0] = (
+        self.vel_command_b[fwd_ids, 0].abs().clamp(min=0.3)
+      )
+      self.vel_command_b[fwd_ids, 1] = 0.0
+      self.vel_command_b[fwd_ids, 2] = 0.0
+      
     # Optionally initialize robot velocities to match commands
     init_vel_mask = r.uniform_(0.0, 1.0) < self.cfg.init_velocity_prob
     init_vel_env_ids = env_ids[init_vel_mask]
@@ -121,9 +149,89 @@ class UniformVelocityCommand(CommandTerm):
         min=self.cfg.ranges.ang_vel_z[0],
         max=self.cfg.ranges.ang_vel_z[1],
       )
+    # World-frame envs: rotate world-frame linear vel into body frame.
+    if self.is_world_env.any():
+      w_ids = self.is_world_env.nonzero(as_tuple=False).flatten()
+      heading = self.robot.data.heading_w[w_ids]
+      cos_h = torch.cos(heading)
+      sin_h = torch.sin(heading)
+      vx_w = self.vel_command_w[w_ids, 0]
+      vy_w = self.vel_command_w[w_ids, 1]
+      self.vel_command_b[w_ids, 0] = cos_h * vx_w + sin_h * vy_w
+      self.vel_command_b[w_ids, 1] = -sin_h * vx_w + cos_h * vy_w
+
     # Zero out commands for standing environments
     standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
     self.vel_command_b[standing_env_ids, :] = 0.0
+    self.vel_command_w[standing_env_ids, :] = 0.0
+
+  # GUI.
+
+  def create_gui(
+    self,
+    name: str,
+    server: viser.ViserServer,
+    get_env_idx: Callable[[], int],
+    on_change: Callable[[], None] | None = None,
+    request_action: Callable[[str, Any], None] | None = None,
+  ) -> None:
+    """Create velocity joystick sliders in the Viser viewer."""
+    from viser import Icon
+
+    ranges = self.cfg.ranges
+
+    axes = [
+      ("lin_vel_x", ranges.lin_vel_x[1]),
+      ("lin_vel_y", ranges.lin_vel_y[1]),
+      ("ang_vel_z", ranges.ang_vel_z[1]),
+    ]
+    sliders: list = []
+
+    with server.gui.add_folder(name.capitalize()):
+      enabled = server.gui.add_checkbox("Enable", initial_value=False)
+
+      for label, max_val in axes:
+        max_input = server.gui.add_slider(
+          f"Max {label}",
+          initial_value=max_val,
+          step=0.1,
+          min=0.1,
+          max=10.0,
+        )
+        slider = server.gui.add_slider(
+          label,
+          min=-max_val,
+          max=max_val,
+          step=0.05,
+          initial_value=0.0,
+        )
+
+        @max_input.on_update
+        def _(_ev, _s=slider, _m=max_input) -> None:
+          _s.min = -_m.value
+          _s.max = _m.value
+
+        sliders.append(slider)
+
+      zero_btn = server.gui.add_button("Zero", icon=Icon.SQUARE_X)
+
+      @zero_btn.on_click
+      def _(_) -> None:
+        for s in sliders:
+          s.value = 0.0
+
+    # Store GUI state for compute() override.
+    self._joystick_enabled = enabled
+    self._joystick_sliders = sliders
+    self._joystick_get_env_idx = get_env_idx
+
+  def compute(self, dt: float) -> None:
+    super().compute(dt)
+    if self._joystick_enabled is not None and self._joystick_enabled.value:
+      assert self._joystick_get_env_idx is not None
+      idx = self._joystick_get_env_idx()
+      for i, s in enumerate(self._joystick_sliders):
+        self.vel_command_b[idx, i] = s.value
 
   # Visualization.
 
@@ -200,14 +308,20 @@ class UniformVelocityCommand(CommandTerm):
 
 @dataclass(kw_only=True)
 class UniformVelocityCommandCfg(CommandTermCfg):
-  """Configuration for uniform velocity command generation."""
-  
-  entity_name: str  # Name of the robot entity to command
-  heading_command: bool = False  # Enable heading control mode
-  heading_control_stiffness: float = 1.0  # Proportional gain for heading control
-  rel_standing_envs: float = 0.0  # Fraction of environments to remain standing
-  rel_heading_envs: float = 1.0  # Fraction of environments using heading control
-  init_velocity_prob: float = 0.0  # Probability of initializing robot to command velocity
+  entity_name: str
+  heading_command: bool = False
+  heading_control_stiffness: float = 1.0
+  rel_standing_envs: float = 0.0
+  rel_heading_envs: float = 1.0
+  rel_world_envs: float = 0.0
+  """Fraction of environments that use world-frame velocity commands.
+  World-frame envs sample linear velocity in world frame and rotate to body
+  frame each step, so the command direction stays fixed in the world."""
+  rel_forward_envs: float = 0.0
+  """Fraction of environments that receive forward-only commands (positive
+  lin_vel_x, zero lin_vel_y and ang_vel_z). Increases training coverage for
+  straight-line walking, which is important for stair climbing."""
+  init_velocity_prob: float = 0.0
 
   @dataclass
   class Ranges:

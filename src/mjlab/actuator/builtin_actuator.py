@@ -16,6 +16,7 @@ from mjlab.actuator.actuator import (
   Actuator,
   ActuatorCfg,
   ActuatorCmd,
+  CommandField,
   TransmissionType,
 )
 from mjlab.utils.spec import (
@@ -33,9 +34,9 @@ if TYPE_CHECKING:
 class BuiltinPositionActuatorCfg(ActuatorCfg):
   """Configuration for MuJoCo built-in position actuator.
 
-  Under the hood, this creates a <position> actuator for each target and sets
-  the stiffness, damping and effort limits accordingly. It also modifies the target's
-  properties, namely armature and frictionloss.
+  Under the hood, this creates a <position> actuator for each target and sets the
+  stiffness, damping and effort limits accordingly. If armature or frictionloss are
+  set, they override the corresponding joint/tendon properties from XML.
   """
 
   stiffness: float
@@ -62,6 +63,10 @@ class BuiltinPositionActuatorCfg(ActuatorCfg):
 class BuiltinPositionActuator(Actuator[BuiltinPositionActuatorCfg]):
   """MuJoCo built-in position actuator."""
 
+  @property
+  def command_field(self) -> CommandField:
+    return "position"
+
   def __init__(
     self,
     cfg: BuiltinPositionActuatorCfg,
@@ -82,6 +87,7 @@ class BuiltinPositionActuator(Actuator[BuiltinPositionActuatorCfg]):
         effort_limit=self.cfg.effort_limit,
         armature=self.cfg.armature,
         frictionloss=self.cfg.frictionloss,
+        viscous_damping=self.cfg.viscous_damping,
         transmission_type=self.cfg.transmission_type,
       )
       self._mjs_actuators.append(actuator)
@@ -94,9 +100,9 @@ class BuiltinPositionActuator(Actuator[BuiltinPositionActuatorCfg]):
 class BuiltinMotorActuatorCfg(ActuatorCfg):
   """Configuration for MuJoCo built-in motor actuator.
 
-  Under the hood, this creates a <motor> actuator for each target and sets
-  its effort limit and gear ratio accordingly. It also modifies the target's
-  properties, namely armature and frictionloss.
+  Under the hood, this creates a <motor> actuator for each target and sets its effort
+  limit and gear ratio accordingly. If armature or frictionloss are set, they override
+  the corresponding joint/tendon properties from XML.
   """
 
   effort_limit: float
@@ -112,6 +118,10 @@ class BuiltinMotorActuatorCfg(ActuatorCfg):
 
 class BuiltinMotorActuator(Actuator[BuiltinMotorActuatorCfg]):
   """MuJoCo built-in motor actuator."""
+
+  @property
+  def command_field(self) -> CommandField:
+    return "effort"
 
   def __init__(
     self,
@@ -132,6 +142,7 @@ class BuiltinMotorActuator(Actuator[BuiltinMotorActuatorCfg]):
         gear=self.cfg.gear,
         armature=self.cfg.armature,
         frictionloss=self.cfg.frictionloss,
+        viscous_damping=self.cfg.viscous_damping,
         transmission_type=self.cfg.transmission_type,
       )
       self._mjs_actuators.append(actuator)
@@ -145,8 +156,8 @@ class BuiltinVelocityActuatorCfg(ActuatorCfg):
   """Configuration for MuJoCo built-in velocity actuator.
 
   Under the hood, this creates a <velocity> actuator for each target and sets the
-  damping gain. It also modifies the target's properties, namely armature and
-  frictionloss.
+  damping gain. If armature or frictionloss are set, they override the corresponding
+  joint/tendon properties from XML.
   """
 
   damping: float
@@ -171,6 +182,10 @@ class BuiltinVelocityActuatorCfg(ActuatorCfg):
 class BuiltinVelocityActuator(Actuator[BuiltinVelocityActuatorCfg]):
   """MuJoCo built-in velocity actuator."""
 
+  @property
+  def command_field(self) -> CommandField:
+    return "velocity"
+
   def __init__(
     self,
     cfg: BuiltinVelocityActuatorCfg,
@@ -190,6 +205,7 @@ class BuiltinVelocityActuator(Actuator[BuiltinVelocityActuatorCfg]):
         effort_limit=self.cfg.effort_limit,
         armature=self.cfg.armature,
         frictionloss=self.cfg.frictionloss,
+        viscous_damping=self.cfg.viscous_damping,
         transmission_type=self.cfg.transmission_type,
       )
       self._mjs_actuators.append(actuator)
@@ -243,6 +259,10 @@ class BuiltinMuscleActuatorCfg(ActuatorCfg):
 
 class BuiltinMuscleActuator(Actuator[BuiltinMuscleActuatorCfg]):
   """MuJoCo built-in muscle actuator."""
+
+  @property
+  def command_field(self) -> CommandField:
+    return "effort"
 
   def __init__(
     self,

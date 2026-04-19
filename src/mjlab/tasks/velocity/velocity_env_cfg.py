@@ -9,21 +9,28 @@ from dataclasses import replace
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
+from mjlab.envs.mdp import dr
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.action_manager import ActionTermCfg
 from mjlab.managers.command_manager import CommandTermCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
 from mjlab.scene import SceneCfg
-from mjlab.sensor import GridPatternCfg, ObjRef, RayCastSensorCfg
+from mjlab.sensor import (
+  GridPatternCfg,
+  ObjRef,
+  RayCastSensorCfg,
+  TerrainHeightSensorCfg,
+)
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
-from mjlab.terrains import TerrainImporterCfg
+from mjlab.terrains import TerrainEntityCfg
 from mjlab.terrains.config import ROUGH_TERRAINS_CFG
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
@@ -43,8 +50,23 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     pattern=GridPatternCfg(size=(1.6, 1.0), resolution=0.1),
     max_distance=5.0,
     exclude_parent_body=True,
+    include_geom_groups=(0,),  # Terrain only.
     debug_vis=True,
-    viz=RayCastSensorCfg.VizCfg(show_normals=True),
+  )
+
+  foot_height_scan = TerrainHeightSensorCfg(
+    name="foot_height_scan",
+    frame=(),  # Set per-robot: frame and pattern.
+    ray_alignment="yaw",
+    max_distance=1.0,
+    exclude_parent_body=True,
+    include_geom_groups=(0,),  # Terrain only.
+    debug_vis=True,
+    viz=TerrainHeightSensorCfg.VizCfg(
+      show_rays=True,
+      hit_color=(1.0, 0.0, 1.0, 0.8),  # Magenta rays.
+      hit_sphere_color=(1.0, 0.0, 1.0, 1.0),
+    ),
   )
 
   ##
@@ -96,7 +118,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "foot_height": ObservationTermCfg(
       func=mdp.foot_height,
-      params={"asset_cfg": SceneEntityCfg("robot", site_names=())},  # Set per-robot.
+      params={"sensor_name": "foot_height_scan"},
     ),
     "foot_air_time": ObservationTermCfg(
       func=mdp.foot_air_time,
@@ -126,6 +148,16 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
+  # Metrics
+  ##
+
+  metrics = {
+    "mean_action_acc": MetricsTermCfg(
+      func=mdp.mean_action_acc,
+    ),
+  }
+
+  ##
   # Actions
   ##
 
@@ -145,9 +177,10 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
   commands: dict[str, CommandTermCfg] = {
     "twist": UniformVelocityCommandCfg(
       entity_name="robot",
-      resampling_time_range=(3.0, 8.0),  # Resample every 3-8s
-      rel_standing_envs=0.1,  # 10% of envs get zero velocity
-      rel_heading_envs=0.3,  # 30% use heading control
+      resampling_time_range=(3.0, 8.0),
+      rel_standing_envs=0.1,
+      rel_heading_envs=0.3,
+      rel_forward_envs=0.2,
       heading_command=True,
       heading_control_stiffness=0.5,
       debug_vis=True,
@@ -204,19 +237,17 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "foot_friction": EventTermCfg(
       mode="startup",
-      func=mdp.randomize_field,
-      domain_randomization=True,
+      func=dr.geom_friction,
       params={
         "asset_cfg": SceneEntityCfg("robot", geom_names=()),  # Set per-robot.
         "operation": "abs",
-        "field": "geom_friction",
         "ranges": (0.3, 1.2),
         "shared_random": True,  # All foot geoms share the same friction.
       },
     ),
     "encoder_bias": EventTermCfg(
       mode="startup",
-      func=mdp.randomize_encoder_bias,
+      func=dr.encoder_bias,
       params={
         "asset_cfg": SceneEntityCfg("robot"),
         "bias_range": (-0.015, 0.015),
@@ -224,12 +255,10 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "base_com": EventTermCfg(
       mode="startup",
-      func=mdp.randomize_field,
-      domain_randomization=True,
+      func=dr.body_com_offset,
       params={
         "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
         "operation": "add",
-        "field": "body_ipos",
         "ranges": {
           0: (-0.025, 0.025),
           1: (-0.025, 0.025),
@@ -255,7 +284,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"command_name": "twist", "std": math.sqrt(0.5)},
     ),
     "upright": RewardTermCfg(
-      func=mdp.flat_orientation,
+      func=mdp.upright,
       weight=1.0,
       params={
         "std": math.sqrt(0.2),
@@ -336,6 +365,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=-2.0,
       params={
         "target_height": 0.1,
+        "height_sensor_name": "foot_height_scan",
         "command_name": "twist",
         "command_threshold": 0.05,
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
@@ -346,10 +376,10 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=-0.25,
       params={
         "sensor_name": "feet_ground_contact",
+        "height_sensor_name": "foot_height_scan",
         "target_height": 0.1,
         "command_name": "twist",
         "command_threshold": 0.05,
-        "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
       },
     ),
     "foot_slip": RewardTermCfg(
@@ -391,6 +421,10 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "fell_over": TerminationTermCfg(
       func=mdp.bad_orientation,
       params={"limit_angle": math.radians(70.0)},
+    ),
+    "out_of_terrain_bounds": TerminationTermCfg(
+      func=mdp.out_of_terrain_bounds,
+      time_out=True,
     ),
   }
 
@@ -443,12 +477,12 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
 
   return ManagerBasedRlEnvCfg(
     scene=SceneCfg(
-      terrain=TerrainImporterCfg(
+      terrain=TerrainEntityCfg(
         terrain_type="generator",
         terrain_generator=replace(ROUGH_TERRAINS_CFG),
         max_init_terrain_level=5,
       ),
-      sensors=(terrain_scan,),
+      sensors=(terrain_scan, foot_height_scan),
       num_envs=1,
       extent=2.0,
     ),
@@ -459,6 +493,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     rewards=rewards,
     terminations=terminations,
     curriculum=curriculum,
+    metrics=metrics,
     viewer=ViewerConfig(
       origin_type=ViewerConfig.OriginType.ASSET_BODY,
       entity_name="robot",

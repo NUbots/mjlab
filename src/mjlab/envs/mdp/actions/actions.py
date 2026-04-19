@@ -88,6 +88,15 @@ class BaseAction(ActionTerm):
         f"Supported types are float and dict."
       )
 
+    if cfg.clip is not None:
+      self._clip = torch.tensor(
+        [[-float("inf"), float("inf")]], device=self.device
+      ).repeat(self.num_envs, self.action_dim, 1)
+      index_list, _, value_list = resolve_matching_names_values(
+        cfg.clip, self._target_names
+      )
+      self._clip[:, index_list] = torch.tensor(value_list, device=self.device)
+
   def _find_targets(self, cfg: BaseActionCfg) -> tuple[list[int], list[str]]:
     """Find target IDs and names based on transmission type.
 
@@ -143,9 +152,15 @@ class BaseAction(ActionTerm):
     return self._target_names
 
   def process_actions(self, actions: torch.Tensor):
-    """Process raw actions by applying scale and offset."""
+    """Process raw actions by applying scale, offset, and optional clip."""
     self._raw_actions[:] = actions
     self._processed_actions = self._raw_actions * self._scale + self._offset
+    if self.cfg.clip is not None:
+      self._processed_actions = torch.clamp(
+        self._processed_actions,
+        min=self._clip[:, :, 0],
+        max=self._clip[:, :, 1],
+      )
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     """Reset raw actions to zero for specified environments."""
@@ -206,6 +221,39 @@ class JointPositionAction(BaseAction):
   def apply_actions(self) -> None:
     encoder_bias = self._entity.data.encoder_bias[:, self._target_ids]
     target = self._processed_actions - encoder_bias
+    self._entity.set_joint_position_target(target, joint_ids=self._target_ids)
+
+
+@dataclass(kw_only=True)
+class RelativeJointPositionActionCfg(BaseActionCfg):
+  """Configuration for joint position control relative to current positions.
+
+  target = current_joint_pos + action * scale
+
+  The ``offset`` field inherited from ``BaseActionCfg`` is not supported and
+  must remain at its default of ``0.0``. The ``clip`` field is supported and
+  clamps the delta (``action * scale``) before it is added to the current
+  position.
+  """
+
+  def __post_init__(self):
+    self.transmission_type = TransmissionType.JOINT
+    if self.offset != 0.0:
+      raise ValueError(
+        "RelativeJointPositionActionCfg does not support 'offset'. "
+        "The target is current_pos + action * scale; a fixed offset has no meaning."
+      )
+
+  def build(self, env: ManagerBasedRlEnv) -> RelativeJointPositionAction:
+    return RelativeJointPositionAction(self, env)
+
+
+class RelativeJointPositionAction(BaseAction):
+  """Control joints via position targets relative to current positions."""
+
+  def apply_actions(self) -> None:
+    current_pos = self._entity.data.joint_pos[:, self._target_ids]
+    target = current_pos + self._processed_actions
     self._entity.set_joint_position_target(target, joint_ids=self._target_ids)
 
 

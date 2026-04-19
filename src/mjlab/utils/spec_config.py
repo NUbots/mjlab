@@ -30,6 +30,9 @@ _GEOM_ATTR_DEFAULTS = {
   "friction": None,
   "solref": None,
   "solimp": None,
+  "margin": None,
+  "gap": None,
+  "solmix": None,
 }
 
 _LIGHT_TYPE_MAP = {
@@ -104,29 +107,47 @@ class TextureCfg(SpecCfg):
 
 @dataclass
 class MaterialCfg(SpecCfg):
-  """Configuration to add a material to the MuJoCo spec."""
+  """Configuration to add a material to the MuJoCo spec.
+
+  Optionally assigns the material to geoms matching ``geom_names_expr``.
+  """
 
   name: str
   """Name of the material."""
-  texuniform: bool
-  """Whether texture is uniform."""
-  texrepeat: tuple[int, int]
-  """Texture repeat pattern (width, height) - both must be positive."""
+  rgba: tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
+  """RGBA color of the material. Without a texture this is the direct
+  surface color; with a texture it multiplies the texture colors."""
+  texuniform: bool = False
+  """Whether texture coordinates are uniform."""
+  texrepeat: tuple[float, float] = (1.0, 1.0)
+  """Texture repeat pattern (width, height). Must be positive."""
   reflectance: float = 0.0
   """Material reflectance value."""
   texture: str | None = None
   """Name of texture to apply (optional)."""
+  geom_names_expr: tuple[str, ...] | None = None
+  """Regex patterns to match geom names. Matching geoms will have their
+  material set to this material. ``None`` means no assignment."""
 
   def edit_spec(self, spec: mujoco.MjSpec) -> None:
     self.validate()
 
     mat = spec.add_material(
       name=self.name,
+      rgba=self.rgba,
       texuniform=self.texuniform,
       texrepeat=self.texrepeat,
     )
     if self.texture is not None:
       mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB.value] = self.texture
+
+    if self.geom_names_expr is not None:
+      from mjlab.utils.string import filter_exp
+
+      all_geom_names = tuple(g.name for g in spec.geoms)
+      matched = filter_exp(self.geom_names_expr, all_geom_names)
+      for geom_name in matched:
+        spec.geom(geom_name).material = self.name
 
   def validate(self) -> None:
     if self.texrepeat[0] <= 0 or self.texrepeat[1] <= 0:
@@ -160,6 +181,12 @@ class CollisionCfg(SpecCfg):
   """Solver reference parameters as tuple or dict mapping patterns to tuples."""
   solimp: tuple[float, ...] | dict[str, tuple[float, ...]] | None = None
   """Solver impedance parameters as tuple or dict mapping patterns to tuples."""
+  margin: float | dict[str, float] | None = None
+  """Detection margin. Contacts are generated when geom distance < margin."""
+  gap: float | dict[str, float] | None = None
+  """Gap for solver inclusion. Contact included when dist < margin - gap."""
+  solmix: float | dict[str, float] | None = None
+  """Mixing weight for blending solver parameters between geom pairs."""
   disable_other_geoms: bool = True
   """Whether to disable collision for non-matching geoms."""
 
@@ -203,6 +230,36 @@ class CollisionCfg(SpecCfg):
               f"{field_name} must be non-negative, got {value} for pattern '{pattern}'"
             )
 
+    # Validate margin (non-negative).
+    if isinstance(self.margin, (int, float)) and self.margin < 0:
+      raise ValueError("margin must be non-negative")
+    if isinstance(self.margin, dict):
+      for pattern, value in self.margin.items():
+        if value < 0:
+          raise ValueError(
+            f"margin must be non-negative, got {value} for pattern '{pattern}'"
+          )
+
+    # Validate gap (non-negative).
+    if isinstance(self.gap, (int, float)) and self.gap < 0:
+      raise ValueError("gap must be non-negative")
+    if isinstance(self.gap, dict):
+      for pattern, value in self.gap.items():
+        if value < 0:
+          raise ValueError(
+            f"gap must be non-negative, got {value} for pattern '{pattern}'"
+          )
+
+    # Validate solmix (must be in [0, 1]).
+    if isinstance(self.solmix, (int, float)) and not (0 <= self.solmix <= 1):
+      raise ValueError("solmix must be in [0, 1]")
+    if isinstance(self.solmix, dict):
+      for pattern, value in self.solmix.items():
+        if not (0 <= value <= 1):
+          raise ValueError(
+            f"solmix must be in [0, 1], got {value} for pattern '{pattern}'"
+          )
+
   def edit_spec(self, spec: mujoco.MjSpec) -> None:
     from mjlab.utils.spec import disable_collision
     from mjlab.utils.string import filter_exp, resolve_field
@@ -230,6 +287,13 @@ class CollisionCfg(SpecCfg):
       CollisionCfg.set_array_field(geom.solref, resolved_fields["solref"][i])
       CollisionCfg.set_array_field(geom.solimp, resolved_fields["solimp"][i])
 
+      if resolved_fields["margin"][i] is not None:
+        geom.margin = resolved_fields["margin"][i]
+      if resolved_fields["gap"][i] is not None:
+        geom.gap = resolved_fields["gap"][i]
+      if resolved_fields["solmix"][i] is not None:
+        geom.solmix = resolved_fields["solmix"][i]
+
     if self.disable_other_geoms:
       other_geoms = set(all_geom_names).difference(geom_subset)
       for geom_name in other_geoms:
@@ -253,13 +317,13 @@ class LightCfg(SpecCfg):
   """Light type ("spot" or "directional")."""
   castshadow: bool = True
   """Whether light casts shadows."""
-  pos: tuple[float, float, float] = (0, 0, 0)
+  pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
   """Light position (x, y, z)."""
-  dir: tuple[float, float, float] = (0, 0, -1)
+  dir: tuple[float, float, float] = (0.0, 0.0, -1.0)
   """Light direction vector (x, y, z)."""
-  cutoff: float = 45
+  cutoff: float = 45.0
   """Spot light cutoff angle in degrees."""
-  exponent: float = 10
+  exponent: float = 10.0
   """Spot light exponent."""
 
   def edit_spec(self, spec: mujoco.MjSpec) -> None:
@@ -296,11 +360,11 @@ class CameraCfg(SpecCfg):
   """Camera mode ("fixed", "track", "trackcom", "targetbody", "targetbodycom")."""
   target: str | None = None
   """Target body for tracking modes (optional)."""
-  fovy: float = 45
+  fovy: float = 45.0
   """Field of view in degrees."""
-  pos: tuple[float, float, float] = (0, 0, 0)
+  pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
   """Camera position (x, y, z)."""
-  quat: tuple[float, float, float, float] = (1, 0, 0, 0)
+  quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
   """Camera orientation quaternion (w, x, y, z)."""
 
   def edit_spec(self, spec: mujoco.MjSpec) -> None:

@@ -28,7 +28,15 @@ extensions = [
   "sphinx_design",
   "sphinx_tabs.tabs",
   "sphinx_multiversion",
+  "sphinx.ext.extlinks",
 ]
+
+extlinks = {
+  "issue": (
+    "https://github.com/mujocolab/mjlab/issues/%s",
+    "#%s",
+  ),
+}
 
 mathjax3_config = {
   "tex": {
@@ -65,11 +73,7 @@ bibtex_bibfiles = ["source/_static/refs.bib"]
 autosummary_generate = True
 autosummary_generate_overwrite = False
 autodoc_default_options = {
-  "members": True,
-  "undoc-members": True,
-  "show-inheritance": True,
   "member-order": "bysource",
-  "autosummary": True,
 }
 intersphinx_mapping = {
   "python": ("https://docs.python.org/3", None),
@@ -98,6 +102,7 @@ autodoc_mock_imports = [
   "tensordict",
   "trimesh",
   "toml",
+  "mjviser",
   "mujoco_warp",
   "gymnasium",
   "rsl_rl",
@@ -134,7 +139,7 @@ html_theme_options = {
   "show_toc_level": 2,
   "use_sidenotes": True,
   "logo": {
-    "text": "The mjlab Documentation",
+    "text": "mjlab Documentation",
   },
   "icon_links": [
     {
@@ -172,5 +177,24 @@ def skip_member(app, what, name, obj, skip, options):
   return None
 
 
+def process_signature(app, what, name, obj, options, signature, return_annotation):
+  """Suppress the ugly __init__ signature for dataclass Cfg classes."""
+  if what == "class" and "exclude-members" in options:
+    if "__init__" in options["exclude-members"]:
+      return ("", None)
+  return None
+
+
+def process_docstring(app, what, name, obj, options, lines):
+  """Strip auto-generated dataclass docstrings (e.g. 'ClassName(*, ...)')."""
+  import dataclasses
+
+  if what == "class" and dataclasses.is_dataclass(obj):
+    if lines and lines[0].startswith(f"{obj.__name__}("):
+      lines.clear()
+
+
 def setup(app):
   app.connect("autodoc-skip-member", skip_member)
+  app.connect("autodoc-process-signature", process_signature)
+  app.connect("autodoc-process-docstring", process_docstring)

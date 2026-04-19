@@ -9,7 +9,7 @@ import mujoco
 import mujoco_warp as mjwarp
 import torch
 
-from mjlab.actuator.actuator import Actuator, ActuatorCfg, ActuatorCmd
+from mjlab.actuator.actuator import Actuator, ActuatorCfg, ActuatorCmd, CommandField
 from mjlab.utils.spec import create_motor_actuator
 
 if TYPE_CHECKING:
@@ -38,6 +38,10 @@ class IdealPdActuatorCfg(ActuatorCfg):
 class IdealPdActuator(Actuator, Generic[IdealPdCfgT]):
   """Ideal PD control actuator."""
 
+  @property
+  def command_field(self) -> CommandField:
+    return "position"
+
   def __init__(
     self,
     cfg: IdealPdCfgT,
@@ -62,6 +66,7 @@ class IdealPdActuator(Actuator, Generic[IdealPdCfgT]):
         effort_limit=self.cfg.effort_limit,
         armature=self.cfg.armature,
         frictionloss=self.cfg.frictionloss,
+        viscous_damping=self.cfg.viscous_damping,
         transmission_type=self.cfg.transmission_type,
       )
       self._mjs_actuators.append(actuator)

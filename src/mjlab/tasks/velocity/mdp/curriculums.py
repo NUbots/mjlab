@@ -22,17 +22,12 @@ class VelocityStage(TypedDict):
   ang_vel_z: tuple[float, float] | None
 
 
-class RewardWeightStage(TypedDict):
-  step: int
-  weight: float
-
-
 def terrain_levels_vel(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
   command_name: str,
   asset_cfg: SceneEntityCfg = _DEFAULT_SCENE_CFG,
-) -> torch.Tensor:
+) -> dict[str, torch.Tensor]:
   asset: Entity = env.scene[asset_cfg.name]
 
   terrain = env.scene.terrain
@@ -45,14 +40,15 @@ def terrain_levels_vel(
 
   # Compute the distance the robot walked.
   distance = torch.norm(
-    asset.data.root_link_pos_w[env_ids, :2] - env.scene.env_origins[env_ids, :2], dim=1
+    asset.data.root_link_pos_w[env_ids, :2] - env.scene.env_origins[env_ids, :2],
+    dim=1,
   )
 
   # Robots that walked far enough progress to harder terrains.
   move_up = distance > terrain_generator.size[0] / 2
 
-  # Robots that walked less than half of their required distance go to simpler
-  # terrains.
+  # Robots that walked less than half of their required distance go to
+  # simpler terrains.
   move_down = (
     distance < torch.norm(command[env_ids, :2], dim=1) * env.max_episode_length_s * 0.5
   )
@@ -61,7 +57,27 @@ def terrain_levels_vel(
   # Update terrain levels.
   terrain.update_env_origins(env_ids, move_up, move_down)
 
-  return torch.mean(terrain.terrain_levels.float())
+  # Compute per-terrain-type mean levels.
+  levels = terrain.terrain_levels.float()
+  result: dict[str, torch.Tensor] = {
+    "mean": torch.mean(levels),
+    "max": torch.max(levels),
+  }
+
+  # In curriculum mode num_cols == num_terrains (one column per type),
+  # so the column index directly maps to the sub-terrain name.
+  sub_terrain_names = list(terrain_generator.sub_terrains.keys())
+  terrain_origins = terrain.terrain_origins
+  assert terrain_origins is not None
+  num_cols = terrain_origins.shape[1]
+  if num_cols == len(sub_terrain_names):
+    types = terrain.terrain_types
+    for i, name in enumerate(sub_terrain_names):
+      mask = types == i
+      if mask.any():
+        result[name] = torch.mean(levels[mask])
+
+  return result
 
 
 def commands_vel(
@@ -75,7 +91,7 @@ def commands_vel(
   assert command_term is not None
   cfg = cast(UniformVelocityCommandCfg, command_term.cfg)
   for stage in velocity_stages:
-    if env.common_step_counter > stage["step"]:
+    if env.common_step_counter >= stage["step"]:
       if "lin_vel_x" in stage and stage["lin_vel_x"] is not None:
         cfg.ranges.lin_vel_x = stage["lin_vel_x"]
       if "lin_vel_y" in stage and stage["lin_vel_y"] is not None:
@@ -90,18 +106,3 @@ def commands_vel(
     "ang_vel_z_min": torch.tensor(cfg.ranges.ang_vel_z[0]),
     "ang_vel_z_max": torch.tensor(cfg.ranges.ang_vel_z[1]),
   }
-
-
-def reward_weight(
-  env: ManagerBasedRlEnv,
-  env_ids: torch.Tensor,
-  reward_name: str,
-  weight_stages: list[RewardWeightStage],
-) -> torch.Tensor:
-  """Update a reward term's weight based on training step stages."""
-  del env_ids  # Unused.
-  reward_term_cfg = env.reward_manager.get_term_cfg(reward_name)
-  for stage in weight_stages:
-    if env.common_step_counter > stage["step"]:
-      reward_term_cfg.weight = stage["weight"]
-  return torch.tensor([reward_term_cfg.weight])

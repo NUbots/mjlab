@@ -68,8 +68,8 @@ def main() -> None:
   grip_open = torch.tensor([[0.037]], device=device)
 
   server = viser.ViserServer(label="IK Control Demo")
-  scene = ViserMujocoScene.create(server, sim.mj_model, num_envs=1)
-  scene.create_visualization_gui(
+  scene = ViserMujocoScene(server, sim.mj_model, num_envs=1)
+  scene.create_scene_gui(
     camera_distance=0.1,
     camera_azimuth=135.0,
     camera_elevation=30.0,
@@ -180,7 +180,7 @@ def main() -> None:
         entity.write_joint_position_to_sim(grip_open, joint_ids=grip_joint_ids)
         sim.forward()
 
-      scene.update(sim.wp_data)
+      scene.update(sim.data)
       if scene.needs_update:
         scene.refresh_visualization()
 

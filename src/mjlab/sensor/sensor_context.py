@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import mujoco
@@ -31,6 +32,10 @@ def _unpack_rgb_kernel(
   rgb[world_idx, pixel_idx, 2] = b
 
 
+# Fields that require per-pixel ray recomputation at render time.
+_RAY_FIELDS = frozenset({"cam_fovy", "cam_intrinsic"})
+
+
 class SensorContext:
   """Container for shared sensing resources.
 
@@ -45,7 +50,7 @@ class SensorContext:
     model: mjwarp.Model,
     data: mjwarp.Data,
     camera_sensors: list[CameraSensor],
-    raycast_sensors: list[RayCastSensor],
+    raycast_sensors: Sequence[RayCastSensor],
     device: str,
   ):
     self._model = model
@@ -67,8 +72,11 @@ class SensorContext:
     self._rgb_unpacked: wp.array | None = None
     self._rgb_torch: torch.Tensor | None = None
     self._depth_torch: torch.Tensor | None = None
+    self._seg_torch: torch.Tensor | None = None
     self._rgb_adr_np: list[int] | None = None
     self._depth_adr_np: list[int] | None = None
+    self._seg_adr_np: list[int] | None = None
+    self._disable_precomputed_rays = False
     self._create_context(mj_model)
 
     # Wire up sensors to use this context.
@@ -89,11 +97,17 @@ class SensorContext:
   def render_context(self) -> mjwarp.RenderContext:
     return self._ctx
 
-  def recreate(self, mj_model: mujoco.MjModel) -> None:
+  def recreate(
+    self,
+    mj_model: mujoco.MjModel,
+    expanded_fields: set[str] | None = None,
+  ) -> None:
     """Recreate the render context after model fields are expanded.
 
     Called by Simulation.expand_model_fields() for domain randomization.
     """
+    if expanded_fields is not None:
+      self._disable_precomputed_rays = bool(expanded_fields & _RAY_FIELDS)
     self._create_context(mj_model)
 
   def prepare(self) -> None:
@@ -176,6 +190,41 @@ class SensorContext:
     cam_data = self._depth_torch[:, depth_adr : depth_adr + num_pixels]
     return cam_data.view(nworld, h, w, 1)
 
+  def get_segmentation(self, cam_idx: int) -> torch.Tensor:
+    """Get per-pixel geom ID data for a camera.
+
+    Args:
+      cam_idx: MuJoCo camera ID.
+
+    Returns:
+      Tensor of shape [num_envs, height, width, 1] (int32).
+      Values: >= 0 for geom IDs, -1 for background, -2 for flex.
+    """
+    if cam_idx not in self._cam_idx_to_list_idx:
+      available = list(self._cam_idx_to_list_idx.keys())
+      raise KeyError(
+        f"Camera ID {cam_idx} not found in SensorContext. "
+        f"Available camera IDs: {available}"
+      )
+
+    list_idx = self._cam_idx_to_list_idx[cam_idx]
+
+    assert self._seg_adr_np is not None
+    assert self._seg_torch is not None
+    seg_adr = self._seg_adr_np[list_idx]
+    if seg_adr < 0:
+      raise RuntimeError(
+        f"Camera ID {cam_idx} does not have segmentation rendering enabled."
+      )
+
+    sensor = self.camera_sensors[list_idx]
+    w, h = sensor.cfg.width, sensor.cfg.height
+    num_pixels = w * h
+    nworld = self._data.nworld
+
+    cam_data = self._seg_torch[:, seg_adr : seg_adr + num_pixels]
+    return cam_data.view(nworld, h, w, 1)
+
   # Private methods.
 
   def _validate_sensor_settings(self) -> None:
@@ -206,9 +255,9 @@ class SensorContext:
     """Compute the union of geom groups across all raycast sensors."""
     groups: set[int] = set()
     for s in self.raycast_sensors:
-      if s.cfg.include_geom_groups is None:
+      if s.include_geom_groups is None:
         return {0, 1, 2, 3, 4, 5}
-      groups.update(s.cfg.include_geom_groups)
+      groups.update(s.include_geom_groups)
     return groups
 
   def _create_context(self, mj_model: mujoco.MjModel) -> None:
@@ -217,6 +266,7 @@ class SensorContext:
     cam_res: list[tuple[int, int]] | None = None
     render_rgb: list[bool] | None = None
     render_depth: list[bool] | None = None
+    render_seg: list[bool] | None = None
 
     raycast_geom_groups = self._raycast_geom_groups()
 
@@ -247,12 +297,14 @@ class SensorContext:
       cam_res = []
       render_rgb = []
       render_depth = []
+      render_seg = []
 
       for s in self.camera_sensors:
         cam_active[s.camera_idx] = True
         cam_res.append((s.cfg.width, s.cfg.height))
         render_rgb.append("rgb" in s.cfg.data_types)
         render_depth.append("depth" in s.cfg.data_types)
+        render_seg.append("segmentation" in s.cfg.data_types)
     else:
       # Raycasts-only: need BVH but no camera rendering.
       use_textures = False
@@ -271,6 +323,8 @@ class SensorContext:
         use_shadows=use_shadows,
         enabled_geom_groups=enabled_geom_groups,
         cam_active=cam_active,
+        use_precomputed_rays=not self._disable_precomputed_rays,
+        render_seg=render_seg,
       )
 
     # Cache address arrays from the render context. An adr value of -1 means that data
@@ -278,11 +332,13 @@ class SensorContext:
     if self.camera_sensors:
       self._rgb_adr_np = self._ctx.rgb_adr.numpy().tolist()
       self._depth_adr_np = self._ctx.depth_adr.numpy().tolist()
+      self._seg_adr_np = self._ctx.seg_adr.numpy().tolist()
 
     has_any_rgb = self._rgb_adr_np is not None and any(a >= 0 for a in self._rgb_adr_np)
     has_any_depth = self._depth_adr_np is not None and any(
       a >= 0 for a in self._depth_adr_np
     )
+    has_any_seg = self._seg_adr_np is not None and any(a >= 0 for a in self._seg_adr_np)
 
     # Allocate RGB unpack buffer if any camera wants RGB.
     if has_any_rgb:
@@ -303,6 +359,12 @@ class SensorContext:
       self._depth_torch = wp.to_torch(self._ctx.depth_data)
     else:
       self._depth_torch = None
+
+    # Cache segmentation torch view (zero-copy).
+    if has_any_seg:
+      self._seg_torch = wp.to_torch(self._ctx.seg_data)
+    else:
+      self._seg_torch = None
 
   def unpack_rgb(self) -> None:
     """Unpack packed uint32 RGB data into separate channels.

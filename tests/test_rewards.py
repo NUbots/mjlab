@@ -10,7 +10,7 @@ from conftest import get_test_device
 
 from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.entity import Entity, EntityArticulationInfoCfg, EntityCfg
-from mjlab.envs.mdp.rewards import electrical_power_cost
+from mjlab.envs.mdp.rewards import electrical_power_cost, joint_torques_l2
 from mjlab.managers.reward_manager import RewardManager, RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sim.sim import Simulation, SimulationCfg
@@ -205,14 +205,13 @@ def test_electrical_power_cost_partially_actuated(device):
   reward = electrical_power_cost(reward_cfg, env)
 
   assert len(reward._joint_ids) == 2
-  assert len(reward._actuator_ids) == 2
 
   # Test case 1: All forces and velocities aligned (all positive work).
-  # actuated_joint1 (qvel[:, 0]), actuated_joint2 (qvel[:, 2]).
-  # Note: qvel[:, 1] is the passive joint, not used in power calculation.
-  sim.data.actuator_force[:] = torch.tensor(
-    [[2.0, 3.0], [1.0, 4.0]], device=device, dtype=torch.float32
-  )
+  # actuated_joint1 (dof 0), actuated_joint2 (dof 2).
+  # Note: dof 1 is the passive joint, not used in power calculation.
+  sim.data.qfrc_actuator[:] = 0.0
+  sim.data.qfrc_actuator[:, 0] = torch.tensor([2.0, 1.0], device=device)
+  sim.data.qfrc_actuator[:, 2] = torch.tensor([3.0, 4.0], device=device)
   sim.data.qvel[:] = 0.0
   sim.data.qvel[:, 0] = torch.tensor([1.0, 2.0], device=device)
   sim.data.qvel[:, 2] = torch.tensor([2.0, 1.0], device=device)
@@ -224,9 +223,9 @@ def test_electrical_power_cost_partially_actuated(device):
   assert torch.allclose(power_cost, expected)
 
   # Test case 2: Some negative forces (regenerative braking, not penalized).
-  sim.data.actuator_force[:] = torch.tensor(
-    [[-2.0, 3.0], [1.0, -4.0]], device=device, dtype=torch.float32
-  )
+  sim.data.qfrc_actuator[:] = 0.0
+  sim.data.qfrc_actuator[:, 0] = torch.tensor([-2.0, 1.0], device=device)
+  sim.data.qfrc_actuator[:, 2] = torch.tensor([3.0, -4.0], device=device)
 
   power_cost = reward(env, asset_cfg)
 
@@ -438,3 +437,27 @@ def test_reward_scaling_default_is_enabled(mock_env):
 
   # Default (scaling enabled): reward = 1.0 * 1.0 * 0.01 = 0.01
   assert torch.allclose(rewards, torch.full((4,), 0.01))
+
+
+def test_joint_torques_l2_with_actuator_ids(mock_env):
+  """Test that joint_torques_l2 only penalizes specified actuators."""
+  mock_env.scene["robot"].data.actuator_force = torch.tensor([[1.0, 2.0, 3.0, 4.0]] * 4)
+
+  asset_cfg = SceneEntityCfg(name="robot", actuator_ids=[0, 2])
+  result = joint_torques_l2(mock_env, asset_cfg)
+
+  # Only actuators 0 and 2: 1^2 + 3^2 = 10.0
+  expected = torch.full((4,), 10.0)
+  assert torch.allclose(result, expected)
+
+
+def test_joint_torques_l2_all_actuators(mock_env):
+  """Test that joint_torques_l2 uses all actuators by default."""
+  mock_env.scene["robot"].data.actuator_force = torch.tensor([[1.0, 2.0, 3.0]] * 4)
+
+  asset_cfg = SceneEntityCfg(name="robot")
+  result = joint_torques_l2(mock_env, asset_cfg)
+
+  # All actuators: 1^2 + 2^2 + 3^2 = 14.0
+  expected = torch.full((4,), 14.0)
+  assert torch.allclose(result, expected)

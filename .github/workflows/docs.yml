@@ -34,6 +34,9 @@ jobs:
       - name: Add root redirect
         run: echo '<meta http-equiv="refresh" content="0; url=main/index.html">' > docs/_build/index.html
 
+      - name: Remove Sphinx build artifacts
+        run: find docs/_build -type d -name .doctrees -exec rm -rf {} +
+
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:

@@ -34,7 +34,9 @@ def joint_torques_l2(
 ) -> torch.Tensor:
   """Penalize joint torques applied on the articulation using L2 squared kernel."""
   asset: Entity = env.scene[asset_cfg.name]
-  return torch.sum(torch.square(asset.data.actuator_force), dim=1)
+  return torch.sum(
+    torch.square(asset.data.actuator_force[:, asset_cfg.actuator_ids]), dim=1
+  )
 
 
 def joint_vel_l2(
@@ -54,14 +56,20 @@ def joint_acc_l2(
 
 
 def action_rate_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Penalize the rate of change of the actions using L2 squared kernel."""
+  """Penalize the rate of change of the actions using L2 squared kernel.
+
+  Operates on raw policy output (before per-term scale/offset).
+  """
   return torch.sum(
     torch.square(env.action_manager.action - env.action_manager.prev_action), dim=1
   )
 
 
 def action_acc_l2(env: ManagerBasedRlEnv) -> torch.Tensor:
-  """Penalize the acceleration of the actions using L2 squared kernel."""
+  """Penalize the acceleration of the actions using L2 squared kernel.
+
+  Operates on raw policy output (before per-term scale/offset).
+  """
   action_acc = (
     env.action_manager.action
     - 2 * env.action_manager.prev_action
@@ -131,15 +139,11 @@ class electrical_power_cost:
     joint_ids, _ = asset.find_joints(
       cfg.params["asset_cfg"].joint_names,
     )
-    actuator_ids, _ = asset.find_actuators(
-      cfg.params["asset_cfg"].joint_names,
-    )
     self._joint_ids = torch.tensor(joint_ids, device=env.device, dtype=torch.long)
-    self._actuator_ids = torch.tensor(actuator_ids, device=env.device, dtype=torch.long)
 
   def __call__(self, env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     asset: Entity = env.scene[asset_cfg.name]
-    tau = asset.data.actuator_force[:, self._actuator_ids]
+    tau = asset.data.qfrc_actuator[:, self._joint_ids]
     qd = asset.data.joint_vel[:, self._joint_ids]
     mech = tau * qd
     mech_pos = torch.clamp(mech, min=0.0)  # Don't penalize regen.
