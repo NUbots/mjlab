@@ -36,6 +36,8 @@ class TrainConfig:
   wandb_checkpoint_name: str | None = None
   """Optional checkpoint name within the W&B run to load (e.g. 'model_4000.pt')."""
   gpu_ids: list[int] | Literal["all"] | None = field(default_factory=lambda: [0])
+  log_terminal: bool = False
+  """Write a rolling training_log.json to the log directory."""
 
   @staticmethod
   def from_task(task_id: str) -> "TrainConfig":
@@ -163,6 +165,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     dump_yaml(log_dir / "params" / "agent.yaml", agent_cfg)
 
   runner = runner_cls(env, agent_cfg, str(log_dir), device, **runner_kwargs)
+
+  if cfg.log_terminal:
+    from mjlab.rl.terminal_log import enable_terminal_log
+
+    enable_terminal_log(runner.logger)
 
   add_wandb_tags(cfg.agent.wandb_tags)
   runner.add_git_repo_to_log(__file__)
