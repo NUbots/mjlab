@@ -1,4 +1,5 @@
 from pathlib import Path
+
 import mujoco
 
 from mjlab import MJLAB_SRC_PATH
@@ -41,25 +42,25 @@ def get_spec() -> mujoco.MjSpec:
 # MX106 motor (hip yaw joints)
 ARMATURE_MX106 = 0.0266
 ACTUATOR_MX106 = ElectricActuator(
-    reflected_inertia=ARMATURE_MX106,
-    velocity_limit=5.75,    # rads/s      
-    effort_limit=11.086,    # From forcerange in xml
+  reflected_inertia=ARMATURE_MX106,
+  velocity_limit=5.75,  # rads/s
+  effort_limit=11.086,  # From forcerange in xml
 )
 
 # MX64 motor (most other joints)
 ARMATURE_MX64 = 0.01195
 ACTUATOR_MX64 = ElectricActuator(
-    reflected_inertia=ARMATURE_MX64,
-    velocity_limit=8.168,   # rads/s
-    effort_limit=6.1621,    # From forcerange in xml
+  reflected_inertia=ARMATURE_MX64,
+  velocity_limit=8.168,  # rads/s
+  effort_limit=6.1621,  # From forcerange in xml
 )
 
 # XH540-W270 motor (knee joints)
 ARMATURE_XH540 = 0.0266
 ACTUATOR_XH540 = ElectricActuator(
-    reflected_inertia=ARMATURE_XH540,
-    velocity_limit=4.817,   # rads/s
-    effort_limit=11.086,    # From forcerange in xml
+  reflected_inertia=ARMATURE_XH540,
+  velocity_limit=4.817,  # rads/s
+  effort_limit=11.086,  # From forcerange in xml
 )
 
 # Natural frequency and damping ratio for PD control
