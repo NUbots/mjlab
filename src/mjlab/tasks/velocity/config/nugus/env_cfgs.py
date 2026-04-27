@@ -133,7 +133,6 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["limb_symmetry"].params["asset_cfg"].joint_names = (
     r"^(left|right)_(hip_pitch|knee_pitch|ankle_pitch)$",
   )
-  cfg.rewards["limb_symmetry"].params["velocity_weight"] = 0.2
 
   cfg.rewards["cot_proxy"].params["asset_cfg"].joint_names = (".*",)
   cfg.rewards["cot_proxy"].params["speed_floor"] = 0.12
