@@ -40,7 +40,7 @@ def get_spec() -> mujoco.MjSpec:
 ARMATURE_MX106 = 0.0266
 ACTUATOR_MX106 = ElectricActuator(
     reflected_inertia=ARMATURE_MX106,
-    velocity_limit=30,      # TODO, not specified in XML
+    velocity_limit=5.75,    # rads/s      
     effort_limit=11.086,    # From forcerange in xml
 )
 
@@ -48,7 +48,7 @@ ACTUATOR_MX106 = ElectricActuator(
 ARMATURE_MX64 = 0.01195
 ACTUATOR_MX64 = ElectricActuator(
     reflected_inertia=ARMATURE_MX64,
-    velocity_limit=30,      # TODO, not specified in xml
+    velocity_limit=8.168,   # rads/s
     effort_limit=6.1621,    # From forcerange in xml
 )
 
@@ -56,7 +56,7 @@ ACTUATOR_MX64 = ElectricActuator(
 ARMATURE_XH540=0.0266
 ACTUATOR_XH540 = ElectricActuator(
     reflected_inertia=ARMATURE_XH540,
-    velocity_limit=30,      # TODO, not specified in xml
+    velocity_limit=4.817,   # rads/s
     effort_limit=11.086,    # From forcerange in xml
 )
 
