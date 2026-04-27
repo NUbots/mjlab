@@ -44,6 +44,7 @@ def test_collect_metrics_all_terminal_fields():
   )
   m = _collect_metrics(
     logger,
+    logger.ep_extras,
     it=10,
     start_it=0,
     total_it=5000,
@@ -78,6 +79,7 @@ def test_collect_metrics_null_rewards_when_empty():
   logger = _make_logger()
   m = _collect_metrics(
     logger,
+    logger.ep_extras,
     it=0,
     start_it=0,
     total_it=100,
@@ -100,6 +102,7 @@ def test_collect_metrics_episode_extras():
   logger = _make_logger(ep_extras=extras)
   m = _collect_metrics(
     logger,
+    logger.ep_extras,
     it=5,
     start_it=0,
     total_it=100,
@@ -110,7 +113,7 @@ def test_collect_metrics_episode_extras():
     action_std=torch.tensor([0.5]),
     rnd_weight=None,
   )
-  assert m["episode/rew_tracking"] == 2.5
+  assert m["Episode/rew_tracking"] == 2.5
 
 
 def test_dump_history_one_line_per_key(tmp_path):
@@ -210,7 +213,7 @@ def test_enable_terminal_log_null_padding(tmp_path):
   # mean_reward: null for iter 0, value for iter 1.
   assert data["mean_reward"] == [None, 5.0]
   # episode/custom_metric didn't exist at iter 0.
-  assert data["episode/custom_metric"] == [None, 1.0]
+  assert data["Episode/custom_metric"] == [None, 1.0]
   # All arrays same length.
   lengths = {len(v) for v in data.values()}
   assert lengths == {2}

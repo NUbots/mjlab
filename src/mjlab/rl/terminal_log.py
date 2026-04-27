@@ -33,6 +33,7 @@ from rsl_rl.utils.logger import Logger
 
 def _collect_metrics(
   logger: Logger,
+  ep_extras: list[dict[str, Any]],
   it: int,
   start_it: int,
   total_it: int,
@@ -95,9 +96,9 @@ def _collect_metrics(
   m["mean_action_std"] = round(action_std.mean().item(), 4)
 
   # Episode extras (reward components, custom metrics).
-  if logger.ep_extras:
-    for key in logger.ep_extras[0]:
-      values = [ep[key] for ep in logger.ep_extras if key in ep]
+  if ep_extras:
+    for key in ep_extras[0]:
+      values = [ep[key] for ep in ep_extras if key in ep]
       if not values:
         continue
       tensors = []
@@ -108,7 +109,8 @@ def _collect_metrics(
           v = v.unsqueeze(0)
         tensors.append(v)
       mean_val = torch.cat(tensors).float().mean().item()
-      m[f"episode/{key}"] = round(mean_val, 6)
+      out_key = key if "/" in key else f"Episode/{key}"
+      m[out_key] = round(mean_val, 6)
 
   # Timing.
   m["iteration_time"] = round(iteration_time, 4)
@@ -164,6 +166,9 @@ def enable_terminal_log(logger: Logger) -> None:
     width: int = 80,
     pad: int = 40,
   ) -> None:
+    # Copy ep_extras before it is cleared by original_log
+    saved_ep_extras = list(logger.ep_extras)
+
     # Call the original log (prints to console, writes to TB/wandb).
     original_log(
       it=it,
@@ -185,6 +190,7 @@ def enable_terminal_log(logger: Logger) -> None:
 
     metrics = _collect_metrics(
       logger,
+      saved_ep_extras,
       it,
       start_it,
       total_it,
