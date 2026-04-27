@@ -23,7 +23,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['track_linear_velocity'].weight",
-    "current": 2.0,
+    "original_value": 2.0,
     "range": [0.5, 5.0],
     "search_scale": "linear",
     "notes": "Reward for matching commanded XY velocity. Underlying function is exp(-error/std^2), so values are bounded [0,1] before weighting. Higher weight = better tracking but can suppress gait quality if too dominant."
@@ -32,7 +32,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['track_angular_velocity'].weight",
-    "current": 2.0,
+    "original_value": 2.0,
     "range": [0.5, 5.0],
     "search_scale": "linear",
     "notes": "Reward for matching commanded yaw rate. Same exp(-error/std^2) shape as linear velocity tracking reward."
@@ -42,7 +42,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['upright'].weight",
-    "current": 1.0,
+    "original_value": 1.0,
     "range": [0.0, 3.0],
     "search_scale": "linear",
     "notes": "Rewards keeping torso upright (penalises tilt). Stability reward — since fell_over is already low, only marginal gains expected from increasing this."
@@ -52,7 +52,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['pose'].weight",
-    "current": 1.0,
+    "original_value": 1.0,
     "range": [0.0, 3.0],
     "search_scale": "linear",
     "notes": "Rewards staying close to default pose, with speed-dependent tolerance via per-joint std values. This is a major handle on gait shape — high values keep the robot rigid, low values let it deviate too much."
@@ -62,7 +62,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['body_ang_vel'].weight",
-    "current": -0.05,
+    "original_value": -0.05,
     "range": [-0.5, 0.0],
     "search_scale": "linear",
     "notes": "Penalises XY angular velocity of torso. Reduces torso wobble. More negative = more stable but stiffer-looking motion."
@@ -71,7 +71,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['angular_momentum'].weight",
-    "current": -0.01,
+    "original_value": -0.01,
     "range": [-0.1, 0.0],
     "search_scale": "linear",
     "notes": "Penalises whole-body angular momentum. Encourages natural arm swing to cancel leg-induced angular momentum. Important for naturalness."
@@ -81,7 +81,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['dof_pos_limits'].weight",
-    "current": -1.0,
+    "original_value": -1.0,
     "range": [-5.0, 0.0],
     "search_scale": "linear",
     "notes": "Penalises joints near their position limits. Prevents the policy from learning to hit hardware limits. Usually doesn't need much tuning."
@@ -91,7 +91,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['action_rate_l2'].weight",
-    "current": -0.1,
+    "original_value": -0.1,
     "range": [-0.5, -0.001],
     "search_scale": "log",
     "notes": "Penalises rapid changes in actions (smoothness). Higher penalty = smoother but slower-reacting policy. Strong effect on gait — too high makes the robot stiff, too low makes it twitchy. Critical for naturalness."
@@ -101,7 +101,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['actuation_power'].weight",
-    "current": 0.0,
+    "original_value": 0.0,
     "range": [-1.0, 0.0],
     "search_scale": "linear",
     "notes": "Currently disabled in favour of cot_proxy. If enabling, it penalises raw electrical power. Avoid using simultaneously with cot_proxy — they compete."
@@ -111,7 +111,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['cot_proxy'].weight",
-    "current": -0.01,
+    "original_value": -0.01,
     "range": [-1.0, 0.0],
     "search_scale": "log",
     "notes": "Penalises mechanical-power-per-distance (cost of transport). More negative = more energy-efficient gait. Moderate effect on naturalness — efficient gaits tend to look more natural."
@@ -120,7 +120,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['cot_proxy'].params['speed_floor']",
-    "current": 0.12,
+    "original_value": 0.12,
     "range": [0.01, 0.3],
     "search_scale": "linear",
     "notes": "Minimum speed in CoT denominator (m/s). Prevents division-by-zero blow-up at low speeds. Higher floor softens the penalty at low speeds."
@@ -129,7 +129,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['cot_proxy'].params['command_threshold']",
-    "current": 0.02,
+    "original_value": 0.02,
     "range": [0.0, 0.2],
     "search_scale": "linear",
     "notes": "Disables CoT penalty when commanded velocity is below this threshold. Avoids penalising the policy for not moving when it's not asked to."
@@ -139,7 +139,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['limb_symmetry'].weight",
-    "current": -0.5,
+    "original_value": -0.5,
     "range": [-3.0, 0.0],
     "search_scale": "linear",
     "notes": "Penalises left-right asymmetry of leg joints (pitch joints only on Nugus). Critical for natural-looking bipedal gait. Too low = limp; too high = robotic mirror motion."
@@ -148,7 +148,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "cfg.rewards['limb_symmetry'].params['position_weight']",
-    "current": 1.0,
+    "original_value": 1.0,
     "range": [0.0, 2.0],
     "search_scale": "linear",
     "notes": "Sub-weight on positional asymmetry inside limb_symmetry cost. Combined cost = position_weight*pos_cost + velocity_weight*vel_cost."
@@ -157,7 +157,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "cfg.rewards['limb_symmetry'].params['velocity_weight']",
-    "current": 0.1,
+    "original_value": 0.1,
     "range": [0.0, 2.0],
     "search_scale": "linear",
     "notes": "Sub-weight on velocity asymmetry. Higher value penalises desynchronised joint speeds between legs."
@@ -167,7 +167,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['air_time'].weight",
-    "current": 0.2,
+    "original_value": 0.2,
     "range": [0.0, 2.0],
     "search_scale": "linear",
     "notes": "Rewards feet being in the air for durations between threshold_min and threshold_max. Encourages stepping rather than shuffling. Strong effect on gait quality."
@@ -176,7 +176,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['air_time'].params['threshold_min']",
-    "current": 0.05,
+    "original_value": 0.05,
     "range": [0.02, 0.2],
     "search_scale": "linear",
     "notes": "Minimum air time (seconds) for reward to count. Below this, foot is considered to have barely lifted."
@@ -185,7 +185,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['air_time'].params['threshold_max']",
-    "current": 0.5,
+    "original_value": 0.5,
     "range": [0.2, 1.5],
     "search_scale": "linear",
     "notes": "Maximum air time for reward to count. Above this, it's hopping/stalling rather than stepping."
@@ -194,7 +194,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['air_time'].params['command_threshold']",
-    "current": 0.5,
+    "original_value": 0.5,
     "range": [0.05, 1.0],
     "search_scale": "linear",
     "notes": "Disables air_time reward when commanded velocity is below this. Higher value = robot is allowed to stand still without losing this reward."
@@ -204,7 +204,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['gait_phase_regularity'].weight",
-    "current": -1.0,
+    "original_value": -1.0,
     "range": [-5.0, 0.0],
     "search_scale": "linear",
     "notes": "Penalises variation in swing/stance durations across feet (coefficient of variation). Encourages regular, periodic gait. Key parameter for natural-looking gait."
@@ -213,7 +213,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['gait_phase_regularity'].params['command_threshold']",
-    "current": 0.02,
+    "original_value": 0.02,
     "range": [0.0, 0.2],
     "search_scale": "linear",
     "notes": "Disables gait regularity penalty when not commanded to move."
@@ -223,7 +223,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['foot_clearance'].weight",
-    "current": -2.0,
+    "original_value": -2.0,
     "range": [-5.0, 0.0],
     "search_scale": "linear",
     "notes": "Penalises feet not being at target height during swing, weighted by foot velocity. Strong influence on step shape — too high gives exaggerated high-stepping, too low can give shuffling."
@@ -232,7 +232,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['foot_clearance'].params['target_height']",
-    "current": 0.1,
+    "original_value": 0.1,
     "range": [0.03, 0.3],
     "search_scale": "linear",
     "notes": "Target foot height during swing (meters). Crucial for gait shape. Too high = lifted/marching gait, too low = shuffling. Tune in conjunction with foot_swing_height_target_height."
@@ -241,7 +241,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['foot_clearance'].params['command_threshold']",
-    "current": 0.05,
+    "original_value": 0.05,
     "range": [0.0, 0.2],
     "search_scale": "linear",
     "notes": "Disables clearance penalty when commanded velocity is below this."
@@ -251,7 +251,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['foot_swing_height'].weight",
-    "current": -0.25,
+    "original_value": -0.25,
     "range": [-2.0, 0.0],
     "search_scale": "linear",
     "notes": "Penalises peak swing height deviating from target_height, evaluated at landing. Complements foot_clearance — the latter is continuous, this is end-of-swing."
@@ -260,7 +260,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['foot_swing_height'].params['target_height']",
-    "current": 0.1,
+    "original_value": 0.1,
     "range": [0.03, 0.3],
     "search_scale": "linear",
     "notes": "Target peak height during swing. Should usually match foot_clearance_target_height unless intentionally decoupled."
@@ -269,7 +269,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['foot_swing_height'].params['command_threshold']",
-    "current": 0.05,
+    "original_value": 0.05,
     "range": [0.0, 0.2],
     "search_scale": "linear",
     "notes": "Disables swing height penalty when commanded velocity is below this."
@@ -279,7 +279,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['foot_slip'].weight",
-    "current": -1.0,
+    "original_value": -1.0,
     "range": [-5.0, 0.0],
     "search_scale": "linear",
     "notes": "Penalises foot xy velocity while in contact (sliding). Important for clean foot contact and natural-looking stance."
@@ -288,7 +288,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['foot_slip'].params['command_threshold']",
-    "current": 0.05,
+    "original_value": 0.05,
     "range": [0.0, 0.2],
     "search_scale": "linear",
     "notes": "Disables slip penalty when commanded velocity is below this."
@@ -298,7 +298,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['feet_too_close'].weight",
-    "current": -1.0,
+    "original_value": -1.0,
     "range": [-5.0, 0.0],
     "search_scale": "linear",
     "notes": "Penalises feet being closer than min_distance. Prevents leg-crossing and stance collapse. Stronger penalty = wider stance."
@@ -307,7 +307,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['feet_too_close'].params['min_distance']",
-    "current": 0.14,
+    "original_value": 0.14,
     "range": [0.10, 0.20],
     "search_scale": "linear",
     "notes": "Minimum allowed XY distance between feet (meters). Sets the lower bound on stance width — too high forces an unnaturally wide stance, too low allows feet to interfere."
@@ -317,7 +317,7 @@
     "category": "reward_weight",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['soft_landing'].weight",
-    "current": -1e-5,
+    "original_value": -1e-5,
     "range": [-1e-2, 0.0],
     "search_scale": "log",
     "notes": "Penalises high impact force at first foot contact. Encourages soft footfalls. Very small magnitude because raw landing forces are large (10s-100s of Newtons) — increase carefully."
@@ -326,7 +326,7 @@
     "category": "reward_param",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "rewards['soft_landing'].params['command_threshold']",
-    "current": 0.05,
+    "original_value": 0.05,
     "range": [0.0, 0.2],
     "search_scale": "linear",
     "notes": "Disables soft-landing penalty when commanded velocity is below this."
@@ -336,7 +336,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*hip_pitch.*']",
-    "current": 0.6,
+    "original_value": 0.6,
     "range": [0.2, 1.2],
     "search_scale": "linear",
     "notes": "Hip pitch tolerance during walking. Higher = more freedom for stride length. Major control on stride amplitude."
@@ -345,7 +345,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*hip_roll.*']",
-    "current": 0.15,
+    "original_value": 0.15,
     "range": [0.05, 0.4],
     "search_scale": "linear",
     "notes": "Hip roll tolerance during walking. Tight to prevent excessive lateral sway. Increase cautiously if gait looks too narrow/stiff laterally."
@@ -354,7 +354,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*hip_yaw.*']",
-    "current": 0.15,
+    "original_value": 0.15,
     "range": [0.05, 0.4],
     "search_scale": "linear",
     "notes": "Hip yaw tolerance. Tight to keep feet pointing forward. Increase if turning looks unnatural."
@@ -363,7 +363,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*knee.*']",
-    "current": 0.7,
+    "original_value": 0.7,
     "range": [0.2, 1.5],
     "search_scale": "linear",
     "notes": "Knee tolerance during walking. Loose to allow natural leg bending. Major control on knee bend depth."
@@ -372,7 +372,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*ankle_pitch.*']",
-    "current": 0.5,
+    "original_value": 0.5,
     "range": [0.1, 1.0],
     "search_scale": "linear",
     "notes": "Ankle pitch tolerance — controls foot pitch during swing/contact. Major effect on heel-strike vs flat-foot landing."
@@ -381,7 +381,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*ankle_roll.*']",
-    "current": 0.2,
+    "original_value": 0.2,
     "range": [0.05, 0.5],
     "search_scale": "linear",
     "notes": "Ankle roll tolerance. Tight for lateral balance. Loosen only if balance looks fragile during single-foot stance."
@@ -390,7 +390,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*shoulder_pitch.*']",
-    "current": 0.15,
+    "original_value": 0.15,
     "range": [0.05, 0.6],
     "search_scale": "linear",
     "notes": "Shoulder pitch tolerance — controls arm swing forward/back. Increase to allow more arm swing for natural walking. Strong naturalness lever."
@@ -399,7 +399,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*shoulder_roll.*']",
-    "current": 0.15,
+    "original_value": 0.15,
     "range": [0.05, 0.4],
     "search_scale": "linear",
     "notes": "Shoulder roll tolerance — arms held in vs out. Usually kept tight."
@@ -408,7 +408,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*elbow.*']",
-    "current": 0.15,
+    "original_value": 0.15,
     "range": [0.05, 0.5],
     "search_scale": "linear",
     "notes": "Elbow tolerance. Affects arm posture during swing. Increase for more natural arm motion."
@@ -417,7 +417,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*neck_yaw.*']",
-    "current": 0.1,
+    "original_value": 0.1,
     "range": [0.05, 0.3],
     "search_scale": "linear",
     "notes": "Neck yaw tolerance. Usually kept tight to keep head facing forward."
@@ -426,7 +426,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_walking'][r'.*head_pitch.*']",
-    "current": 0.1,
+    "original_value": 0.1,
     "range": [0.05, 0.3],
     "search_scale": "linear",
     "notes": "Head pitch tolerance. Tight to keep head level."
@@ -435,7 +435,7 @@
     "category": "pose_std",
     "file": "src/mjlab/tasks/velocity/config/nugus/env_cfgs.py",
     "key_path": "cfg.rewards['pose'].params['std_standing'][r'.*']",
-    "current": 0.05,
+    "original_value": 0.05,
     "range": [0.02, 0.2],
     "search_scale": "linear",
     "notes": "Tolerance for ALL joints when standing still (speed below walking_threshold). Tight value keeps the robot crisp at rest."
@@ -445,7 +445,7 @@
     "category": "curriculum",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "curriculum['command_vel'].params['velocity_stages'][1]['step']",
-    "current": 216000,
+    "original_value": 216000,
     "range": [96000, 240000],
     "search_scale": "log",
     "notes": "Training step (in env steps, =9000*24 currently) at which stage 1 velocity range activates. Earlier = faster curriculum, can destabilise; later = more time spent at low speeds."
@@ -454,7 +454,7 @@
     "category": "curriculum",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "curriculum['command_vel'].params['velocity_stages'][2]['step']",
-    "current": 576000,
+    "original_value": 576000,
     "range": [240001, 600000],
     "search_scale": "log",
     "notes": "Step at which stage 2 (intermediate speeds) activates. Currently 24000*24."
@@ -463,7 +463,7 @@
     "category": "curriculum",
     "file": "src/mjlab/tasks/velocity/velocity_env_cfg.py",
     "key_path": "curriculum['command_vel'].params['velocity_stages'][3]['step']",
-    "current": 960000,
+    "original_value": 960000,
     "range": [600001, 960000],
     "search_scale": "log",
     "notes": "Step at which stage 3 (top speed) activates. Currently 40000*24."
