@@ -23,7 +23,6 @@ JSON, and is truncated at the start of each training run.
 
 import json
 import statistics
-import time
 from pathlib import Path
 from typing import Any
 
@@ -50,16 +49,6 @@ def _collect_metrics(
   rsl-rl ``Logger.log`` method is included here.  Values that are not
   available on this iteration are set to ``None``.
   """
-  collection_size = (
-    logger.cfg["num_steps_per_env"] * logger.num_envs * logger.gpu_world_size
-  )
-  iteration_time = collect_time + learn_time
-  fps = int(collection_size / iteration_time)
-
-  done_it = it + 1 - start_it
-  remaining_it = total_it - start_it - done_it
-  eta = logger.tot_time / done_it * remaining_it if done_it > 0 else 0.0
-
   run_name = logger.cfg.get("run_name")
 
   m: dict[str, Any] = {
@@ -68,12 +57,6 @@ def _collect_metrics(
   }
   if run_name:
     m["run_name"] = run_name
-
-  # -- Removed, not needed --
-  # m["total_steps"] = logger.tot_timesteps
-  # m["fps"] = fps
-  # m["collection_time"] = round(collect_time, 4)
-  # m["learning_time"] = round(learn_time, 4)
 
   m["learning_rate"] = round(learning_rate, 8)
 
@@ -113,11 +96,6 @@ def _collect_metrics(
       mean_val = torch.cat(tensors).float().mean().item()
       out_key = key if "/" in key else f"Episode/{key}"
       m[out_key] = round(mean_val, 6)
-
-  # Timing. -- Removed, not needed --
-  # m["iteration_time"] = round(iteration_time, 4)
-  # m["time_elapsed"] = time.strftime("%H:%M:%S", time.gmtime(logger.tot_time))
-  # m["eta"] = time.strftime("%H:%M:%S", time.gmtime(eta))
 
   return m
 

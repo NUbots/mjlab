@@ -13,23 +13,16 @@ def _make_logger(
   rewbuffer=None,
   lenbuffer=None,
   ep_extras=None,
-  tot_timesteps=491520,
-  tot_time=120.0,
   run_name=None,
 ):
   """Create a minimal mock of rsl-rl's Logger with the fields we read."""
   logger = MagicMock()
   cfg: dict = {
-    "num_steps_per_env": 24,
     "algorithm": {"rnd_cfg": None},
   }
   if run_name is not None:
     cfg["run_name"] = run_name
   logger.cfg = cfg
-  logger.num_envs = 4096
-  logger.gpu_world_size = 1
-  logger.tot_timesteps = tot_timesteps
-  logger.tot_time = tot_time
   logger.rewbuffer = deque(rewbuffer or [])
   logger.lenbuffer = deque(lenbuffer or [])
   logger.ep_extras = ep_extras or []
@@ -59,19 +52,12 @@ def test_collect_metrics_all_terminal_fields():
   assert m["iteration"] == 10
   assert m["total_iterations"] == 5000
   assert m["run_name"] == "nugus-flat"
-  assert m["total_steps"] == 491520
-  assert m["fps"] > 0
-  assert m["collection_time"] == 0.843
-  assert m["learning_time"] == 0.378
   assert m["learning_rate"] == 0.0003
   assert m["loss/surrogate"] == 0.0234
   assert m["loss/value_function"] == 1.4567
   assert m["mean_reward"] == 42.5
   assert m["mean_ep_len"] == 305.0
   assert m["mean_action_std"] == 0.715
-  assert "iteration_time" in m
-  assert "time_elapsed" in m
-  assert "eta" in m
 
 
 def test_collect_metrics_null_rewards_when_empty():
