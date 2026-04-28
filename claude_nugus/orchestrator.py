@@ -160,6 +160,7 @@ async def _query_agent(
   output_format: dict[str, Any] | None = None,
   max_turns: int = 5,
   permission_mode: sdk.PermissionMode = "default",
+  tools: list[str] | None = None,
 ) -> Any:
   """Run a one-shot Claude agent query and return the result."""
   # The SDK expects output_format wrapped as {"type": "json_schema", "schema": ...}
@@ -174,6 +175,7 @@ async def _query_agent(
     permission_mode=permission_mode,
     cwd=str(REPO_ROOT),
     model="claude-sonnet-4-6",
+    tools=tools if tools is not None else None,
   )
   async for message in sdk.query(prompt=prompt, options=options):
     if isinstance(message, sdk.ResultMessage):
@@ -445,7 +447,8 @@ def call_editor(run_dir: Path) -> None:
     ),
     system_prompt=EDITOR_SYSTEM,
     output_format=EDITOR_SCHEMA,
-    max_turns=3,
+    max_turns=8,
+    tools=[],
   )
 
   if not isinstance(result, dict):
