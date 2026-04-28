@@ -69,10 +69,12 @@ def _collect_metrics(
   if run_name:
     m["run_name"] = run_name
 
-  m["total_steps"] = logger.tot_timesteps
-  m["fps"] = fps
-  m["collection_time"] = round(collect_time, 4)
-  m["learning_time"] = round(learn_time, 4)
+  # -- Removed, not needed --
+  # m["total_steps"] = logger.tot_timesteps
+  # m["fps"] = fps
+  # m["collection_time"] = round(collect_time, 4)
+  # m["learning_time"] = round(learn_time, 4)
+
   m["learning_rate"] = round(learning_rate, 8)
 
   # Losses.
@@ -112,10 +114,10 @@ def _collect_metrics(
       out_key = key if "/" in key else f"Episode/{key}"
       m[out_key] = round(mean_val, 6)
 
-  # Timing.
-  m["iteration_time"] = round(iteration_time, 4)
-  m["time_elapsed"] = time.strftime("%H:%M:%S", time.gmtime(logger.tot_time))
-  m["eta"] = time.strftime("%H:%M:%S", time.gmtime(eta))
+  # Timing. -- Removed, not needed --
+  # m["iteration_time"] = round(iteration_time, 4)
+  # m["time_elapsed"] = time.strftime("%H:%M:%S", time.gmtime(logger.tot_time))
+  # m["eta"] = time.strftime("%H:%M:%S", time.gmtime(eta))
 
   return m
 
