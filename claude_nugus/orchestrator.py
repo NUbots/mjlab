@@ -162,9 +162,14 @@ async def _query_agent(
   permission_mode: sdk.PermissionMode = "default",
 ) -> Any:
   """Run a one-shot Claude agent query and return the result."""
+  # The SDK expects output_format wrapped as {"type": "json_schema", "schema": ...}
+  # so the CLI receives the --json-schema flag.
+  sdk_output_format = None
+  if output_format is not None:
+    sdk_output_format = {"type": "json_schema", "schema": output_format}
   options = sdk.ClaudeAgentOptions(
     system_prompt=system_prompt,
-    output_format=output_format,
+    output_format=sdk_output_format,
     max_turns=max_turns,
     permission_mode=permission_mode,
     cwd=str(REPO_ROOT),
@@ -173,16 +178,35 @@ async def _query_agent(
   async for message in sdk.query(prompt=prompt, options=options):
     if isinstance(message, sdk.ResultMessage):
       if message.is_error:
-        raise RuntimeError(f"Agent error: {message.result}")
-      if output_format and message.structured_output is not None:
-        return message.structured_output
+        details = message.result or (
+          "; ".join(message.errors) if message.errors else "unknown"
+        )
+        raise RuntimeError(f"Agent error: {details}")
+      if output_format:
+        if message.structured_output is not None:
+          return message.structured_output
+        # Fallback: parse result as JSON if structured_output is missing.
+        if message.result:
+          return json.loads(message.result)
       return message.result or ""
   raise RuntimeError("Agent returned no result")
 
 
+def _get_event_loop() -> asyncio.AbstractEventLoop:
+  """Get or create a persistent event loop for agent queries."""
+  global _event_loop
+  if _event_loop is None or _event_loop.is_closed():
+    _event_loop = asyncio.new_event_loop()
+  return _event_loop
+
+
+_event_loop: asyncio.AbstractEventLoop | None = None
+
+
 def _run_agent(prompt: str, system_prompt: str, **kwargs: Any) -> Any:
   """Sync wrapper around the async SDK query."""
-  return asyncio.run(_query_agent(prompt, system_prompt, **kwargs))
+  loop = _get_event_loop()
+  return loop.run_until_complete(_query_agent(prompt, system_prompt, **kwargs))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
