@@ -27,7 +27,7 @@ from 0 (the robot was standing still) to several per env (it's learning to
 move and that destabilizes it). It then drops back toward 0 as the policy
 masters balance.
 
-Rule: only treat sustained `fell_over > 0.5` past iteration ~750 as a
+Rule: only treat sustained `fell_over > 1.5` past iteration ~750 as a
 stability failure. Early spikes are not meaningful.
 
 ---
@@ -149,7 +149,7 @@ first ~1000 iterations are not predictive of where the run will end up.
 
 Rule: when scoring a run, use only the late window (we use the final 20% of
 iterations). When deciding whether to abort a run early, only use stability
-gates (`fell_over` past iter 500, NaN losses), not gait quality metrics.
+gates (`fell_over` past iter 750, NaN losses), not gait quality metrics.
 
 ---
 

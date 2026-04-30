@@ -17,3 +17,7 @@ benchmark_results/
 # Documentation outputs.
 **/_build/*
 **/generated/*
+
+# Claude stuff
+claude_nugus/runs/*/snapshots
+claude_nugus/runs

@@ -76,6 +76,12 @@ TRAINING_LOG_ROOT = REPO_ROOT / "logs" / "rsl_rl" / "nugus_velocity"
 # Probe length per experiment.
 PROBE_ITERATIONS = 3000
 
+# Adaptive extension. When a probe finishes, the orchestrator inspects the
+# current run's score + trends and either extends by another PROBE_ITERATIONS
+# or terminates. MAX_EXTENSIONS bounds the worst case at
+# PROBE_ITERATIONS * (1 + MAX_EXTENSIONS) iterations.
+MAX_EXTENSIONS = 4
+
 # Polling intervals.
 LOG_POLL_SECONDS = 10.0
 FEEDBACK_POLL_SECONDS = 30.0
@@ -83,10 +89,16 @@ FEEDBACK_POLL_SECONDS = 30.0
 # Human feedback cadence.
 EXPERIMENTS_PER_FEEDBACK = 5
 
-# Early-failure gate: if late-iteration fell_over rate exceeds this past
-# this iteration count, kill the run early and score it 0.
+# Early-failure gate: if the most recent fell_over rate exceeds this past
+# EARLY_KILL_AFTER_ITER iterations, kill the run regardless of promise. This
+# is the "obviously broken" tripwire — adaptive extension handles the
+# subtler "is this worth more compute" question.
 EARLY_KILL_FELL_OVER = 1.5
 EARLY_KILL_AFTER_ITER = 750
+
+# Stability gate threshold (matches scoring_function.STABILITY_GATE_FELL_OVER).
+# Used by the promise check to estimate when a run might pass the gate.
+STABILITY_GATE_FELL_OVER = 0.5
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -584,13 +596,128 @@ def find_latest_log_dir(after_time: float) -> Path | None:
   return max(candidates, key=lambda d: d.stat().st_mtime)
 
 
-def launch_training(run_dir: Path, target_iterations: int) -> Path:
-  """Launch training, poll its log, and kill it at the target iteration.
+@dataclass
+class ExtensionDecision:
+  """Result of asking 'should this run keep going for another probe?'."""
 
-  Returns: path to the training_log.json that was produced, copied into
-  run_dir/training_log.json.
+  extend: bool
+  reason: str
+
+
+def assess_run_promise(
+  run_dir: Path,
+  log_path: Path,
+  current_iter: int,
+  extensions_so_far: int,
+) -> ExtensionDecision:
+  """Decide whether the in-flight run is promising enough to extend.
+
+  Pure Python — no LLM call. Reads a snapshot of the partial log, runs the
+  same compression + scoring used for the final eval, and compares the
+  result to the experiment history. The decision and the partial scoring
+  snapshot are written to ``run_dir/checkpoints/`` for later debugging.
   """
-  log.info(f"Launching training (target: {target_iterations} iters)")
+  compress_log = _import_local("metrics_compression").compress_log
+  score_run = _import_local("scoring_function").score_run
+
+  # Snapshot the log first — the training process may still be writing.
+  ckpt_dir = run_dir / "checkpoints"
+  ckpt_dir.mkdir(exist_ok=True)
+  snapshot_path = ckpt_dir / f"training_log_iter_{current_iter}.json"
+  shutil.copy(log_path, snapshot_path)
+
+  try:
+    summary = compress_log(snapshot_path)
+    score = score_run(summary)
+  except Exception as e:
+    return ExtensionDecision(False, f"could not evaluate partial log: {e}")
+
+  with open(ckpt_dir / f"score_iter_{current_iter}.json", "w") as f:
+    json.dump(
+      {
+        "iteration": current_iter,
+        "extensions_so_far": extensions_so_far,
+        "score": score,
+        "health_flags": summary.get("health_flags", []),
+      },
+      f,
+      indent=2,
+    )
+
+  if extensions_so_far >= MAX_EXTENSIONS:
+    return ExtensionDecision(False, f"reached MAX_EXTENSIONS={MAX_EXTENSIONS}")
+
+  current_score = float(score["score"])
+  fell_over_rate = float(summary["final_window"].get("fell_over_rate", 0.0))
+  fell_over_slope = float(score.get("fell_over_slope", 0.0))
+  gates_failed = score.get("gates_failed", []) or []
+
+  if not gates_failed:
+    # Already passing hard gates. Extend unless we've slipped well below
+    # the best run we have seen — that's diminishing returns.
+    history = load_history()
+    past_scores = [
+      float(h["score"].get("score", 0.0))
+      for h in history
+      if isinstance(h.get("score"), dict)
+    ]
+    best = max(past_scores, default=0.0)
+    if best > 0.0 and current_score < 0.7 * best:
+      return ExtensionDecision(
+        False,
+        f"passing but score {current_score:.3f} below 70% of best {best:.3f}",
+      )
+    return ExtensionDecision(
+      True, f"passing gates with score {current_score:.3f} — extend"
+    )
+
+  # Gate-failing run: only extend if recovery is plausible. Project the
+  # slope forward — how many iterations until fell_over crosses the gate?
+  if fell_over_slope >= 0:
+    return ExtensionDecision(
+      False,
+      f"failing ({'/'.join(gates_failed)}, fell_over={fell_over_rate:.2f}) "
+      f"with non-negative slope {fell_over_slope:.5f}",
+    )
+  iters_to_pass = (fell_over_rate - STABILITY_GATE_FELL_OVER) / -fell_over_slope
+  if iters_to_pass > 2 * PROBE_ITERATIONS:
+    return ExtensionDecision(
+      False,
+      f"failing ({'/'.join(gates_failed)}); recovery would need ~"
+      f"{int(iters_to_pass)} iters at slope {fell_over_slope:.5f}",
+    )
+  return ExtensionDecision(
+    True,
+    f"failing ({'/'.join(gates_failed)}) but recovering — "
+    f"~{int(iters_to_pass)} iters from gate at slope {fell_over_slope:.5f}",
+  )
+
+
+def _wait_for_training_log(
+  proc: subprocess.Popen, launch_time: float
+) -> tuple[Path, Path]:
+  """Wait for the training subprocess to produce its log file."""
+  for _ in range(60):  # up to 10 minutes
+    time.sleep(LOG_POLL_SECONDS)
+    log_dir = find_latest_log_dir(launch_time)
+    if log_dir and (log_dir / "training_log.json").exists():
+      log.info(f"  found log: {log_dir}")
+      return log_dir, log_dir / "training_log.json"
+  proc.send_signal(signal.SIGTERM)
+  raise RuntimeError("Training did not produce a log within 10 minutes")
+
+
+def launch_training(run_dir: Path, initial_target: int) -> int:
+  """Launch training and adaptively extend until the run stops being promising.
+
+  Polls the training subprocess's log. When the iteration count reaches the
+  current target, evaluates partial results and either extends by another
+  ``PROBE_ITERATIONS`` (up to ``MAX_EXTENSIONS`` times) or terminates. The
+  early-kill tripwire still applies for obvious stability disasters.
+
+  Returns the final iteration count reached.
+  """
+  log.info(f"Launching training (initial target: {initial_target} iters)")
   launch_time = time.time()
   proc = subprocess.Popen(
     TRAIN_CMD,
@@ -600,22 +727,25 @@ def launch_training(run_dir: Path, target_iterations: int) -> Path:
   )
   log.info(f"  pid: {proc.pid}")
 
-  # Find the training log directory the subprocess created.
-  log_dir: Path | None = None
-  for _ in range(60):  # wait up to 10 minutes for first log file
-    time.sleep(LOG_POLL_SECONDS)
-    log_dir = find_latest_log_dir(launch_time)
-    if log_dir and (log_dir / "training_log.json").exists():
-      log.info(f"  found log: {log_dir}")
-      break
-  else:
-    proc.send_signal(signal.SIGTERM)
-    raise RuntimeError("Training did not produce a log within 10 minutes")
+  log_dir, log_path = _wait_for_training_log(proc, launch_time)
 
-  assert log_dir is not None
-  log_path = log_dir / "training_log.json"
+  # Persist the training log dir so the human-feedback step (and anyone
+  # later running ``play``) can find the policy this run produced.
+  with open(run_dir / "run_meta.json", "w") as f:
+    json.dump(
+      {
+        "training_log_dir": str(log_dir),
+        "started_at": datetime.fromtimestamp(launch_time).isoformat(),
+        "initial_target_iterations": initial_target,
+      },
+      f,
+      indent=2,
+    )
 
-  # Poll the log until the target iteration is reached.
+  target = initial_target
+  extensions = 0
+  current = 0
+
   while True:
     time.sleep(LOG_POLL_SECONDS)
     if proc.poll() is not None:
@@ -632,16 +762,32 @@ def launch_training(run_dir: Path, target_iterations: int) -> Path:
       continue
     current = iters[-1]
 
-    # Early-kill check: stability gate.
+    # Early-kill: obvious stability disaster, regardless of promise check.
     if current >= EARLY_KILL_AFTER_ITER:
       recent_falls = training_log.get("Episode_Termination/fell_over", [])
       if recent_falls and recent_falls[-1] > EARLY_KILL_FELL_OVER:
         log.warning(f"Early kill: fell_over={recent_falls[-1]:.2f} at iter {current}")
         break
 
-    if current >= target_iterations:
-      log.info(f"Reached target iteration {target_iterations}, killing training")
+    if current < target:
+      continue
+
+    decision = assess_run_promise(
+      run_dir=run_dir,
+      log_path=log_path,
+      current_iter=current,
+      extensions_so_far=extensions,
+    )
+    log.info(
+      f"  Iter {current} promise check: extend={decision.extend} — {decision.reason}"
+    )
+    if not decision.extend:
       break
+    extensions += 1
+    target = current + PROBE_ITERATIONS
+    log.info(
+      f"  Extending to {target} iters (extension #{extensions}/{MAX_EXTENSIONS})"
+    )
 
   proc.send_signal(signal.SIGTERM)
   try:
@@ -651,10 +797,16 @@ def launch_training(run_dir: Path, target_iterations: int) -> Path:
     proc.kill()
     proc.wait()
 
-  # Copy the log into our run dir for permanence.
-  dest = run_dir / "training_log.json"
-  shutil.copy(log_path, dest)
-  return dest
+  shutil.copy(log_path, run_dir / "training_log.json")
+
+  # Update run_meta with the actual final iteration count and extension tally.
+  meta_path = run_dir / "run_meta.json"
+  meta = json.loads(meta_path.read_text())
+  meta.update({"final_iterations": current, "extensions_used": extensions})
+  with open(meta_path, "w") as f:
+    json.dump(meta, f, indent=2)
+
+  return current
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -680,14 +832,15 @@ def evaluate_run(run_dir: Path) -> dict:
   with open(run_dir / "compressed.json", "w") as f:
     json.dump(summary, f, indent=2)
 
-  score = score_run(summary["final_window"])  # type: ignore[arg-type]
+  # Pass the full summary so the score can reflect n_iterations and the
+  # fell_over slope, not just final-window means.
+  score = score_run(summary)
   with open(run_dir / "score.json", "w") as f:
     json.dump(score, f, indent=2)
 
-  log.info(
-    f"Score: {score['score']:.3f}"
-    + (f"  ({score['gate_failed']})" if score["gate_failed"] else "")
-  )
+  gates_failed = score.get("gates_failed") or []
+  gate_note = f"  (gates failed: {', '.join(gates_failed)})" if gates_failed else ""
+  log.info(f"Score: {score['score']:.3f}{gate_note}")
   return score
 
 
@@ -696,12 +849,52 @@ def evaluate_run(run_dir: Path) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def request_human_feedback(run_dir: Path, state: State) -> None:
-  """Pause until the human writes their feedback into pending.json."""
+def request_human_feedback(state: State) -> None:
+  """Pause until the human writes feedback on the current best run.
+
+  The previous version of this function recorded both ``run_dir`` (the
+  latest experiment) and ``best_run`` in pending.json, which left the
+  reviewer unsure which policy to play. Latest-run feedback was also
+  ambiguous because losing experiments are reverted — the source code on
+  disk no longer reflects the policy under review.
+
+  Now we always solicit feedback on the *current best* run, since that is
+  the policy embedded in the source files and the baseline future
+  experiments will build on. Pending.json carries a single
+  ``run_to_evaluate`` field plus the path to the trained-policy checkpoints
+  so the human knows exactly which run to play.
+  """
   pending_path = FEEDBACK_DIR / "pending.json"
+
+  if state.best_run_id is None:
+    log.info("No best run yet — skipping feedback request")
+    return
+
+  best_run_dir = RUNS_DIR / state.best_run_id
+  meta_path = best_run_dir / "run_meta.json"
+  policy_log_dir: str | None = None
+  if meta_path.exists():
+    try:
+      meta = json.loads(meta_path.read_text())
+      policy_log_dir = meta.get("training_log_dir")
+    except json.JSONDecodeError:
+      log.warning(f"Could not parse {meta_path}; play path will be missing")
+
+  score_path = best_run_dir / "score.json"
+  score_summary = json.loads(score_path.read_text()) if score_path.exists() else None
+
+  play_hint = (
+    f"`uv run play <task> --load_run {policy_log_dir}`"
+    if policy_log_dir
+    else "(policy log dir not recorded for this run; check logs/rsl_rl/...)"
+  )
+
   request = {
-    "run_dir": str(run_dir),
-    "best_run": state.best_run_id,
+    "run_to_evaluate": state.best_run_id,
+    "run_dir": str(best_run_dir),
+    "policy_log_dir": policy_log_dir,
+    "current_best_score": state.best_score,
+    "score": score_summary,
     "questions": [
       "leg_coordination_1to5",
       "foot_contact_quality_1to5",
@@ -709,8 +902,10 @@ def request_human_feedback(run_dir: Path, state: State) -> None:
       "specific_issues_freetext",
     ],
     "instructions": (
-      "Watch the policy from this run, then fill in the answer fields "
-      "below and save. The orchestrator will detect the change."
+      f"Watch the policy from run '{state.best_run_id}' (the system's "
+      f"current best). Play it with: {play_hint}. "
+      "Then fill in the answer fields below and save. The orchestrator "
+      "will detect the change."
     ),
     "answers": {
       "leg_coordination_1to5": None,
@@ -722,7 +917,9 @@ def request_human_feedback(run_dir: Path, state: State) -> None:
   with open(pending_path, "w") as f:
     json.dump(request, f, indent=2)
 
-  log.info(f"⏸  Awaiting human feedback at {pending_path}")
+  log.info(
+    f"⏸  Awaiting human feedback on best run '{state.best_run_id}' at {pending_path}"
+  )
   while True:
     time.sleep(FEEDBACK_POLL_SECONDS)
     with open(pending_path) as f:
@@ -730,7 +927,8 @@ def request_human_feedback(run_dir: Path, state: State) -> None:
     if all(v is not None for v in current["answers"].values()):
       break
 
-  feedback_path = run_dir / "feedback.json"
+  # Save feedback against the run it actually describes, not the latest run.
+  feedback_path = best_run_dir / "feedback.json"
   shutil.copy(pending_path, feedback_path)
   pending_path.unlink()
   log.info("▶  Feedback received, resuming")
@@ -792,7 +990,7 @@ def run_one_experiment(state: State) -> None:
 
   # 8. Maybe ask for human feedback
   if state.experiments_since_feedback >= EXPERIMENTS_PER_FEEDBACK:
-    request_human_feedback(run_dir, state)
+    request_human_feedback(state)
     state.experiments_since_feedback = 0
     state.save()
 

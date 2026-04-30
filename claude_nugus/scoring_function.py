@@ -1,29 +1,45 @@
-"""Scoring function for evaluating a completed training run.
+"""Scoring function for evaluating a completed (or partially-completed) run.
 
-Takes the compressed metrics summary from a training run and returns a scalar
-score. This is the orchestrator's automated proxy for "natural gait quality".
-Human feedback is the ground truth; this score is just for ranking experiments
-between feedback checkpoints.
+Takes the compressed metrics summary and returns a scalar score plus a rich
+breakdown of the components that produced it. The score is the orchestrator's
+automated proxy for "natural gait quality"; human feedback remains the ground
+truth.
+
+Design priorities:
+
+1.  **No hard-zero gates.** Earlier versions of this function collapsed every
+    failed run to 0.0, which made the experiment history useless for ranking
+    "almost passing" vs "catastrophic" failures. The new function uses smooth
+    saturating signals so the score always carries information.
+
+2.  **Distinguish failure severity.** A run that fell over twice per env still
+    scores higher than one that fell five times, and a run with a downward
+    fell_over slope scores higher than one that's stuck. This lets the planner
+    move toward better regions even before any run actually passes.
+
+3.  **Penalise early aborts.** Runs that die at iter 750 are not the same as
+    runs that completed 3000 iters with the same final-window stats. The
+    scoring takes ``n_iterations`` into account when available.
+
+4.  **Keep passing-vs-failing easy to read.** Scores in [0.0, 0.30) mean at
+    least one hard quality gate failed; [0.30, 1.0] means all gates passed
+    and the score reflects gait + tracking quality.
 
 Priority ordering (per project goals):
-    Stability (gate)  >  Gait quality  >  Velocity tracking
-
-Stability is treated as a hard gate — if the policy is not stable, the score
-is 0 regardless of how good other metrics look. Otherwise the score is a
-weighted sum of gait quality and velocity tracking components.
+    Stability  >  Gait quality  >  Velocity tracking
 """
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 
 
 class CompressedMetrics(TypedDict):
   """Late-training-window averages from a completed run.
 
-  These are computed over the final ~20% of iterations of the run, NOT the
-  whole run, because early training values are noise from a partly-trained
-  policy. See metrics_compression.py.
+  Computed over the final ~20% of iterations of the run, NOT the whole run,
+  because early training values are noise from a partly-trained policy.
+  See metrics_compression.py.
   """
 
   # Per-component reward terms (averaged over final window)
@@ -41,11 +57,11 @@ class CompressedMetrics(TypedDict):
   foot_slip: float  # negative
 
   # Termination rates (averaged over final window)
-  fell_over_rate: float  # episodes terminated by falling per env
+  fell_over_rate: float
   time_out_rate: float
 
   # Raw metrics (averaged over final window)
-  gait_air_cv_mean: float  # coefficient of variation of swing duration
+  gait_air_cv_mean: float
   gait_contact_cv_mean: float
   slip_velocity_mean: float
   air_time_mean: float
@@ -60,62 +76,81 @@ class CompressedMetrics(TypedDict):
   entropy_loss: float
 
 
-# Tunable: stability gate threshold. If fell_over rate at end of run is above
-# this, the run is treated as a failure (score = 0). Currently set to 0.5
-# which is generous — failed policies usually have fell_over > 2.0.
+# Hard-gate thresholds. Failing any of these caps the score at GATE_FAIL_CEILING.
 STABILITY_GATE_FELL_OVER = 0.5
+MIN_EP_LENGTH = 500.0
 
-# Tunable: minimum episode length to consider a run "real". Below this the
-# robot is barely moving and the per-component rewards aren't comparable.
-MIN_EP_LENGTH = 50.0
+# Anything that fails a gate sits in [0, GATE_FAIL_CEILING]; anything that
+# passes sits in [GATE_FAIL_CEILING, 1.0]. This keeps the boundary obvious
+# while still ranking failed runs against each other.
+GATE_FAIL_CEILING = 0.30
+
+# Default planned iteration count. The orchestrator passes the real value;
+# this is just a fallback for the smoke test and standalone calls.
+DEFAULT_PLANNED_ITERATIONS = 3000
 
 
 def normalize_negative_penalty(value: float, scale: float) -> float:
   """Map a negative penalty (closer to 0 = better) to [0, 1] (1 = better).
 
   Uses 1 / (1 + |value| / scale) — soft, monotonic, no hard clipping.
-  `scale` should be the rough magnitude where the penalty starts to matter.
+  ``scale`` should be the rough magnitude where the penalty starts to matter.
   """
   return 1.0 / (1.0 + abs(value) / scale)
 
 
 def normalize_positive_reward(value: float, scale: float) -> float:
-  """Map a positive reward (higher = better) to [0, 1].
-
-  Uses value / (value + scale). Tracking rewards are bounded [0,1] per step
-  by their exp(-error/std^2) shape, but they get accumulated over an episode,
-  so the post-episode value is unbounded. This squashes safely.
-  """
+  """Map a positive reward (higher = better) to [0, 1]."""
   if value <= 0:
     return 0.0
   return value / (value + scale)
 
 
+def stability_quality(fell_over_rate: float, fell_over_slope: float) -> float:
+  """Smooth stability signal in [0, 1].
+
+  Saturating in fell_over_rate so a run with fell_over=2.0 still scores above
+  a run with fell_over=4.0. A negative slope (improving over the run) earns a
+  small bonus — useful for partial-run promise checks.
+  """
+  base = 1.0 / (1.0 + (fell_over_rate / 0.5) ** 2)
+  if fell_over_slope < 0:
+    # Slope is per-iteration. -5e-4/iter over a 3k probe = -1.5 over the run,
+    # which is a serious recovery — worth ~+0.10. Clip the bonus.
+    bonus = min(0.10, abs(fell_over_slope) * 200.0)
+    base = min(1.0, base + bonus)
+  return base
+
+
+def episode_length_quality(ep_length: float) -> float:
+  """Soft saturating signal on mean episode length, in [0, 1]."""
+  if ep_length <= 0:
+    return 0.0
+  return ep_length / (ep_length + 300.0)
+
+
+def completion_quality(n_iterations: int, planned_iterations: int) -> float:
+  """Fraction of planned iterations actually reached, in [0, 1]."""
+  if planned_iterations <= 0:
+    return 1.0
+  return min(1.0, n_iterations / planned_iterations)
+
+
 def gait_quality_score(m: CompressedMetrics) -> float:
   """Weighted sum of gait-quality signals, mapped to [0, 1]."""
-  # Each component is normalized to [0,1] where 1 = good. Weights sum to 1.
   components = [
-    # Phase regularity — most important gait shape signal
     (normalize_negative_penalty(m["gait_phase_regularity"], scale=0.05), 0.20),
-    # Direct CV measurements — independent of weight tuning
     (normalize_negative_penalty(m["gait_air_cv_mean"], scale=0.3), 0.10),
     (normalize_negative_penalty(m["gait_contact_cv_mean"], scale=0.3), 0.10),
-    # Limb symmetry
     (normalize_negative_penalty(m["limb_symmetry"], scale=0.005), 0.15),
-    # Smoothness — too high a magnitude here means twitchy actions
     (normalize_negative_penalty(m["action_rate_l2"], scale=0.3), 0.15),
-    # Clean foot contact
     (normalize_negative_penalty(m["foot_slip"], scale=0.005), 0.10),
     (normalize_negative_penalty(m["slip_velocity_mean"], scale=0.05), 0.05),
-    # Stepping (not shuffling)
     (normalize_positive_reward(m["air_time"], scale=0.001), 0.10),
-    # Soft landing implicit via landing force
     (normalize_negative_penalty(m["landing_force_mean"], scale=80.0), 0.05),
   ]
-
-  score = sum(value * weight for value, weight in components)
-  total_weight = sum(weight for _, weight in components)
-  return score / total_weight  # safety: normalise in case weights drift
+  total_weight = sum(w for _, w in components)
+  return sum(v * w for v, w in components) / total_weight
 
 
 def velocity_tracking_score(m: CompressedMetrics) -> float:
@@ -124,98 +159,113 @@ def velocity_tracking_score(m: CompressedMetrics) -> float:
     (normalize_positive_reward(m["track_linear_velocity"], scale=0.15), 0.60),
     (normalize_positive_reward(m["track_angular_velocity"], scale=0.10), 0.40),
   ]
-  return sum(value * weight for value, weight in components)
+  return sum(v * w for v, w in components)
 
 
-def score_run(m: CompressedMetrics) -> dict:
-  """Compute the overall score for a run, with diagnostic breakdown.
+def _extract_fell_over_slope(summary: dict[str, Any]) -> float:
+  """Pull the late-trend slope out of the compressed-summary trends block."""
+  trends = summary.get("trends", {}) or {}
+  entry = trends.get("Episode_Termination/fell_over", {}) or {}
+  return float(entry.get("slope_per_iter", 0.0))
 
-  Returns a dict with the final score and the component sub-scores so the
-  orchestrator and Analyst can reason about why the score is what it is.
+
+def score_run(
+  summary: dict[str, Any],
+  planned_iterations: int = DEFAULT_PLANNED_ITERATIONS,
+) -> dict:
+  """Compute the overall score for a run, with a diagnostic breakdown.
+
+  Accepts either a full compressed summary (with ``final_window``,
+  ``trends``, ``n_iterations``) or — for backwards compatibility — a bare
+  metrics dict, in which case slope and iteration count default to neutral
+  values.
   """
-  # Hard gates first — these short-circuit the rest of the score.
+  if "final_window" in summary:
+    m = cast(CompressedMetrics, summary["final_window"])
+    n_iterations = int(summary.get("n_iterations", planned_iterations))
+    fell_over_slope = _extract_fell_over_slope(summary)
+  else:
+    m = cast(CompressedMetrics, summary)
+    n_iterations = planned_iterations
+    fell_over_slope = 0.0
+
+  gates_failed: list[str] = []
   if m["fell_over_rate"] > STABILITY_GATE_FELL_OVER:
-    return {
-      "score": 0.0,
-      "gate_failed": "stability",
-      "reason": (
-        f"fell_over_rate={m['fell_over_rate']:.2f} "
-        f"exceeds gate of {STABILITY_GATE_FELL_OVER}"
-      ),
-      "gait_quality": None,
-      "velocity_tracking": None,
-    }
-
+    gates_failed.append("stability")
   if m["mean_episode_length"] < MIN_EP_LENGTH:
-    return {
-      "score": 0.0,
-      "gate_failed": "ep_length",
-      "reason": (
-        f"mean_episode_length={m['mean_episode_length']:.1f} "
-        f"below minimum of {MIN_EP_LENGTH}"
-      ),
-      "gait_quality": None,
-      "velocity_tracking": None,
-    }
+    gates_failed.append("ep_length")
 
-  gait = gait_quality_score(m)
-  velocity = velocity_tracking_score(m)
+  components = {
+    "stability": stability_quality(m["fell_over_rate"], fell_over_slope),
+    "episode_length": episode_length_quality(m["mean_episode_length"]),
+    "completion": completion_quality(n_iterations, planned_iterations),
+    "gait_quality": gait_quality_score(m),
+    "velocity_tracking": velocity_tracking_score(m),
+  }
 
-  # 70/30 split per project priority: gait > velocity tracking.
-  # Stability is already gated above — no separate term needed.
-  combined = 0.70 * gait + 0.30 * velocity
+  if gates_failed:
+    # Failing run: rank by stability + completion + ep_length, with gait /
+    # tracking only contributing a thin sliver. Compressed into [0, 0.30].
+    raw = (
+      0.55 * components["stability"]
+      + 0.20 * components["episode_length"]
+      + 0.15 * components["completion"]
+      + 0.07 * components["gait_quality"]
+      + 0.03 * components["velocity_tracking"]
+    )
+    score = GATE_FAIL_CEILING * raw
+  else:
+    # Passing run: gait > tracking > stability margin. Lives in
+    # [GATE_FAIL_CEILING, 1.0] so passing always beats failing.
+    quality = (
+      0.55 * components["gait_quality"]
+      + 0.20 * components["velocity_tracking"]
+      + 0.15 * components["stability"]
+      + 0.05 * components["episode_length"]
+      + 0.05 * components["completion"]
+    )
+    score = GATE_FAIL_CEILING + (1.0 - GATE_FAIL_CEILING) * quality
+
+  reason = None
+  if gates_failed:
+    parts = []
+    if "stability" in gates_failed:
+      parts.append(
+        f"fell_over_rate={m['fell_over_rate']:.2f} > {STABILITY_GATE_FELL_OVER}"
+      )
+    if "ep_length" in gates_failed:
+      parts.append(
+        f"mean_ep_length={m['mean_episode_length']:.0f} < {MIN_EP_LENGTH:.0f}"
+      )
+    reason = "; ".join(parts)
 
   return {
-    "score": combined,
-    "gate_failed": None,
-    "reason": None,
-    "gait_quality": gait,
-    "velocity_tracking": velocity,
+    "score": score,
+    "gates_failed": gates_failed,
+    "reason": reason,
+    "components": components,
+    "n_iterations": n_iterations,
+    "planned_iterations": planned_iterations,
+    "fell_over_slope": fell_over_slope,
+    # Legacy keys preserved so older readers and the analyst's prompt still
+    # see familiar fields. Prefer ``components`` and ``gates_failed`` going
+    # forward.
+    "gate_failed": gates_failed[0] if gates_failed else None,
+    "gait_quality": components["gait_quality"],
+    "velocity_tracking": components["velocity_tracking"],
   }
 
 
 if __name__ == "__main__":
-  # Smoke test against the sample log.
+  # Smoke test against a real compressed summary.
   import json
   import sys
   from pathlib import Path
 
-  log_path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
-  if log_path is None or not log_path.exists():
-    print("Usage: python scoring_function.py /path/to/training_log.json")
+  if len(sys.argv) < 2:
+    print("Usage: python scoring_function.py /path/to/compressed.json")
     sys.exit(1)
 
-  with open(log_path) as f:
-    log = json.load(f)
-
-  # Build a CompressedMetrics from the last entry in each list.
-  # NOTE: this is a smoke test only — real use goes through metrics_compression.py
-  last = lambda k: log[k][-1]
-  m: CompressedMetrics = {
-    "track_linear_velocity": last("Episode_Reward/track_linear_velocity"),
-    "track_angular_velocity": last("Episode_Reward/track_angular_velocity"),
-    "upright": last("Episode_Reward/upright"),
-    "pose": last("Episode_Reward/pose"),
-    "action_rate_l2": last("Episode_Reward/action_rate_l2"),
-    "cot_proxy": last("Episode_Reward/cot_proxy"),
-    "limb_symmetry": last("Episode_Reward/limb_symmetry"),
-    "air_time": last("Episode_Reward/air_time"),
-    "gait_phase_regularity": last("Episode_Reward/gait_phase_regularity"),
-    "foot_clearance": last("Episode_Reward/foot_clearance"),
-    "foot_swing_height": last("Episode_Reward/foot_swing_height"),
-    "foot_slip": last("Episode_Reward/foot_slip"),
-    "fell_over_rate": last("Episode_Termination/fell_over"),
-    "time_out_rate": last("Episode_Termination/time_out"),
-    "gait_air_cv_mean": last("Metrics/gait_air_cv_mean"),
-    "gait_contact_cv_mean": last("Metrics/gait_contact_cv_mean"),
-    "slip_velocity_mean": last("Metrics/slip_velocity_mean"),
-    "air_time_mean": last("Metrics/air_time_mean"),
-    "landing_force_mean": last("Metrics/landing_force_mean"),
-    "locomotion_speed_mean": last("Metrics/locomotion_speed_mean"),
-    "symmetry_pos_cost_mean": last("Metrics/symmetry_pos_cost_mean"),
-    "symmetry_vel_cost_mean": last("Metrics/symmetry_vel_cost_mean"),
-    "mean_episode_length": last("mean_ep_len"),
-    "mean_action_std": last("mean_action_std"),
-    "entropy_loss": last("loss/entropy"),
-  }
-  print(json.dumps(score_run(m), indent=2))
+  with open(Path(sys.argv[1])) as f:
+    summary = json.load(f)
+  print(json.dumps(score_run(summary), indent=2))
