@@ -35,14 +35,16 @@ import asyncio
 import importlib.util
 import json
 import logging
+import re
 import shutil
 import signal
 import subprocess
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import claude_agent_sdk as sdk
 
@@ -85,6 +87,12 @@ MAX_EXTENSIONS = 4
 # Polling intervals.
 LOG_POLL_SECONDS = 10.0
 FEEDBACK_POLL_SECONDS = 30.0
+
+# When the Claude session usage limit is hit and we cannot parse a reset
+# time from the error message, sleep this long before retrying the agent
+# call. The orchestrator never crashes on a usage limit — it just waits.
+USAGE_LIMIT_FALLBACK_SLEEP_SECONDS = 1800  # 30 min
+USAGE_LIMIT_HEARTBEAT_SECONDS = 300  # log progress every 5 min while waiting
 
 # Human feedback cadence.
 EXPERIMENTS_PER_FEEDBACK = 5
@@ -166,6 +174,58 @@ def new_run_dir() -> Path:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+class UsageLimitError(RuntimeError):
+  """Raised when the Claude session usage limit has been hit.
+
+  ``reset_at`` is the parsed reset time (timezone-aware) when one could be
+  extracted from the error message, otherwise None.
+  """
+
+  def __init__(self, message: str, reset_at: datetime | None) -> None:
+    super().__init__(message)
+    self.reset_at = reset_at
+
+
+# Matches messages like:
+#   "You've hit your limit · resets 1:40pm (Australia/Sydney)"
+#   "...resets 13:40 (UTC)"
+_USAGE_LIMIT_RESET_RE = re.compile(
+  r"resets\s+(\d{1,2}):(\d{2})\s*(am|pm)?\s*\(([^)]+)\)",
+  re.IGNORECASE,
+)
+
+
+def _parse_usage_limit_reset(message: str) -> datetime | None:
+  m = _USAGE_LIMIT_RESET_RE.search(message)
+  if not m:
+    return None
+  hour_s, minute_s, ampm, tz_name = m.groups()
+  hour = int(hour_s)
+  minute = int(minute_s)
+  if ampm:
+    ampm_l = ampm.lower()
+    if ampm_l == "pm" and hour != 12:
+      hour += 12
+    elif ampm_l == "am" and hour == 12:
+      hour = 0
+  try:
+    tz = ZoneInfo(tz_name.strip())
+  except ZoneInfoNotFoundError:
+    return None
+  now = datetime.now(tz)
+  candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+  # If the parsed wall-clock time has already passed today, the reset is
+  # tomorrow — these limits roll over within ~24h.
+  if candidate <= now:
+    candidate += timedelta(days=1)
+  return candidate
+
+
+def _is_usage_limit_message(text: str) -> bool:
+  t = text.lower()
+  return "hit your limit" in t or "usage limit" in t
+
+
 async def _query_agent(
   prompt: str,
   system_prompt: str,
@@ -195,6 +255,8 @@ async def _query_agent(
         details = message.result or (
           "; ".join(message.errors) if message.errors else "unknown"
         )
+        if _is_usage_limit_message(details):
+          raise UsageLimitError(details, _parse_usage_limit_reset(details))
         raise RuntimeError(f"Agent error: {details}")
       if output_format:
         if message.structured_output is not None:
@@ -217,10 +279,52 @@ def _get_event_loop() -> asyncio.AbstractEventLoop:
 _event_loop: asyncio.AbstractEventLoop | None = None
 
 
+def _sleep_with_heartbeat(seconds: float, what: str) -> None:
+  """Sleep, logging remaining time periodically so the user sees progress."""
+  end = time.monotonic() + seconds
+  while True:
+    remaining = end - time.monotonic()
+    if remaining <= 0:
+      return
+    chunk = min(remaining, USAGE_LIMIT_HEARTBEAT_SECONDS)
+    time.sleep(chunk)
+    remaining_after = end - time.monotonic()
+    if remaining_after > 0:
+      mins = int(remaining_after // 60)
+      log.info(f"  still waiting for {what}... ~{mins} min remaining")
+
+
 def _run_agent(prompt: str, system_prompt: str, **kwargs: Any) -> Any:
-  """Sync wrapper around the async SDK query."""
+  """Sync wrapper around the async SDK query.
+
+  If the Claude session usage limit is hit, this sleeps until the reset
+  time (parsed from the error) and retries — it never raises out. This
+  lets the orchestrator survive limit windows without losing in-flight
+  training progress: training has already been recorded to disk by the
+  time the planner/editor (next experiment) or analyst (this experiment)
+  is called.
+  """
   loop = _get_event_loop()
-  return loop.run_until_complete(_query_agent(prompt, system_prompt, **kwargs))
+  while True:
+    try:
+      return loop.run_until_complete(_query_agent(prompt, system_prompt, **kwargs))
+    except UsageLimitError as e:
+      if e.reset_at is not None:
+        # Add a small buffer so we don't retry right at the boundary.
+        wait_s = (e.reset_at - datetime.now(e.reset_at.tzinfo)).total_seconds() + 30
+        wait_s = max(60.0, wait_s)
+        log.warning(
+          f"Usage limit hit; resets at {e.reset_at.isoformat()}. "
+          f"Sleeping ~{int(wait_s // 60)} min then retrying."
+        )
+      else:
+        wait_s = float(USAGE_LIMIT_FALLBACK_SLEEP_SECONDS)
+        log.warning(
+          f"Usage limit hit; reset time not parseable ({e}). "
+          f"Sleeping {int(wait_s // 60)} min then retrying."
+        )
+      _sleep_with_heartbeat(wait_s, "usage limit reset")
+      log.info("Retrying agent call after usage limit wait")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1001,11 +1105,18 @@ def main() -> None:
   state = State.load()
   log.info(f"Starting orchestrator. Best so far: {state.best_score:.3f}")
 
-  try:
-    while True:
+  while True:
+    try:
       run_one_experiment(state)
-  except KeyboardInterrupt:
-    log.info("Stopped by user")
+    except KeyboardInterrupt:
+      log.info("Stopped by user")
+      return
+    except Exception:
+      # An experiment can fail for many reasons (training crash, parser
+      # error, etc). Log and move on rather than killing the whole loop —
+      # the next experiment starts from current best.
+      log.exception("Experiment failed; continuing to next iteration")
+      _sleep_with_heartbeat(60.0, "next experiment")
 
 
 if __name__ == "__main__":
