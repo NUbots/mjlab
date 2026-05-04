@@ -134,6 +134,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     r"^(left|right)_(hip_pitch|knee_pitch|ankle_pitch)$",
   )
   cfg.rewards["limb_symmetry"].params["velocity_weight"] = 0.2
+  cfg.rewards["limb_symmetry"].params["position_weight"] = 1.0
 
   cfg.rewards["cot_proxy"].params["asset_cfg"].joint_names = (".*",)
   cfg.rewards["cot_proxy"].params["speed_floor"] = 0.12
@@ -149,11 +150,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["body_ang_vel"].weight = -0.05
   cfg.rewards["angular_momentum"].weight = -0.01
   cfg.rewards["air_time"].weight = 0.08
-  cfg.rewards["actuation_power"].weight = 0.0 # Disable (use CoT instead)
-  cfg.rewards["cot_proxy"].weight = -0.01
-  cfg.rewards["gait_phase_regularity"].weight = -0.1
-  cfg.rewards["limb_symmetry"].weight = -0.1
-  cfg.rewards["feet_too_close"].weight = -0.0
+  cfg.rewards["actuation_power"].weight = 0.0 # Disable (debugging)
+  cfg.rewards["cot_proxy"].weight = -0.00 # Disable (debugging)
+  cfg.rewards["gait_phase_regularity"].weight = -0.0 # Disable (debugging)
+  cfg.rewards["limb_symmetry"].weight = -0.0 # Disable (debugging)
+  cfg.rewards["feet_too_close"].weight = -0.0 # Disable (debugging)
 
   # Apply play mode overrides.
   if play:
