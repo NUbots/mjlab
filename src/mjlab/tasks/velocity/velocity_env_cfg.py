@@ -298,6 +298,15 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_threshold": 0.5,
       },
     ),
+    "gait_phase_regularity": RewardTermCfg(
+      func=mdp.gait_phase_regularity_cost,
+      weight=0.0,  # Override per-robot.
+      params={
+        "sensor_name": "feet_ground_contact",
+        "command_name": "twist",
+        "command_threshold": 0.05,
+      },
+    ),
     "foot_clearance": RewardTermCfg(
       func=mdp.feet_clearance,
       weight=-2.0,

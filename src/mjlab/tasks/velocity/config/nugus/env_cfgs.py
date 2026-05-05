@@ -122,6 +122,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.rewards["angular_momentum"].weight = -0.01
     cfg.rewards["air_time"].weight = 0.08
 
+    cfg.rewards["gait_phase_regularity"].params["command_threshold"] = 0.02
+    cfg.rewards["gait_phase_regularity"].weight = -0.1
+
     # Apply play mode overrides.
     if play:
         # Effectively infinite episode length.

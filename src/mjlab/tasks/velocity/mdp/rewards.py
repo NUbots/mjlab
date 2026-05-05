@@ -370,3 +370,49 @@ class variable_posture:
     error_squared = torch.square(current_joint_pos - desired_joint_pos)
 
     return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
+  
+def gait_phase_regularity_cost(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+  eps: float = 1e-6,
+) -> torch.Tensor:
+  """Penalize irregular left-right gait timing using contact phase durations.
+
+  Uses coefficient of variation (CV) across feet for completed swing and stance
+  durations from the contact sensor's airtime tracker.
+  """
+  contact_sensor: ContactSensor = env.scene[sensor_name]
+  sensor_data = contact_sensor.data
+  assert sensor_data.last_air_time is not None
+  assert sensor_data.last_contact_time is not None
+
+  last_air_time = sensor_data.last_air_time
+  last_contact_time = sensor_data.last_contact_time
+
+  num_feet = last_air_time.shape[1]
+  if num_feet < 2:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+  air_var = torch.var(last_air_time, dim=1, unbiased=False)
+  contact_var = torch.var(last_contact_time, dim=1, unbiased=False)
+  air_mean = torch.mean(last_air_time, dim=1)
+  contact_mean = torch.mean(last_contact_time, dim=1)
+
+  air_cv = torch.sqrt(air_var) / torch.clamp(air_mean, min=eps)
+  contact_cv = torch.sqrt(contact_var) / torch.clamp(contact_mean, min=eps)
+  cost = air_cv + contact_cv
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      total_command = linear_norm + angular_norm
+      active = (total_command > command_threshold).float()
+      cost = cost * active
+
+  env.extras["log"]["Metrics/gait_air_cv_mean"] = torch.mean(air_cv)
+  env.extras["log"]["Metrics/gait_contact_cv_mean"] = torch.mean(contact_cv)
+  return cost
