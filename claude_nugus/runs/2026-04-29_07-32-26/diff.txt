@@ -1,0 +1,24 @@
+parameter: gait_phase_regularity_reward_weight
+file: src/mjlab/tasks/velocity/config/nugus/env_cfgs.py
+before: cfg.rewards["gait_phase_regularity"].weight = -2.5
+after:  cfg.rewards["gait_phase_regularity"].weight = -1
+
+parameter: air_time_reward_weight
+file: src/mjlab/tasks/velocity/config/nugus/env_cfgs.py
+before: cfg.rewards["air_time"].weight = 0.2
+after:  cfg.rewards["air_time"].weight = 0.5
+
+parameter: pose_std_walking_shoulder_pitch
+file: src/mjlab/tasks/velocity/config/nugus/env_cfgs.py
+before: r".*shoulder_pitch.*": 0.35,
+    r".*shoulder_roll.*": 0.15,
+    r".*elbow.*": 0.15,
+    # Head
+    r".*neck_yaw.*": 0.1,
+    r".*head_pitch.*": 0.1,
+after:  r".*shoulder_pitch.*": 0.35,
+    r".*shoulder_roll.*": 0.15,
+    r".*elbow.*": 0.15,
+    # Head
+    r".*neck_yaw.*": 0.1,
+    r".*head_pitch.*": 0.1,

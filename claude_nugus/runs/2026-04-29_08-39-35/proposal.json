@@ -1,0 +1,15 @@
+{
+  "hypothesis": "The four prior stability failures share a common pattern: gait_phase_regularity_reward_weight (\u22121.0, contributing \u22121.479 per step) is a large competing penalty that overrides the policy's ability to take stabilising recovery steps, without actually improving CV metrics (which have worsened across all runs). Simultaneously, limb_symmetry_velocity_weight=0.1 makes the velocity-asymmetry component of the symmetry reward negligibly small (~\u22120.006 per step), so the mirror-pose limp (symmetry_pos_cost~0.003, symmetry_vel_cost~0.098) has been unaddressed. Reducing gait_phase_regularity to \u22120.3 relieves the competitive pressure on balance, while increasing limb_symmetry_velocity_weight to 0.6 activates a meaningful signal against the velocity desynchronisation that is driving irregular contact timing and high gait CV.",
+  "changes": {
+    "gait_phase_regularity_reward_weight": -0.3,
+    "limb_symmetry_velocity_weight": 0.6
+  },
+  "expected_effects": [
+    "fell_over_rate drops below 0.5 past iteration 750 \u2014 primary pass criterion; removing the large gait_phase_regularity competing penalty frees the policy to take recovery steps",
+    "symmetry_vel_cost_mean decreases from ~0.098 baseline \u2014 directly targeted by the velocity_weight increase; if it does not decrease, the limb_symmetry weight change is not taking effect",
+    "gait_contact_cv_mean decreases from ~0.568 toward <0.4 \u2014 more synchronised leg velocity phases should produce more regular stance timing",
+    "gait_phase_regularity reward contribution becomes less negative (smaller magnitude than the current \u22121.479) \u2014 confirming the weight reduction is reflected in the reward signal",
+    "track_linear_velocity reward holds stable or improves slightly \u2014 with less competing penalty pressure, the policy can allocate more capacity to tracking; any decrease here would be unexpected and worth investigating"
+  ],
+  "probe_iterations": 3000
+}

@@ -1,0 +1,16 @@
+{
+  "hypothesis": "The two prior failures were caused by gait_phase_regularity_reward_weight = -2.5, which overrode stabilising reflexes without improving CV metrics. Resetting regularity to baseline (-1.0) restores stability, while increasing air_time_reward_weight from 0.2 to 0.5 provides a gentler, mechanistically different handle on gait CV: instead of penalising irregular timing after the fact, it directly rewards feet spending time airborne in the healthy 0.05\u20130.5s window, encouraging a consistent periodic stepping cadence. Keeping shoulder_pitch std at 0.35 (validated safe in both prior runs) costs nothing. Together these should reduce gait_air_cv_mean and gait_contact_cv_mean toward the healthy range without destabilising the robot.",
+  "changes": {
+    "gait_phase_regularity_reward_weight": -1,
+    "air_time_reward_weight": 0.5,
+    "pose_std_walking_shoulder_pitch": 0.35
+  },
+  "expected_effects": [
+    "fell_over_rate drops toward 0 past iteration 500 \u2014 stability gate passes (reverting the confirmed destabiliser)",
+    "gait_air_cv_mean decreases from 0.247 baseline \u2014 direct effect of air_time reward encouraging consistent foot lifting cadence",
+    "gait_contact_cv_mean decreases from 0.334 baseline \u2014 consistent swing timing feeds into more regular contact timing",
+    "air_time reward term value increases in late-window metrics \u2014 confirms the weight increase is taking effect and the policy is producing more swings in the 0.05\u20130.5s range",
+    "track_linear_velocity reward dips slightly vs baseline \u2014 Rule 6 side-effect check: policy allocating some capacity to step cadence vs pure speed matching; if it doesn't dip at all, the air_time change is not doing real work"
+  ],
+  "probe_iterations": 3000
+}

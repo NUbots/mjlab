@@ -1,0 +1,20 @@
+{
+  "score": 0.1168197444658291,
+  "gates_failed": [
+    "stability"
+  ],
+  "reason": "fell_over_rate=1.12 > 0.5",
+  "components": {
+    "stability": 0.2655573438397238,
+    "episode_length": 0.7424222306786775,
+    "completion": 0.2813333333333333,
+    "gait_quality": 0.3625117479009635,
+    "velocity_tracking": 0.9094113539593088
+  },
+  "n_iterations": 844,
+  "planned_iterations": 3000,
+  "fell_over_slope": -0.0011773554299179686,
+  "gate_failed": "stability",
+  "gait_quality": 0.3625117479009635,
+  "velocity_tracking": 0.9094113539593088
+}

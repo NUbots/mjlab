@@ -1,0 +1,16 @@
+{
+  "hypothesis": "The destabilisation in run 1 was caused by the angular_momentum_reward_weight jump (-0.01\u2192-0.05), which competed with the torso dynamics needed for balance. Reverting it to -0.01 while keeping gait_phase_regularity_reward_weight at -2.5 and pose_std_walking_shoulder_pitch at 0.35 isolates whether the stronger regularity penalty alone can reduce gait CV metrics toward the healthy range (<0.15) without instability. The shoulder pitch loosening gives arms the kinematic freedom to swing; the regularity penalty shapes the timing without the destabilising angular momentum conflict.",
+  "changes": {
+    "gait_phase_regularity_reward_weight": -2.5,
+    "pose_std_walking_shoulder_pitch": 0.35,
+    "angular_momentum_reward_weight": -0.01
+  },
+  "expected_effects": [
+    "fell_over_rate drops back toward 0 by iteration ~500 \u2014 reverting angular_momentum_reward_weight removes the destabilising force (stability gate should pass this time)",
+    "gait_contact_cv_mean decreases from 0.567 baseline toward <0.3 \u2014 primary effect of the stronger regularity penalty without the competing angular momentum term",
+    "gait_air_cv_mean decreases from 0.270 \u2014 secondary CV improvement from more periodic swing cadence",
+    "track_linear_velocity reward decreases slightly \u2014 expected Rule 6 trade-off confirming the regularity weight is doing real work (if it doesn't dip, the weight change isn't taking effect)",
+    "symmetry_vel_cost_mean improves modestly \u2014 more regular gait timing should reduce velocity asymmetry between legs"
+  ],
+  "probe_iterations": 3000
+}

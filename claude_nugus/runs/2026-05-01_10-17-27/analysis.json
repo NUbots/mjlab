@@ -1,0 +1,12 @@
+{
+  "verdict": "regression",
+  "key_observations": [
+    "Stability gate failed for the third consecutive experiment: fell_over_rate=1.085 in the final window, with run terminating at 40% completion (1214/3000 iterations).",
+    "The air_time reward intervention was mechanically inert: the air_time component earned \u22480.0006 despite a 0.4 weight, meaning the policy cannot access this reward at current capability level (locomotion_speed=0.08 m/s, air_time_mean=0.030 s). The policy cannot be rewarded into a stepping capability it does not yet possess.",
+    "gait_contact_cv_mean=0.598 is statistically identical to prior experiments (0.595), with slope still positive \u2014 the intended intervention had zero effect on its primary target metric.",
+    "gait_air_cv_mean=0.297 is below 0.3 and acceptable (rule 10); swing regularity is not the problem, only contact duration irregularity is.",
+    "Per-step reward is improving (from \u22120.031 to +0.055 per step) and fell_over slope is negative (\u22120.0008/iter), indicating the policy is learning \u2014 but the run terminated too early (40%) to confirm recovery, and the late-window average remains well above the gate.",
+    "Three consecutive stability failures with different configurations makes it impossible to attribute causation without a controlled baseline run. The baseline stability has never been directly verified."
+  ],
+  "next_suggestion": "Run a full diagnostic baseline experiment (air_time_reward_weight=0.2, limb_symmetry_velocity_weight=0.1, all other parameters at baseline defaults) for 3000 iterations. This establishes the first controlled anchor point in the program. If baseline fell_over_rate drops below 0.5 by iteration 1000, air_time=0.4 was the destabilizer and the next step is a smaller increment (e.g., 0.25). If baseline also fails the stability gate, the investigation must pivot away from reward weights entirely toward curriculum/physics parameters (command velocity schedule, reset conditions), as no reward tweak can fix a structurally unstable task configuration."
+}

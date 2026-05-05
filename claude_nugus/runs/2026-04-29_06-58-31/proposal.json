@@ -1,0 +1,16 @@
+{
+  "hypothesis": "Reverting angular_momentum_reward_weight to -0.01 while retaining the stronger gait_phase_regularity_reward_weight (-2.5) and looser shoulder_pitch tolerance (0.35) isolates whether the gait regularity penalty alone can drive CV metrics toward the healthy range. The previous run's stability failure is attributed primarily to the 5\u00d7 angular momentum penalty increase conflicting with torso dynamics needed for balance \u2014 removing that change should restore stability while keeping the two changes most likely to improve gait rhythm and arm naturalness.",
+  "changes": {
+    "gait_phase_regularity_reward_weight": -2.5,
+    "pose_std_walking_shoulder_pitch": 0.35,
+    "angular_momentum_reward_weight": -0.01
+  },
+  "expected_effects": [
+    "fell_over_rate drops back below 0.5 \u2014 stability restored by removing the aggressive angular momentum penalty",
+    "gait_air_cv_mean and gait_contact_cv_mean decrease toward <0.2 \u2014 direct effect of the stronger regularity penalty now able to act without competing destabilization",
+    "track_linear_velocity reward decreases slightly \u2014 expected Rule 6 side effect confirming regularity weight is doing work (if it doesn't dip, the penalty is not effective)",
+    "symmetry_vel_cost_mean improves \u2014 more periodic gait should reduce velocity asymmetry between legs",
+    "landing_force_mean remains in 30-90 N range \u2014 no soft_landing weight change, should be unaffected"
+  ],
+  "probe_iterations": 3000
+}

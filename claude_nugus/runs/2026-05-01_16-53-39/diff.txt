@@ -1,0 +1,13 @@
+parameter: upright_reward_weight
+file: src/mjlab/tasks/velocity/velocity_env_cfg.py
+before: "upright": RewardTermCfg(
+      func=mdp.upright,
+      weight=1.0,
+after:  "upright": RewardTermCfg(
+      func=mdp.upright,
+      weight=2,
+
+parameter: body_ang_vel_reward_weight
+file: src/mjlab/tasks/velocity/config/nugus/env_cfgs.py
+before: cfg.rewards["body_ang_vel"].weight = -0.05
+after:  cfg.rewards["body_ang_vel"].weight = -0.2

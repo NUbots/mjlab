@@ -1,0 +1,90 @@
+{
+  "n_iterations": 769,
+  "window_iterations": 153,
+  "final_window": {
+    "track_linear_velocity": 1.1628265294117648,
+    "track_angular_velocity": 1.2749850849673203,
+    "upright": 0.7576662679738562,
+    "pose": 0.6970252549019608,
+    "action_rate_l2": -1.1053865294117649,
+    "cot_proxy": -0.33557922875817,
+    "limb_symmetry": -0.005175477124183006,
+    "air_time": 0.00025172549019607845,
+    "gait_phase_regularity": -1.509899679738562,
+    "foot_clearance": -0.005227986928104575,
+    "foot_swing_height": -0.005432535947712418,
+    "foot_slip": -0.0020992418300653597,
+    "fell_over_rate": 1.5953158954248368,
+    "time_out_rate": 3.4716775490196077,
+    "gait_air_cv_mean": 0.26204776470588237,
+    "gait_contact_cv_mean": 0.5646959738562092,
+    "slip_velocity_mean": 0.020967535947712418,
+    "air_time_mean": 0.025019980392156863,
+    "landing_force_mean": 40.941648176470586,
+    "locomotion_speed_mean": 0.08504383660130718,
+    "symmetry_pos_cost_mean": 0.004204490196078432,
+    "symmetry_vel_cost_mean": 0.08930279084967321,
+    "mean_episode_length": 810.8354248366013,
+    "mean_action_std": 0.6635699346405229,
+    "entropy_loss": 20.00285088235294
+  },
+  "trends": {
+    "mean_reward": {
+      "slope_per_iter": 0.018451928952468208,
+      "trend": "flat",
+      "first": -0.4987,
+      "last": 16.0021
+    },
+    "mean_ep_len": {
+      "slope_per_iter": 0.23379514158630707,
+      "trend": "flat",
+      "first": 12.5625,
+      "last": 764.64
+    },
+    "loss/entropy": {
+      "slope_per_iter": -0.001160928841745056,
+      "trend": "flat",
+      "first": 28.292421,
+      "last": 19.939277
+    },
+    "mean_action_std": {
+      "slope_per_iter": -4.1106154898417575e-05,
+      "trend": "flat",
+      "first": 0.9931,
+      "last": 0.6615
+    },
+    "Episode_Termination/fell_over": {
+      "slope_per_iter": -0.0016379206238231047,
+      "trend": "flat",
+      "first": 0.0,
+      "last": 1.958333
+    },
+    "Metrics/gait_air_cv_mean": {
+      "slope_per_iter": 2.09987262615473e-06,
+      "trend": "flat",
+      "first": 0.24744,
+      "last": 0.259549
+    },
+    "Metrics/gait_contact_cv_mean": {
+      "slope_per_iter": 1.932815674450711e-05,
+      "trend": "flat",
+      "first": 0.333587,
+      "last": 0.566876
+    },
+    "Metrics/slip_velocity_mean": {
+      "slope_per_iter": -1.4849344844037628e-05,
+      "trend": "flat",
+      "first": 0.081579,
+      "last": 0.020417
+    },
+    "Metrics/landing_force_mean": {
+      "slope_per_iter": 0.000294149310619079,
+      "trend": "flat",
+      "first": 59.413315,
+      "last": 41.683357
+    }
+  },
+  "health_flags": [
+    "unstable: late-window fell_over=1.60"
+  ]
+}

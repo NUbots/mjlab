@@ -1,0 +1,4 @@
+parameter: angular_momentum_reward_weight
+file: src/mjlab/tasks/velocity/config/nugus/env_cfgs.py
+before: cfg.rewards["angular_momentum"].weight = -0.05
+after:  cfg.rewards["angular_momentum"].weight = -0.01

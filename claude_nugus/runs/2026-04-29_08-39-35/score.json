@@ -1,0 +1,7 @@
+{
+  "score": 0.0,
+  "gate_failed": "stability",
+  "reason": "fell_over_rate=0.81 exceeds gate of 0.5",
+  "gait_quality": null,
+  "velocity_tracking": null
+}

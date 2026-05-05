@@ -1,0 +1,16 @@
+{
+  "hypothesis": "Strengthening gait phase regularity (from -1.0 to -2.5) will reduce gait CV metrics toward the healthy range (<0.15). Simultaneously loosening shoulder pitch tolerance (0.15\u21920.35) and increasing the angular momentum penalty (\u22120.01\u2192\u22120.05) will give arms the kinematic freedom and incentive to produce natural counterswing, improving overall gait appearance without destabilising the robot.",
+  "changes": {
+    "gait_phase_regularity_reward_weight": -2.5,
+    "pose_std_walking_shoulder_pitch": 0.35,
+    "angular_momentum_reward_weight": -0.05
+  },
+  "expected_effects": [
+    "gait_air_cv_mean and gait_contact_cv_mean decrease (target: approach <0.15) \u2014 direct effect of stronger regularity penalty",
+    "track_linear_velocity reward decreases slightly \u2014 expected trade-off as policy allocates capacity to gait rhythm (Rule 6 check)",
+    "symmetry_vel_cost_mean improves \u2014 more periodic gait should reduce velocity asymmetry between legs",
+    "mean_ep_len remains stable or increases \u2014 stability already solved, these changes should not destabilise",
+    "landing_force_mean remains in 30\u201390 N range \u2014 no soft_landing weight change, should be unaffected"
+  ],
+  "probe_iterations": 3000
+}

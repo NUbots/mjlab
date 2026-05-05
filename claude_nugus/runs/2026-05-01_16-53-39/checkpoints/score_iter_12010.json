@@ -1,0 +1,23 @@
+{
+  "iteration": 12010,
+  "extensions_so_far": 3,
+  "score": {
+    "score": 0.7366729133100447,
+    "gates_failed": [],
+    "reason": null,
+    "components": {
+      "stability": 1.0,
+      "episode_length": 0.7683979884449302,
+      "completion": 1.0,
+      "gait_quality": 0.38047765110200915,
+      "velocity_tracking": 0.8806792002871326
+    },
+    "n_iterations": 12011,
+    "planned_iterations": 3000,
+    "fell_over_slope": -0.000100480571274726,
+    "gate_failed": null,
+    "gait_quality": 0.38047765110200915,
+    "velocity_tracking": 0.8806792002871326
+  },
+  "health_flags": []
+}

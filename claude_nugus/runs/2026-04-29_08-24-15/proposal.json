@@ -1,0 +1,15 @@
+{
+  "hypothesis": "All three prior failures share pose_std_walking_shoulder_pitch=0.35 as the sole persistent non-baseline parameter. The two arms changes (gait_phase_regularity, angular_momentum, air_time weight) were rotated in/out across runs, but shoulder_pitch_std=0.35 was always present. With angular_momentum weight at only -0.01, a wide shoulder pitch envelope allows arms to swing freely and generate rotational momentum disturbances that destabilize the torso. The pose reward (weight=1.0, std=0.35) is too permissive to suppress this. Additionally, air_time_reward_weight=0.5 was functionally inert (air_time_mean=0.032s never entered the 0.05s threshold window), so its reversal to 0.2 is cost-free. Resetting both parameters to original baseline values should eliminate the destabilizing force and yield fell_over_rate < 0.5 past iter 750, establishing the reference point all future experiments require.",
+  "changes": {
+    "air_time_reward_weight": 0.2,
+    "pose_std_walking_shoulder_pitch": 0.15
+  },
+  "expected_effects": [
+    "fell_over_rate drops below 0.5 past iteration 750 \u2014 primary pass criterion; removing the persistent shoulder_pitch_std=0.35 change eliminates the suspected destabiliser",
+    "gait_contact_cv_mean returns toward the 0.334 value seen before the failed experiments \u2014 confirming this is a clean baseline reset, not a further regression",
+    "gait_air_cv_mean stabilises near 0.247 (pre-experiment baseline) \u2014 confirms no residual effect from the reverted air_time weight",
+    "air_time reward term value remains near zero \u2014 confirming that at weight=0.2 with air_time_mean near 0.032s (below 0.05s threshold), this term is still functionally inactive at baseline; future experiments must address the threshold or foot clearance before air_time weight has any effect",
+    "track_linear_velocity and mean_ep_len stabilise or improve vs the last three runs \u2014 the policy can now allocate capacity to locomotion rather than fighting a destabilising reward landscape"
+  ],
+  "probe_iterations": 3000
+}

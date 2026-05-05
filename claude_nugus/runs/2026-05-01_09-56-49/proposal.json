@@ -1,0 +1,15 @@
+{
+  "hypothesis": "The stability failure in experiment 1 was caused by doubling gait_phase_regularity weight to -2.0, which forced the policy to optimize for strict rhythmic cadence before it had mastered basic locomotion \u2014 creating self-defeating competing objectives at this curriculum stage. Reverting gait_phase_regularity_reward_weight to -1.0 removes that constraint. The limb_symmetry_velocity_weight change (0.1 \u2192 0.5) was never fairly evaluated since the run was cut at 25%. By keeping that single change, this experiment cleanly isolates the velocity-symmetry effect: the policy should now have enough room to develop gait while being guided toward better left-right velocity synchronisation, addressing the \"mirror-pose limp\" risk (symmetry_pos_cost small but symmetry_vel_cost potentially elevated). Expected side-effect per domain rule #6: no major change to tracking reward since the gait_regularity competition pressure is removed.",
+  "changes": {
+    "gait_phase_regularity_reward_weight": -1,
+    "limb_symmetry_velocity_weight": 0.5
+  },
+  "expected_effects": [
+    "fell_over_rate drops well below 1.0 by iteration 1000 (stability gate passes) \u2014 the primary success criterion for this run",
+    "gait_contact_cv_mean stabilises or improves from the 0.576 high reached in experiment 1, returning toward baseline ~0.33",
+    "symmetry_vel_cost_mean decreases relative to the original baseline (better velocity synchronisation between legs)",
+    "track_linear_velocity reward remains near its strong level (~1.18) since gait-regularity competition pressure is removed",
+    "symmetry_pos_cost_mean remains roughly unchanged (position symmetry weight untouched \u2014 this is the diagnostic check: if pos_cost also changes, something unexpected is happening)"
+  ],
+  "probe_iterations": 3000
+}

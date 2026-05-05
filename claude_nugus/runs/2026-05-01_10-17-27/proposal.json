@@ -1,0 +1,15 @@
+{
+  "hypothesis": "Both experiments to date failed the stability gate. With gait_phase_regularity reverted in Experiment 2, the only remaining change from baseline was limb_symmetry_velocity_weight=0.5 (5\u00d7 increase) \u2014 this is now identified as the destabilizer: the heavy velocity-symmetry penalty creates a competing objective the policy cannot satisfy while also maintaining balance at this curriculum stage. Reverting limb_symmetry_velocity_weight to baseline (0.1) should restore stability. Simultaneously, gait_contact_cv has been rising monotonically across both runs (peaking at 0.595, above the 0.4 irregular threshold per rule 10), indicating the policy is developing irregular contact patterns. Increasing air_time_reward_weight from 0.2 to 0.4 targets this directly: it is a positive reward (not a penalty) that incentivises regular foot-lift-and-place cycles without creating the competing-objective dynamics that destabilised the previous runs. Expected trade-off per rule 6: track_linear_velocity may dip ~5% as the policy allocates capacity to stepping rhythm \u2014 acceptable.",
+  "changes": {
+    "limb_symmetry_velocity_weight": 0.1,
+    "air_time_reward_weight": 0.4
+  },
+  "expected_effects": [
+    "fell_over_rate drops well below 0.5 by iteration 1000 \u2014 stability gate passes (primary success criterion)",
+    "gait_contact_cv_mean stabilises and returns toward ~0.33, reversing the monotonic rise seen in both prior runs",
+    "gait_air_cv_mean remains below 0.3 or improves (more regular swing durations as stepping rhythm develops)",
+    "track_linear_velocity reward remains near ~1.25 with at most a ~5-10% dip \u2014 the diagnostic check: if it drops more than 10%, air_time weight may be too dominant",
+    "symmetry_vel_cost_mean may rise slightly relative to Experiment 2 (less constraint pressure on velocity symmetry) \u2014 this is expected and acceptable at this stage"
+  ],
+  "probe_iterations": 3000
+}

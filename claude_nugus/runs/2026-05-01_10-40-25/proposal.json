@@ -1,0 +1,14 @@
+{
+  "hypothesis": "Three consecutive stability failures across three different reward-weight configurations make causal attribution impossible \u2014 every candidate culprit has been individually reverted, yet fell_over_rate remains \u22481.08\u20131.49 in the late window of each run. Critically, the original baseline configuration has never been directly tested. This experiment runs all parameters at manifest original values (reverting the air_time_reward_weight=0.4 deviation from Experiment 3 back to 0.2) to establish the first controlled anchor point. Two outcomes are possible: (1) baseline passes the stability gate (fell_over < 0.5 by ~iteration 1000), confirming air_time=0.4 or some prior change was the destabiliser and giving us a clean foundation for incremental gait-quality improvements; (2) baseline also fails, which would indicate structural instability in the task configuration (curriculum schedule, reset conditions, command velocity profile) that no reward weight can fix \u2014 shifting the investigation to curriculum parameters. Either outcome breaks the interpretability deadlock.",
+  "changes": {
+    "air_time_reward_weight": 0.2
+  },
+  "expected_effects": [
+    "fell_over_rate drops below 0.5 by iteration ~1000 and stays there through the full run \u2014 this is the primary success criterion and establishes whether the baseline is stable",
+    "gait_contact_cv_mean stabilises near ~0.33\u20130.40 (the value seen at the start of each prior run before it degraded), rather than continuing the monotonic rise to 0.59+ seen in all three previous experiments",
+    "gait_air_cv_mean remains below 0.3 (swing regularity was acceptable in prior runs and should not regress)",
+    "track_linear_velocity reward remains near ~1.18\u20131.25 (no reward-competition pressure from the reverted changes)",
+    "If baseline also fails the stability gate (fell_over > 0.5 past iteration 1000), this is diagnostic: the instability is structural, not caused by any of the reward weight changes tested so far, and the next investigation must target curriculum velocity schedule or reset configuration"
+  ],
+  "probe_iterations": 3000
+}

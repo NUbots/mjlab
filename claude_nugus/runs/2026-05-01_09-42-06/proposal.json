@@ -1,0 +1,15 @@
+{
+  "hypothesis": "With no prior experiment history and stability already solved, the two most impactful naturalness levers that appear undertested are: (1) gait phase regularity is enforced only moderately (weight -1.0), likely leaving gait_air_cv and gait_contact_cv elevated; and (2) limb symmetry is weighted almost entirely on position (1.0) vs velocity (0.1), which risks a \"mirror-pose limp\" \u2014 legs holding identical shapes but desynchronised in motion. Doubling gait_phase_regularity weight to -2.0 should tighten CV metrics directly. Raising limb_symmetry_velocity_weight from 0.1 to 0.5 addresses the velocity-asymmetry blind spot without touching the overall symmetry weight, keeping the change interpretable. Expected trade-off: linear velocity tracking reward may drop slightly (~5-10%) as the policy reallocates learning capacity toward rhythm and symmetry \u2014 this is acceptable and predicted by domain rule #6.",
+  "changes": {
+    "gait_phase_regularity_reward_weight": -2,
+    "limb_symmetry_velocity_weight": 0.5
+  },
+  "expected_effects": [
+    "gait_air_cv_mean decreases (more regular swing durations \u2014 target below 0.3)",
+    "gait_contact_cv_mean decreases (more regular stance durations)",
+    "symmetry_vel_cost_mean decreases (better velocity synchronisation between legs)",
+    "track_linear_velocity reward decreases slightly (~5-10%) as policy reallocates capacity \u2014 acceptable side effect per rule #6",
+    "symmetry_pos_cost_mean remains roughly unchanged (position symmetry weight untouched)"
+  ],
+  "probe_iterations": 3000
+}

@@ -1,0 +1,15 @@
+{
+  "hypothesis": "All four experiments \u2014 including the full baseline \u2014 have failed the stability gate, with fell_over consistently in the 1.08\u20131.49 range during the evaluation window. However, fell_over slopes are consistently negative across runs (the policy IS learning to stabilize, just not fast enough within 3000 iterations). The root cause is that the upright and torso-wobble stability signals are too weak early in training relative to the velocity tracking objectives (weight 2.0 each): the policy preferentially learns to track velocity while tolerating large torso deviations, delaying stable bipedal balance. Doubling upright_reward_weight (1.0 \u2192 2.0) and quadrupling body_ang_vel_reward_weight (-0.05 \u2192 -0.2) directly strengthens these early-training stability signals without introducing the competing-objective dynamics that destabilised Experiments 1\u20133. The upright reward now matches the importance of velocity tracking; the angular velocity penalty creates stronger torso-wobble damping. These two changes target the same failure mode and are semantically coupled (torso uprightness + torso angular stability), so they count as one semantic change. Expected trade-off per rule 6: track_linear_velocity may dip ~5\u201310% as the policy allocates capacity toward balance \u2014 this is acceptable and serves as the diagnostic check.",
+  "changes": {
+    "upright_reward_weight": 2,
+    "body_ang_vel_reward_weight": -0.2
+  },
+  "expected_effects": [
+    "fell_over_rate drops below 0.5 by iteration ~800\u20131000 and stays there through the full run \u2014 primary success criterion; the stronger upright signal should pull fell_over down faster than the ~-0.001/iter seen in the baseline",
+    "fell_over_slope becomes more steeply negative (more negative than -0.001/iter) compared to baseline, indicating the stability signal is taking effect earlier in training",
+    "track_linear_velocity reward decreases by ~5\u201310% (from ~1.25 to ~1.10\u20131.20) as the policy reallocates capacity to balance \u2014 diagnostic check: if it drops more than 15%, the stability weights are too dominant",
+    "gait_contact_cv_mean stabilises below 0.4 rather than continuing the monotonic rise to 0.60 seen in all prior runs \u2014 more stable gait should produce more regular contact timing as a downstream effect of better balance",
+    "body_ang_vel component in the reward should show a more negative mean value (larger penalty being actively incurred and reduced) relative to baseline, confirming the signal is engaged"
+  ],
+  "probe_iterations": 3000
+}

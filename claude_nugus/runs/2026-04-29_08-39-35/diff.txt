@@ -1,0 +1,9 @@
+parameter: gait_phase_regularity_reward_weight
+file: src/mjlab/tasks/velocity/config/nugus/env_cfgs.py
+before: cfg.rewards["gait_phase_regularity"].weight = -2.5
+after:  cfg.rewards["gait_phase_regularity"].weight = -0.3
+
+parameter: limb_symmetry_velocity_weight
+file: src/mjlab/tasks/velocity/velocity_env_cfg.py
+before: "velocity_weight": 0.1,
+after:  "velocity_weight": 0.6,

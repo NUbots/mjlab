@@ -1,0 +1,4 @@
+parameter: air_time_reward_weight
+file: src/mjlab/tasks/velocity/config/nugus/env_cfgs.py
+before: cfg.rewards["air_time"].weight = 0.4
+after:  cfg.rewards["air_time"].weight = 0.2

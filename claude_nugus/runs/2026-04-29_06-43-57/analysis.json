@@ -1,0 +1,12 @@
+{
+  "verdict": "regression",
+  "key_observations": [
+    "Stability gate failed (fell_over_rate=1.82 > 0.5) at only 758/3000 iterations; Rule 2 edge case but gait metrics confirm genuine trouble, not just early noise.",
+    "Both gait CV targets moved in the wrong direction: gait_air_cv_mean 0.247\u21920.270, gait_contact_cv_mean 0.334\u21920.567 (much worse) \u2014 the primary hypothesis did not hold.",
+    "The 5\u00d7 increase in angular_momentum_reward_weight (\u22120.01\u2192\u22120.05) is the prime destabilisation suspect: it competes with the torso dynamics needed for counterswing and may have conflicted with balance, producing the failed stability gate.",
+    "Exploration health is normal (entropy declining gradually, action_std=0.67) \u2014 the policy is learning locomotion but the reward landscape is too conflicted for stable periodic gait to emerge.",
+    "Symmetry shows the mirror-pose limp pattern (symmetry_pos_cost_mean=0.0027 low but symmetry_vel_cost_mean=0.091 elevated), consistent with the high contact CV irregularity.",
+    "Landing force (42 N) and per-step reward trend are both healthy \u2014 the failure is specifically in gait rhythm and stability, not in the reward signal quality overall."
+  ],
+  "next_suggestion": "Revert angular_momentum_reward_weight to \u22120.01 while keeping gait_phase_regularity_reward_weight at \u22122.5 and shoulder_pitch_std at 0.35. This isolates whether the stronger regularity penalty alone can drive CV metrics down without the destabilising angular momentum interaction. Watch for track_linear_velocity to dip slightly as the expected Rule 6 side effect confirming the regularity weight is actually doing work."
+}

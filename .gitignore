@@ -19,5 +19,5 @@ benchmark_results/
 **/generated/*
 
 # Claude stuff
-claude_nugus/runs/*/snapshots
-claude_nugus/runs
+# claude_nugus/runs/*/snapshots
+# claude_nugus/runs

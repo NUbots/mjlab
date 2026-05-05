@@ -1,0 +1,11 @@
+{
+  "verdict": "regression",
+  "key_observations": [
+    "Stability gate failed again: fell_over_rate=1.11 in the final window (iter ~890\u20131112), past the rule-2 grace period, falsifying the hypothesis that gait_phase_regularity=-2.0 was the primary cause of instability in experiment 1.",
+    "gait_contact_cv_mean rose monotonically from 0.334 to 0.595 (above the 0.4 irregular threshold per rule 10) and is still trending upward \u2014 the policy's contact regularity is degrading as training progresses, not recovering.",
+    "The only remaining change from baseline is limb_symmetry_velocity_weight=0.5 (5x increase); the mirror-pose limp pattern (pos_cost=0.013 small, vel_cost=0.064 elevated per rule 9) is present and unresolved despite the heavier penalty, suggesting the constraint is creating a competing objective that disrupts gait regularity rather than correcting it.",
+    "Velocity tracking is strong (track_linear_velocity=1.253, track_angular_velocity=1.448) and entropy decline is healthy (~61% of starting value remains), so the instability is not from speed mismatch or exploration collapse \u2014 the policy is learning but developing a structurally irregular gait.",
+    "Landing force (40.7 N) is in the healthy range and declining; per-step reward rate improved from -0.033 to +0.054, confirming genuine learning progress despite the gait quality failure."
+  ],
+  "next_suggestion": "Revert limb_symmetry_velocity_weight to baseline (0.1) with gait_phase_regularity_reward_weight remaining at -1.0. This isolates whether the 5x weight increase is the destabilising factor. Once stable locomotion is confirmed at baseline, reintroduce limb_symmetry_velocity_weight in a smaller increment (0.2 rather than 0.5) and use gait_contact_cv_mean as the leading indicator \u2014 it should stay below 0.4 if the increment is safe. Expected diagnostic check per rule 6: symmetry_vel_cost_mean should rise slightly (less constraint pressure) while gait_contact_cv_mean should return toward ~0.33."
+}

@@ -1,0 +1,7 @@
+{
+  "training_log_dir": "/home/vini/mjlab/logs/rsl_rl/nugus_velocity/2026-05-01_10-42-11",
+  "started_at": "2026-05-01T10:42:07.025705",
+  "initial_target_iterations": 3000,
+  "final_iterations": 843,
+  "extensions_used": 0
+}
