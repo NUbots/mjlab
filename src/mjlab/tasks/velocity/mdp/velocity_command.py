@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 class UniformVelocityCommand(CommandTerm):
   """Command term for sampling uniform velocity commands for robot control."""
-  
+
   cfg: UniformVelocityCommandCfg
 
   def __init__(self, cfg: UniformVelocityCommandCfg, env: ManagerBasedRlEnv):
@@ -81,13 +81,13 @@ class UniformVelocityCommand(CommandTerm):
     self.vel_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
     self.vel_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
     self.vel_command_b[env_ids, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
-    
+
     # Sample heading targets if heading control is enabled
     if self.cfg.heading_command:
       assert self.cfg.ranges.heading is not None
       self.heading_target[env_ids] = r.uniform_(*self.cfg.ranges.heading)
       self.is_heading_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
-    
+
     # Randomly select environments to stand still
     self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
 
@@ -201,17 +201,20 @@ class UniformVelocityCommand(CommandTerm):
 @dataclass(kw_only=True)
 class UniformVelocityCommandCfg(CommandTermCfg):
   """Configuration for uniform velocity command generation."""
-  
+
   entity_name: str  # Name of the robot entity to command
   heading_command: bool = False  # Enable heading control mode
   heading_control_stiffness: float = 1.0  # Proportional gain for heading control
   rel_standing_envs: float = 0.0  # Fraction of environments to remain standing
   rel_heading_envs: float = 1.0  # Fraction of environments using heading control
-  init_velocity_prob: float = 0.0  # Probability of initializing robot to command velocity
+  init_velocity_prob: float = (
+    0.0  # Probability of initializing robot to command velocity
+  )
 
   @dataclass
   class Ranges:
     """Sampling ranges for velocity commands."""
+
     lin_vel_x: tuple[float, float]  # Forward/backward linear velocity range
     lin_vel_y: tuple[float, float]  # Left/right linear velocity range
     ang_vel_z: tuple[float, float]  # Yaw angular velocity range
@@ -222,6 +225,7 @@ class UniformVelocityCommandCfg(CommandTermCfg):
   @dataclass
   class VizCfg:
     """Visualization configuration."""
+
     z_offset: float = 0.2  # Height offset for arrows above robot
     scale: float = 0.5  # Scale factor for arrow lengths
 

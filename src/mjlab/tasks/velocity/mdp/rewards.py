@@ -370,7 +370,8 @@ class variable_posture:
     error_squared = torch.square(current_joint_pos - desired_joint_pos)
 
     return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
-  
+
+
 def gait_phase_regularity_cost(
   env: ManagerBasedRlEnv,
   sensor_name: str,
