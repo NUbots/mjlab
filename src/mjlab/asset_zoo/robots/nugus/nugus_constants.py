@@ -94,10 +94,6 @@ NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
   target_names_expr=(
     "right_hip_yaw",
     "left_hip_yaw",
-    "right_hip_roll",
-    "left_hip_roll",
-    "right_hip_pitch",
-    "left_hip_pitch",
   ),
   stiffness=STIFFNESS_MX106,
   damping=DAMPING_MX106,
@@ -107,6 +103,10 @@ NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
 
 NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
   target_names_expr=(
+    "right_hip_roll",
+    "left_hip_roll",
+    "right_hip_pitch",
+    "left_hip_pitch",
     "right_knee_pitch",
     "left_knee_pitch",
     "right_ankle_pitch",
