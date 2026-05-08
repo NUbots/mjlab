@@ -163,25 +163,46 @@ STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
 # Collision Config.
 ##
 
-# Feet-only collision with the ground (no self-collision).
+FOOT_COLLISION_REGEX = r".*foot_collision$"
+
+# Increase this to raise foot-ground traction.
+FOOT_GROUND_FRICTION = 1.1
+
+# Keep non-foot contact friction lower to reduce limb sticking.
+NON_FOOT_COLLISION_FRICTION = 0.5
+
+# Basic collision
 FEET_COLLISION = CollisionCfg(
-  geom_names_expr=(r"^(left|right)_foot_collision$",),
-  contype=0,
-  conaffinity=1,
-  condim=3,
-  priority=1,
-  friction=(1.0,),
+    geom_names_expr=(".*foot_collision",),
+    contype=1,
+    conaffinity=2,
+    condim=3,
+    friction=(FOOT_GROUND_FRICTION,),
 )
 
-# Full-body collision including self-collision.
-# Non-foot geoms use condim=1 (normal force only, no friction) to prevent
-# adjacent links from generating shear forces that lock up joints.
-# Feet use condim=3 for proper frictional ground contact.
 FULL_COLLISION = CollisionCfg(
-  geom_names_expr=(".*_collision",),
-  condim={r"^(left|right)_foot_collision$": 3, ".*_collision": 1},
-  priority={r"^(left|right)_foot_collision$": 1},
-  friction={r"^(left|right)_foot_collision$": (1.0,)},
+    geom_names_expr=(".*_collision",),
+    contype=1,
+    # Enable robot-robot and robot-ground contacts for collision geoms.
+    conaffinity=1,
+    condim=3,
+    friction={
+        FOOT_COLLISION_REGEX: (FOOT_GROUND_FRICTION,),
+        ".*_collision": (NON_FOOT_COLLISION_FRICTION,),
+    },
+)
+
+# Full body collision with ground only
+FULL_COLLISION_GND_ONLY = CollisionCfg(
+    geom_names_expr=(".*_collision",),
+    contype=1,
+    # Ground/environment contacts only (no self-collisions).
+    conaffinity=0,
+    condim=3,
+    friction={
+        FOOT_COLLISION_REGEX: (FOOT_GROUND_FRICTION,),
+        ".*_collision": (NON_FOOT_COLLISION_FRICTION,),
+    },
 )
 
 
@@ -223,7 +244,7 @@ for a in NUGUS_ARTICULATION.actuators:
   names = a.target_names_expr
   assert e is not None
   for n in names:
-    NUGUS_ACTION_SCALE[n] = 0.25 * e / s
+    NUGUS_ACTION_SCALE[n] = 0.25 * e / s # Approx 0.049
 
 if __name__ == "__main__":
   import mujoco.viewer as viewer
