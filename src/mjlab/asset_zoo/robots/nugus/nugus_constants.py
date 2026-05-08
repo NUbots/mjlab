@@ -17,15 +17,9 @@ NUGUS_XML: Path = (
 )
 assert NUGUS_XML.exists(), f"XML not found: {NUGUS_XML}"
 
-def get_assets(meshdir: str) -> dict[str, bytes]:
-    assets: dict[str, bytes] = {}
-    update_assets(assets, NUGUS_XML.parent / "assets", meshdir)
-    return assets
 
 def get_spec() -> mujoco.MjSpec:
-    spec = mujoco.MjSpec.from_file(str(NUGUS_XML))
-    spec.assets = get_assets(spec.meshdir)
-    return spec
+    return mujoco.MjSpec.from_file(str(NUGUS_XML))
 
 
 ##
