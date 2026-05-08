@@ -230,7 +230,50 @@
   </worldbody>
 
   <contact>
+    <!-- Left leg chain (adjacent links) -->
+    <exclude body1="torso" body2="left_hip_yaw"/>
+    <exclude body1="left_hip_yaw" body2="left_hip_roll"/>
+    <exclude body1="left_hip_roll" body2="left_upper_leg"/>
+    <exclude body1="left_upper_leg" body2="left_lower_leg"/>
+    <exclude body1="left_lower_leg" body2="left_ankle"/>
+    <exclude body1="left_ankle" body2="left_foot"/>
+    <!-- Left leg chain (near-neighbor links) -->
+    <exclude body1="torso" body2="left_hip_roll"/>
     <exclude body1="left_hip_yaw" body2="left_upper_leg"/>
+    <exclude body1="left_hip_roll" body2="left_lower_leg"/>
+    <exclude body1="left_upper_leg" body2="left_ankle"/>
+    <exclude body1="left_lower_leg" body2="left_foot"/>
+
+    <!-- Right leg chain (adjacent links) -->
+    <exclude body1="torso" body2="right_hip_yaw"/>
+    <exclude body1="right_hip_yaw" body2="right_hip_roll"/>
+    <exclude body1="right_hip_roll" body2="right_upper_leg"/>
+    <exclude body1="right_upper_leg" body2="right_lower_leg"/>
+    <exclude body1="right_lower_leg" body2="right_ankle"/>
+    <exclude body1="right_ankle" body2="right_foot"/>
+    <!-- Right leg chain (near-neighbor links) -->
+    <exclude body1="torso" body2="right_hip_roll"/>
     <exclude body1="right_hip_yaw" body2="right_upper_leg"/>
+    <exclude body1="right_hip_roll" body2="right_lower_leg"/>
+    <exclude body1="right_upper_leg" body2="right_ankle"/>
+    <exclude body1="right_lower_leg" body2="right_foot"/>
+
+    <!-- Arms chain (adjacent links) -->
+    <exclude body1="torso" body2="left_shoulder"/>
+    <exclude body1="left_shoulder" body2="left_upper_arm"/>
+    <exclude body1="left_upper_arm" body2="left_lower_arm"/>
+    <exclude body1="torso" body2="right_shoulder"/>
+    <exclude body1="right_shoulder" body2="right_upper_arm"/>
+    <exclude body1="right_upper_arm" body2="right_lower_arm"/>
+    <!-- Arms chain (near-neighbor links) -->
+    <exclude body1="torso" body2="left_upper_arm"/>
+    <exclude body1="torso" body2="right_upper_arm"/>
+    <exclude body1="left_shoulder" body2="left_lower_arm"/>
+    <exclude body1="right_shoulder" body2="right_lower_arm"/>
+
+    <!-- Neck/head chain -->
+    <exclude body1="torso" body2="neck"/>
+    <exclude body1="neck" body2="head"/>
+    <exclude body1="torso" body2="head"/>
   </contact>
 </mujoco>
