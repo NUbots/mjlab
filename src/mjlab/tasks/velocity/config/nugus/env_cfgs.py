@@ -80,7 +80,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["pose"].params["std_standing"] = {".*": 0.05}
   cfg.rewards["pose"].params["std_walking"] = {
     # Lower body.
-    r".*hip_pitch.*": 0.3,
+    r".*hip_pitch.*": 0.35,
     r".*hip_roll.*": 0.15,
     r".*hip_yaw.*": 0.15,
     r".*knee.*": 0.35,
@@ -122,7 +122,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["air_time"].weight = 0.08
 
   cfg.rewards["gait_phase_regularity"].params["command_threshold"] = 0.02
-  cfg.rewards["gait_phase_regularity"].weight = -0.1
+  cfg.rewards["gait_phase_regularity"].weight = -0.15
 
   # Apply play mode overrides.
   if play:
