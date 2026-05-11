@@ -113,11 +113,6 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("torso",)
   cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("torso",)
-  cfg.rewards["limb_symmetry"].params["asset_cfg"].joint_names = (
-    r"^(left|right)_(hip_pitch|knee_pitch|ankle_pitch)$",
-  )
-  cfg.rewards["limb_symmetry"].params["velocity_weight"] = 0.2
-  cfg.rewards["limb_symmetry"].params["position_weight"] = 1.0
 
   for reward_name in ["foot_clearance", "foot_swing_height", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
@@ -127,8 +122,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["air_time"].weight = 0.08
 
   cfg.rewards["gait_phase_regularity"].params["command_threshold"] = 0.02
-  cfg.rewards["gait_phase_regularity"].weight = -0.0 # Disable (suspect cause of doing the splits)
-  cfg.rewards["limb_symmetry"].weight = -0.1
+  cfg.rewards["gait_phase_regularity"].weight = -0.1
 
   # Apply play mode overrides.
   if play:

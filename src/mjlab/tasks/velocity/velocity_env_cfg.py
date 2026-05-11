@@ -298,15 +298,6 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_threshold": 0.5,
       },
     ),
-    "limb_symmetry": RewardTermCfg(
-      func=mdp.left_right_joint_symmetry_cost,
-      weight=0.0,  # Override per-robot.
-      params={
-        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
-        "position_weight": 0.0, # Override per-robot
-        "velocity_weight": 0.0, # Override per-robot
-      },
-    ),
     "gait_phase_regularity": RewardTermCfg(
       func=mdp.gait_phase_regularity_cost,
       weight=0.0,  # Override per-robot.
