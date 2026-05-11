@@ -158,10 +158,10 @@ STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
 FOOT_COLLISION_REGEX = r".*foot_collision$"
 
 # Increase this to raise foot-ground traction.
-FOOT_GROUND_FRICTION = 1.1
+FOOT_GROUND_FRICTION = 1.0
 
 # Keep non-foot contact friction lower to reduce limb sticking.
-NON_FOOT_COLLISION_FRICTION = 0.5
+NON_FOOT_COLLISION_FRICTION = 1.0
 
 # Basic collision
 FEET_COLLISION = CollisionCfg(
