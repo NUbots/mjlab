@@ -47,6 +47,12 @@ def main() -> None:
       print(f"  [{ctrl_idx:2d}] {name}")
       ctrl_idx += 1
 
+  print()
+  print("Debugging actuator damping dynamics values")
+  for group in NUGUS_ARTICULATION.actuators:
+    for name in group.target_names_expr:
+      print(f" {name}: armature={group.armature}, stiffness={group.stiffness}, damping={group.damping}, effort_limit={group.effort_limit}, friction_loss={group.frictionloss}")
+
 
 if __name__ == "__main__":
   main()
