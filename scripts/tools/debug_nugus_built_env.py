@@ -111,6 +111,110 @@ def dump_physics(env: ManagerBasedRlEnv) -> None:
     print()
     print("viscous_damping field: not present on this mujoco build")
 
+  
+
+
+def dump_contact_config(env: ManagerBasedRlEnv) -> None:
+  """Dump every contact-related field the compiler resolves.
+
+  The user's CollisionCfg leaves most contact parameters unset, so the
+  compiled geom_solref / geom_solimp / geom_margin / etc. fall back to
+  MuJoCo's defaults. Those defaults can shift between MuJoCo versions —
+  which is the most plausible remaining cause of the post-merge sim-to-real
+  gap. Dumping the compiled MjModel values is the only way to see what
+  *actually* changed between versions for the same input config.
+
+  Run this at the pre- and post-merge snapshots and diff the output.
+  """
+  print()
+  print("-" * 78)
+  print("Contact / solver config (compiled MjModel — what physics actually uses)")
+  print("-" * 78)
+
+  mj_model = env.sim.mj_model
+  opt = mj_model.opt
+
+  print(f"mujoco version:        {_safe_attr(__import__('mujoco'), '__version__')}")
+  print(f"opt.timestep:          {opt.timestep}")
+  print(
+    f"opt.integrator:        {int(opt.integrator)} "
+    f"(0=euler, 1=RK4, 2=implicit, 3=implicitfast)"
+  )
+  print(f"opt.cone:              {int(opt.cone)} (0=pyramidal, 1=elliptic)")
+  print(f"opt.impratio:          {opt.impratio}")
+  print(f"opt.noslip_iterations: {opt.noslip_iterations}")
+  print(f"opt.ccd_iterations:    {_safe_attr(opt, 'ccd_iterations')}")
+  print(f"opt.iterations:        {opt.iterations}")
+  print(f"opt.tolerance:         {opt.tolerance}")
+  print(f"opt.solver:            {int(opt.solver)} (0=PGS, 1=CG, 2=Newton)")
+  if hasattr(opt, "ls_iterations"):
+    print(f"opt.ls_iterations:     {opt.ls_iterations}")
+  if hasattr(opt, "ls_tolerance"):
+    print(f"opt.ls_tolerance:      {opt.ls_tolerance}")
+  if hasattr(opt, "sdf_iterations"):
+    print(f"opt.sdf_iterations:    {opt.sdf_iterations}")
+
+  # Disableflags / enableflags expose which features are on (multiccd,
+  # filterparent, etc.). Different versions toggle these by default.
+  print(f"opt.disableflags:      {opt.disableflags:#x}")
+  print(f"opt.enableflags:       {opt.enableflags:#x}")
+  if hasattr(opt, "multi_ccd"):  # name may vary by mujoco version
+    print(f"opt.multi_ccd:         {opt.multi_ccd}")
+
+  print()
+  print("Global solver overrides (model.opt.o_*; these win if set):")
+  print(f"  o_solref:   {np.asarray(opt.o_solref).tolist()}")
+  print(f"  o_solimp:   {np.asarray(opt.o_solimp).tolist()}")
+  print(f"  o_friction: {np.asarray(opt.o_friction).tolist()}")
+  print(f"  o_margin:   {opt.o_margin}")
+
+  # Per-geom compiled values for foot collision geoms (and one upper-body
+  # geom for comparison so version-default shifts in unset fields are
+  # obvious).
+  geom_names_of_interest: list[str] = []
+  for i in range(mj_model.ngeom):
+    name = mj_model.geom(i).name
+    if "foot_collision" in name or "torso_collision" in name:
+      geom_names_of_interest.append(name)
+  if not geom_names_of_interest:
+    # Fall back to the first few collision geoms.
+    geom_names_of_interest = [
+      mj_model.geom(i).name for i in range(min(6, mj_model.ngeom))
+    ]
+
+  print()
+  print("Per-geom compiled values (these are what MuJoCo actually uses):")
+  for name in geom_names_of_interest:
+    g = mj_model.geom(name)
+    print(f"  {name}:")
+    print(
+      f"    condim={int(g.condim)} priority={int(g.priority)} "
+      f"contype={int(g.contype)} conaffinity={int(g.conaffinity)}"
+    )
+    print(f"    friction={np.asarray(g.friction).tolist()}")
+    print(f"    solref={np.asarray(g.solref).tolist()}")
+    print(f"    solimp={np.asarray(g.solimp).tolist()}")
+    print(f"    margin={float(g.margin)} gap={float(g.gap)} solmix={float(g.solmix)}")
+
+  # Pair-level contact params. Active pairs (model.pair_*) override per-geom
+  # values when present.
+  if mj_model.npair > 0:
+    print()
+    print(f"Defined contact pairs (model.npair={mj_model.npair}):")
+    for i in range(mj_model.npair):
+      g1 = mj_model.geom(int(mj_model.pair_geom1[i])).name
+      g2 = mj_model.geom(int(mj_model.pair_geom2[i])).name
+      print(f"  pair {i}: ({g1}, {g2})")
+      print(f"    friction={np.asarray(mj_model.pair_friction[i]).tolist()}")
+      print(f"    solref={np.asarray(mj_model.pair_solref[i]).tolist()}")
+      print(f"    solimp={np.asarray(mj_model.pair_solimp[i]).tolist()}")
+      print(
+        f"    margin={float(mj_model.pair_margin[i])} gap={float(mj_model.pair_gap[i])}"
+      )
+  else:
+    print()
+    print("No explicit contact pairs defined (model.npair=0).")
+
 
 def test_delay_passthrough(env: ManagerBasedRlEnv) -> None:
   print()
@@ -248,6 +352,7 @@ def main() -> None:
     dump_physics(env)
     test_delay_passthrough(env)
     test_last_action_semantics(env)
+    dump_contact_config(env)
   finally:
     if hasattr(env, "close"):
       env.close()

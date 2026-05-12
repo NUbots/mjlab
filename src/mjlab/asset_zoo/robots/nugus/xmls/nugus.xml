@@ -33,7 +33,7 @@
 
   <default>
     <!-- Default: no collisions -->
-    <geom contype="0" conaffinity="0" condim="1" solref="0.005 1"/>
+    <geom contype="0" conaffinity="0" condim="1" solref="0.02 1"/>
     <site group="5" type="sphere"/>
     <default class="collision">
       <geom group="3" type="box" contype="1" conaffinity="2" friction="1.0"/>
