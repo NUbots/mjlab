@@ -241,8 +241,9 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "asset_cfg": SceneEntityCfg("robot", geom_names=()),  # Set per-robot.
         "operation": "abs",
-        "ranges": (0.3, 1.2),
-        "shared_random": True,  # All foot geoms share the same friction.
+        "ranges": (0.3, 1.5),
+        # Per-foot independent friction so the policy sees asymmetric traction.
+        "shared_random": False,
       },
     ),
     "encoder_bias": EventTermCfg(
@@ -264,6 +265,31 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
           1: (-0.025, 0.025),
           2: (-0.03, 0.03),
         },
+      },
+    ),
+    # PD gain scaling: encoder/motor calibration plus voltage/temperature drift
+    # shift the effective servo gains in the real robot. Scale kp and kd
+    # independently per actuator so the policy can't lock onto exact loop
+    # dynamics. ±10% is a reasonable starting range for well-characterized servos.
+    "pd_gains": EventTermCfg(
+      mode="startup",
+      func=dr.pd_gains,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "kp_range": (0.9, 1.1),
+        "kd_range": (0.9, 1.1),
+        "operation": "scale",
+      },
+    ),
+    # Physics-consistent per-body mass/inertia perturbation. alpha is a
+    # log-scale density factor: mass ~ exp(2*alpha). alpha in (-0.05, 0.05)
+    # gives roughly ±10% mass with inertia scaling correctly along with it.
+    "body_inertia": EventTermCfg(
+      mode="startup",
+      func=dr.pseudo_inertia,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "alpha_range": (-0.05, 0.05),
       },
     ),
   }
