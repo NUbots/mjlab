@@ -497,8 +497,12 @@ def feet_lateral_distance_cost(
   cost = torch.sum(torch.exp(sharpness * shortfall) - 1.0, dim=1)
 
   min_pair_distance = torch.amin(pair_distance, dim=1)
+  max_pair_distance = torch.amax(pair_distance, dim=1)
   env.extras["log"]["Metrics/min_foot_lateral_distance_mean"] = torch.mean(
     min_pair_distance
+  )
+  env.extras["log"]["Metrics/max_foot_lateral_distance_mean"] = torch.mean(
+    max_pair_distance
   )
   return cost
 
