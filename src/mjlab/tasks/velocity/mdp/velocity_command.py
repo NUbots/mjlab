@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 class UniformVelocityCommand(CommandTerm):
   """Command term for sampling uniform velocity commands for robot control."""
-  
+
   cfg: UniformVelocityCommandCfg
 
   def __init__(self, cfg: UniformVelocityCommandCfg, env: ManagerBasedRlEnv):
@@ -93,17 +93,16 @@ class UniformVelocityCommand(CommandTerm):
     self.vel_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
     self.vel_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
     self.vel_command_b[env_ids, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
-    
+
     # Sample heading targets if heading control is enabled
     if self.cfg.heading_command:
       assert self.cfg.ranges.heading is not None
       self.heading_target[env_ids] = r.uniform_(*self.cfg.ranges.heading)
       self.is_heading_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
-    
+
     # Randomly select environments to stand still
     self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
 
-    
     # Randomly assign world-frame envs.
     self.is_world_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_world_envs
     # Copy sampled velocities as world-frame reference for world envs.
@@ -118,7 +117,7 @@ class UniformVelocityCommand(CommandTerm):
       )
       self.vel_command_b[fwd_ids, 1] = 0.0
       self.vel_command_b[fwd_ids, 2] = 0.0
-      
+
     # Optionally initialize robot velocities to match commands
     init_vel_mask = r.uniform_(0.0, 1.0) < self.cfg.init_velocity_prob
     init_vel_env_ids = env_ids[init_vel_mask]
@@ -326,6 +325,7 @@ class UniformVelocityCommandCfg(CommandTermCfg):
   @dataclass
   class Ranges:
     """Sampling ranges for velocity commands."""
+
     lin_vel_x: tuple[float, float]  # Forward/backward linear velocity range
     lin_vel_y: tuple[float, float]  # Left/right linear velocity range
     ang_vel_z: tuple[float, float]  # Yaw angular velocity range
@@ -336,6 +336,7 @@ class UniformVelocityCommandCfg(CommandTermCfg):
   @dataclass
   class VizCfg:
     """Visualization configuration."""
+
     z_offset: float = 0.2  # Height offset for arrows above robot
     scale: float = 0.5  # Scale factor for arrow lengths
 

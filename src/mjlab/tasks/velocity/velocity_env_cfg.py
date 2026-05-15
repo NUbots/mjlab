@@ -351,8 +351,8 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=0.0,  # Override per-robot.
       params={
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
-        "position_weight": 0.0, # Override per-robot
-        "velocity_weight": 0.0, # Override per-robot
+        "position_weight": 0.0,  # Override per-robot
+        "velocity_weight": 0.0,  # Override per-robot
       },
     ),
     "air_time": RewardTermCfg(

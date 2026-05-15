@@ -111,8 +111,6 @@ def dump_physics(env: ManagerBasedRlEnv) -> None:
     print()
     print("viscous_damping field: not present on this mujoco build")
 
-  
-
 
 def dump_contact_config(env: ManagerBasedRlEnv) -> None:
   """Dump every contact-related field the compiler resolves.
