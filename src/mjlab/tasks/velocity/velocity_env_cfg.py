@@ -281,17 +281,6 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "operation": "scale",
       },
     ),
-    # Physics-consistent per-body mass/inertia perturbation. alpha is a
-    # log-scale density factor: mass ~ exp(2*alpha). alpha in (-0.05, 0.05)
-    # gives roughly ±10% mass with inertia scaling correctly along with it.
-    "body_inertia": EventTermCfg(
-      mode="startup",
-      func=dr.pseudo_inertia,
-      params={
-        "asset_cfg": SceneEntityCfg("robot"),
-        "alpha_range": (-0.05, 0.05),
-      },
-    ),
   }
 
   ##
