@@ -241,7 +241,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "asset_cfg": SceneEntityCfg("robot", geom_names=()),  # Set per-robot.
         "operation": "abs",
-        "ranges": (0.3, 1.5),
+        "ranges": (0.8, 1.2),
         # Per-foot independent friction so the policy sees asymmetric traction.
         "shared_random": False,
       },
@@ -267,10 +267,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         },
       },
     ),
-    # PD gain scaling: encoder/motor calibration plus voltage/temperature drift
-    # shift the effective servo gains in the real robot. Scale kp and kd
-    # independently per actuator so the policy can't lock onto exact loop
-    # dynamics. ±10% is a reasonable starting range for well-characterized servos.
+    # PD gain scaling
     "pd_gains": EventTermCfg(
       mode="startup",
       func=dr.pd_gains,
@@ -407,13 +404,13 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
       },
     ),
-    "feet_too_close": RewardTermCfg(
-      func=mdp.feet_too_close_cost,
+    "feet_distance": RewardTermCfg(
+      func=mdp.feet_lateral_distance_cost,
       weight=0.0,  # Override per-robot.
       params={
-        "min_distance": 0.00,  # Set per-robot.
+        "nominal_distance": 0.0,  # Set per-robot.
+        "sharpness": 10.0,  # Set per-robot.
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
-        "use_xy_distance": True,
       },
     ),
     "soft_landing": RewardTermCfg(

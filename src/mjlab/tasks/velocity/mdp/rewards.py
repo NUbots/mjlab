@@ -456,16 +456,22 @@ def gait_phase_regularity_cost(
   return cost
 
 
-def feet_too_close_cost(
+def feet_lateral_distance_cost(
   env: ManagerBasedRlEnv,
-  min_distance: float,
+  nominal_distance: float,
+  sharpness: float,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-  use_xy_distance: bool = True,
 ) -> torch.Tensor:
-  """Penalize feet that are closer than a minimum separation distance.
+  """Penalize feet whose lateral body-frame separation falls below nominal.
 
-  This is computed over all unique foot-site pairs and returns the sum of
-  squared hinge losses: max(0, min_distance - pair_distance)^2.
+  The foot-to-foot vector is expressed in the robot's body frame so that yaw
+  rotation does not affect the measurement. Only the body-Y component is used,
+  isolating lateral spread from fore-aft offset during a stride.
+
+  The penalty shape is ``exp(sharpness * shortfall) - 1`` where
+  ``shortfall = max(0, nominal_distance - lateral_distance)``. This is zero at
+  the nominal, grows slowly for small shortfalls, and accelerates hard for
+  large ones. Increasing ``sharpness`` steepens the curve sooner.
   """
   asset: Entity = env.scene[asset_cfg.name]
   foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
@@ -474,20 +480,26 @@ def feet_too_close_cost(
   if num_feet < 2:
     return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
 
+  root_quat_w = asset.data.root_link_quat_w  # [B, 4]
+
   pair_i, pair_j = torch.triu_indices(num_feet, num_feet, offset=1)
-  foot_a = foot_pos_w[:, pair_i, :]
-  foot_b = foot_pos_w[:, pair_j, :]
+  foot_a = foot_pos_w[:, pair_i, :]  # [B, P, 3]
+  foot_b = foot_pos_w[:, pair_j, :]  # [B, P, 3]
 
-  if use_xy_distance:
-    pair_distance = torch.norm(foot_a[..., :2] - foot_b[..., :2], dim=-1)
-  else:
-    pair_distance = torch.norm(foot_a - foot_b, dim=-1)
+  num_pairs = pair_i.shape[0]
+  # Rotate foot-to-foot vectors into body frame.
+  quat_exp = root_quat_w.unsqueeze(1).expand(-1, num_pairs, -1)  # [B, P, 4]
+  delta_b = quat_apply_inverse(quat_exp, foot_a - foot_b)  # [B, P, 3]
 
-  too_close = torch.clamp(min_distance - pair_distance, min=0.0)
-  cost = torch.sum(torch.square(too_close), dim=1)
+  pair_distance = torch.abs(delta_b[..., 1])  # body-Y component [B, P]
+
+  shortfall = torch.clamp(nominal_distance - pair_distance, min=0.0)
+  cost = torch.sum(torch.exp(sharpness * shortfall) - 1.0, dim=1)
 
   min_pair_distance = torch.amin(pair_distance, dim=1)
-  env.extras["log"]["Metrics/min_foot_distance_mean"] = torch.mean(min_pair_distance)
+  env.extras["log"]["Metrics/min_foot_lateral_distance_mean"] = torch.mean(
+    min_pair_distance
+  )
   return cost
 
 

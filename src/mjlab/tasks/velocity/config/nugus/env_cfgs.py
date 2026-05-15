@@ -144,8 +144,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   for reward_name in ["foot_clearance", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
-  cfg.rewards["feet_too_close"].params["asset_cfg"].site_names = site_names
-  cfg.rewards["feet_too_close"].params["min_distance"] = 0.14
+    
+  cfg.rewards["feet_distance"].params["asset_cfg"].site_names = site_names
+  cfg.rewards["feet_distance"].params["nominal_distance"] = (0.2336)  # keyframe lateral separation
+  cfg.rewards["feet_distance"].params["sharpness"] = 8.0
 
   cfg.rewards["body_ang_vel"].weight = -0.05
   cfg.rewards["angular_momentum"].weight = -0.01
@@ -154,7 +156,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["cot_proxy"].weight = -0.00  # Disable (debugging)
   cfg.rewards["gait_phase_regularity"].weight = -0.1
   cfg.rewards["limb_symmetry"].weight = -0.0  # Disable (debugging)
-  cfg.rewards["feet_too_close"].weight = -0.0  # Disable (debugging)
+  cfg.rewards["feet_distance"].weight = -0.1
 
   # Apply play mode overrides.
   if play:
