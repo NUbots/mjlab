@@ -216,7 +216,7 @@ class EntityData:
   def clear_state(self, env_ids: torch.Tensor | slice | None = None) -> None:
     if self.is_actuated:
       env_ids = self._resolve_env_ids(env_ids)
-      self.joint_pos_target[env_ids] = 0.0
+      self.joint_pos_target[env_ids] = self.default_joint_pos[env_ids]
       self.joint_vel_target[env_ids] = 0.0
       self.joint_effort_target[env_ids] = 0.0
       self.tendon_len_target[env_ids] = 0.0

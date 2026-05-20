@@ -8,7 +8,6 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_flat_env_cfg
 from mjlab.utils.lab_api.math import quat_apply_inverse
 
-
 FOOT_SITE_NAMES = ("left_foot", "right_foot")
 
 

@@ -144,9 +144,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   for reward_name in ["foot_clearance", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
-    
+
   cfg.rewards["feet_distance"].params["asset_cfg"].site_names = site_names
-  cfg.rewards["feet_distance"].params["nominal_distance"] = (0.2336)  # keyframe lateral separation
+  cfg.rewards["feet_distance"].params["nominal_distance"] = (
+    0.2336  # keyframe lateral separation
+  )
   cfg.rewards["feet_distance"].params["sharpness"] = 8.0
 
   cfg.rewards["body_ang_vel"].weight = -0.05
