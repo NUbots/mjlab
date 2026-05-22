@@ -83,19 +83,19 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
-      noise=Gnoise(mean=0.0, std=1.0),
+      noise=Gnoise(mean=0.0, std=math.radians(1.0)), # 1 degree/s stdev for gyroscope noise
     ),
     "projected_gravity": ObservationTermCfg(
       func=mdp.projected_gravity,
-      noise=Gnoise(mean=0.0, std=1.0),
+      noise=Gnoise(mean=0.0, std=math.radians(1.0)), # 1 degree stdev
     ),
     "joint_pos": ObservationTermCfg(
       func=mdp.joint_pos_rel,
-      noise=Gnoise(mean=0.0, std=1.0),
+      noise=Gnoise(mean=0.0, std=math.radians(0.5)), # 0.5 degree stdev for joint position noise
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
-      noise=Gnoise(mean=0.0, std=1.0),
+      noise=Gnoise(mean=0.0, std=math.radians(5.0)), # 5 degree/s stdev for joint velocity noise
     ),
     "actions": ObservationTermCfg(func=mdp.last_action),
     "command": ObservationTermCfg(
