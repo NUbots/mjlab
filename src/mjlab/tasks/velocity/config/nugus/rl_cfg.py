@@ -17,7 +17,7 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       distribution_cfg={
         "class_name": "GaussianDistribution",
         "init_std": 1.0,
-        "std_type": "scalar",
+        "std_type": "log",
       },
     ),
     critic=RslRlModelCfg(
@@ -42,5 +42,5 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     experiment_name="nugus_velocity",
     save_interval=500,
     num_steps_per_env=24,
-    max_iterations=9_000,
+    max_iterations=15_000,
   )

@@ -94,7 +94,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
-      noise=Unoise(n_min=-1.5, n_max=1.5),
+      noise=Unoise(n_min=-0.1, n_max=0.1),
     ),
     "actions": ObservationTermCfg(func=mdp.last_action),
     "command": ObservationTermCfg(
@@ -223,15 +223,15 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
-      interval_range_s=(1.0, 3.0),
+      interval_range_s=(5.0, 10.0),
       params={
         "velocity_range": {
           "x": (-0.5, 0.5),
           "y": (-0.5, 0.5),
-          "z": (-0.4, 0.4),
-          "roll": (-0.52, 0.52),
-          "pitch": (-0.52, 0.52),
-          "yaw": (-0.78, 0.78),
+          "z": (-0.1, 0.1),
+          "roll": (-0.00, 0.00),
+          "pitch": (-0.05, 0.05),
+          "yaw": (-0.0, 0.00),
         },
       },
     ),
@@ -457,11 +457,11 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
           {
             "step": 0,
             "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.1, 0.1),
-            "ang_vel_z": (-0.2, 0.2),
+            "lin_vel_y": (-0.2, 0.2),
+            "ang_vel_z": (-0.4, 0.4),
           },
           {
-            "step": 9000 * 24,
+            "step": 15000 * 24,
             "lin_vel_x": (-1.0, 1.0),
             "lin_vel_y": (-0.5, 0.5),
             "ang_vel_z": (-0.5, 0.5),

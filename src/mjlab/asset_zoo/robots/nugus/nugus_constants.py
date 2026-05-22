@@ -237,7 +237,7 @@ for a in NUGUS_ARTICULATION.actuators:
   names = a.target_names_expr
   assert e is not None
   for n in names:
-    NUGUS_ACTION_SCALE[n] = 0.25 * e / s  # Approx 0.049
+    NUGUS_ACTION_SCALE[n] = (0.25 * e / s) * 5 # Approx 0.049 * 5 = 0.245
 
 if __name__ == "__main__":
   import mujoco.viewer as viewer
