@@ -33,7 +33,6 @@ from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.terrains.config import ROUGH_TERRAINS_CFG
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
-from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 from mjlab.viewer import ViewerConfig
 
 
@@ -83,19 +82,19 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
-      noise=Gnoise(mean=0.0, std=math.radians(1.0)), # 1 degree/s stdev for gyroscope noise
+      noise=Unoise(n_min=-0.2, n_max=0.2), # Override for nugus
     ),
     "projected_gravity": ObservationTermCfg(
       func=mdp.projected_gravity,
-      noise=Gnoise(mean=0.0, std=math.radians(1.0)), # 1 degree stdev
+      noise=Unoise(n_min=-0.05, n_max=0.05), # Override for nugus
     ),
     "joint_pos": ObservationTermCfg(
       func=mdp.joint_pos_rel,
-      noise=Gnoise(mean=0.0, std=math.radians(0.5)), # 0.5 degree stdev for joint position noise
+      noise=Unoise(n_min=-0.01, n_max=0.01), # Override for nugus 
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
-      noise=Gnoise(mean=0.0, std=math.radians(5.0)), # 5 degree/s stdev for joint velocity noise
+      noise=Unoise(n_min=-1.5, n_max=1.5), # Override for nugus
     ),
     "actions": ObservationTermCfg(func=mdp.last_action),
     "command": ObservationTermCfg(

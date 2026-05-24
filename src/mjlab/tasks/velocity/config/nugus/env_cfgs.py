@@ -8,6 +8,7 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 from mjlab.sensor import (
   ContactMatch,
   ContactSensorCfg,
@@ -33,6 +34,12 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   if "height_scan" in cfg.observations["critic"].terms:
     cfg.observations["critic"].terms.pop("height_scan")
 
+  # Override observation sensor noise parameters with more realistic values based on real sensor measurements.
+  cfg.observations["actor"].terms["base_ang_vel"].noise = Gnoise(mean=0.0, std=(0.02, 0.03, 0.03)) # rads/s stdev for gyroscope noise (measured from real IMU) * 10 for factor of safety.
+  cfg.observations["actor"].terms["projected_gravity"].noise = Gnoise(mean=0.0, std=(3.9e-03, 4.3e-03, 5.9e-04)) # From measurements of Z component of Htw Rotation matrix (rounded) then * 10 for factor of safety.
+  cfg.observations["actor"].terms["joint_pos"].noise = Gnoise(mean=0.0, std=0.01) # Came from the motor position units (0.088 deg for the MX series) * factor of safety.
+  cfg.observations["actor"].terms["joint_vel"].noise = Gnoise(mean=0.0, std=0.05) # Came from the motor velocity units (0.229 rpm for the X series) * factor of safety. 
+  
   cfg.sim.mujoco.ccd_iterations = 500
   cfg.sim.contact_sensor_maxmatch = 500
   cfg.sim.nconmax = 45
