@@ -104,32 +104,32 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["pose"].params["std_standing"] = {".*": 0.05}
   cfg.rewards["pose"].params["std_walking"] = {
     # Lower body.
-    r".*hip_pitch.*": 0.3*2,
-    r".*hip_roll.*": 0.15*2,
-    r".*hip_yaw.*": 0.15*2,
-    r".*knee.*": 0.35*2,
-    r".*ankle_pitch.*": 0.25*2,
-    r".*ankle_roll.*": 0.1*2,
+    r".*hip_pitch.*": 0.3,
+    r".*hip_roll.*": 0.15,
+    r".*hip_yaw.*": 0.15,
+    r".*knee.*": 0.35,
+    r".*ankle_pitch.*": 0.25,
+    r".*ankle_roll.*": 0.1,
     # Arms.
-    r".*shoulder_pitch.*": 0.15*2,
-    r".*shoulder_roll.*": 0.15*2,
-    r".*elbow.*": 0.15*2,
+    r".*shoulder_pitch.*": 0.15,
+    r".*shoulder_roll.*": 0.15,
+    r".*elbow.*": 0.15,
     # Head
     r".*neck_yaw.*": 0.1,
     r".*head_pitch.*": 0.1,
   }
   cfg.rewards["pose"].params["std_running"] = {
     # Lower body.
-    r".*hip_pitch.*": 0.5*2,
-    r".*hip_roll.*": 0.2*2,
-    r".*hip_yaw.*": 0.2*2,
-    r".*knee.*": 0.6*2,
-    r".*ankle_pitch.*": 0.35*2,
-    r".*ankle_roll.*": 0.15*2,
+    r".*hip_pitch.*": 0.5,
+    r".*hip_roll.*": 0.2,
+    r".*hip_yaw.*": 0.2,
+    r".*knee.*": 0.6,
+    r".*ankle_pitch.*": 0.35,
+    r".*ankle_roll.*": 0.15,
     # Arms.
-    r".*shoulder_pitch.*": 0.5*2,
-    r".*shoulder_roll.*": 0.2*2,
-    r".*elbow.*": 0.35*2,
+    r".*shoulder_pitch.*": 0.5,
+    r".*shoulder_roll.*": 0.2,
+    r".*elbow.*": 0.35,
     # Head
     r".*neck_yaw.*": 0.15,
     r".*head_pitch.*": 0.15,
