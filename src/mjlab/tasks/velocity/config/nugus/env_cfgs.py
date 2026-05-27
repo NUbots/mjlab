@@ -39,6 +39,19 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["actor"].terms["projected_gravity"].noise = Gnoise(mean=0.0, std=(3.9e-03, 4.3e-03, 5.9e-04)) # From measurements of Z component of Htw Rotation matrix (rounded) then * 10 for factor of safety.
   cfg.observations["actor"].terms["joint_pos"].noise = Gnoise(mean=0.0, std=0.01) # Came from the motor position units (0.088 deg for the MX series) * factor of safety.
   cfg.observations["actor"].terms["joint_vel"].noise = Gnoise(mean=0.0, std=0.05) # Came from the motor velocity units (0.229 rpm for the X series) * factor of safety. 
+
+  # Sensor delays
+  cfg.observations["actor"].terms["base_ang_vel"].delay_min_lag = 0
+  cfg.observations["actor"].terms["base_ang_vel"].delay_max_lag = 2 # 0-40ms
+
+  cfg.observations["actor"].terms["projected_gravity"].delay_min_lag = 0
+  cfg.observations["actor"].terms["projected_gravity"].delay_max_lag = 2 
+
+  cfg.observations["actor"].terms["joint_pos"].delay_min_lag = 1
+  cfg.observations["actor"].terms["joint_pos"].delay_max_lag = 3 # 20-60ms
+
+  cfg.observations["actor"].terms["joint_vel"].delay_min_lag = 1
+  cfg.observations["actor"].terms["joint_vel"].delay_max_lag = 3
   
   cfg.sim.mujoco.ccd_iterations = 500
   cfg.sim.contact_sensor_maxmatch = 500

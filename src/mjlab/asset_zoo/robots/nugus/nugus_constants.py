@@ -66,7 +66,6 @@ STIFFNESS_XH540 = 56.052
 DAMPING_XH540 = 1.6548
 
 # Actuator configs for different joint groups
-# Using order from poster in NUbots lab (right then left)
 NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
   target_names_expr=(
     "right_shoulder_pitch",
@@ -80,6 +79,8 @@ NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
   damping=DAMPING_MX64,
   effort_limit=ACTUATOR_MX64.effort_limit,
   armature=ACTUATOR_MX64.reflected_inertia,
+  delay_min_lag=1, # 5ms minimum
+  delay_max_lag=4, # 20ms maximum
 )
 
 NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
@@ -91,6 +92,8 @@ NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
   damping=DAMPING_MX106,
   effort_limit=ACTUATOR_MX106.effort_limit,
   armature=ACTUATOR_MX106.reflected_inertia,
+  delay_min_lag=1,
+  delay_max_lag=4, 
 )
 
 NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
@@ -110,6 +113,8 @@ NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
   damping=DAMPING_XH540,
   effort_limit=ACTUATOR_XH540.effort_limit,
   armature=ACTUATOR_XH540.reflected_inertia,
+  delay_min_lag=1,
+  delay_max_lag=4,
 )
 
 NUGUS_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
@@ -118,6 +123,8 @@ NUGUS_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
   damping=DAMPING_MX64,
   effort_limit=ACTUATOR_MX64.effort_limit,
   armature=ACTUATOR_MX64.reflected_inertia,
+  delay_min_lag=1,
+  delay_max_lag=4,
 )
 
 ##
