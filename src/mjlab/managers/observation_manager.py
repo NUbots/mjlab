@@ -236,6 +236,17 @@ class ObservationManager(ManagerBase):
     index = self._group_obs_term_names[group_name].index(term_name)
     return self._group_obs_term_cfgs[group_name][index]
 
+  def get_delay_buffer(self, group_name: str, term_name: str) -> DelayBuffer | None:
+    """Return the delay buffer for a term, or None if the term has no delay.
+
+    A buffer only exists when the term was configured with ``delay_max_lag > 0``.
+    """
+    if group_name not in self._group_obs_term_names:
+      raise ValueError(f"Group '{group_name}' not found in active groups.")
+    if term_name not in self._group_obs_term_names[group_name]:
+      raise ValueError(f"Term '{term_name}' not found in group '{group_name}'.")
+    return self._group_obs_term_delay_buffer[group_name].get(term_name)
+
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> dict[str, float]:
     # Invalidate cache since reset envs will have different observations.
     self._obs_buffer = None

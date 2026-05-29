@@ -7,8 +7,8 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
-from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 from mjlab.sensor import (
   ContactMatch,
   ContactSensorCfg,
@@ -17,8 +17,10 @@ from mjlab.sensor import (
   RingPatternCfg,
   TerrainHeightSensorCfg,
 )
+from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
+from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 
 
 def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -35,24 +37,72 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.observations["critic"].terms.pop("height_scan")
 
   # Override observation sensor noise parameters with more realistic values based on real sensor measurements.
-  cfg.observations["actor"].terms["base_ang_vel"].noise = Gnoise(mean=0.0, std=(0.02, 0.03, 0.03)) # rads/s stdev for gyroscope noise (measured from real IMU) * 10 for factor of safety.
-  cfg.observations["actor"].terms["projected_gravity"].noise = Gnoise(mean=0.0, std=(3.9e-03, 4.3e-03, 5.9e-04)) # From measurements of Z component of Htw Rotation matrix (rounded) then * 10 for factor of safety.
-  cfg.observations["actor"].terms["joint_pos"].noise = Gnoise(mean=0.0, std=0.01) # Came from the motor position units (0.088 deg for the MX series) * factor of safety.
-  cfg.observations["actor"].terms["joint_vel"].noise = Gnoise(mean=0.0, std=0.05) # Came from the motor velocity units (0.229 rpm for the X series) * factor of safety. 
+  cfg.observations["actor"].terms["base_ang_vel"].noise = Gnoise(
+    mean=0.0, std=(0.02, 0.03, 0.03)
+  )  # rads/s stdev for gyroscope noise (measured from real IMU) * 10 for factor of safety.
+  cfg.observations["actor"].terms["projected_gravity"].noise = Gnoise(
+    mean=0.0, std=(3.9e-03, 4.3e-03, 5.9e-04)
+  )  # From measurements of Z component of Htw Rotation matrix (rounded) then * 10 for factor of safety.
+  cfg.observations["actor"].terms["joint_pos"].noise = Gnoise(
+    mean=0.0, std=0.01
+  )  # Came from the motor position units (0.088 deg for the MX series) * factor of safety.
+  cfg.observations["actor"].terms["joint_vel"].noise = Gnoise(
+    mean=0.0, std=0.05
+  )  # Came from the motor velocity units (0.229 rpm for the X series) * factor of safety.
 
-  # Sensor delays
+  # Sensor delays. These max_lag values size each term's delay ring buffer, so
+  # they must equal the largest lag the delay curriculum below ever requests. The
+  # curriculum starts at zero delay (clean gait) and anneals up to these values.
   cfg.observations["actor"].terms["base_ang_vel"].delay_min_lag = 0
-  cfg.observations["actor"].terms["base_ang_vel"].delay_max_lag = 2 # 0-40ms
+  cfg.observations["actor"].terms["base_ang_vel"].delay_max_lag = 2  # 0-40ms
 
   cfg.observations["actor"].terms["projected_gravity"].delay_min_lag = 0
-  cfg.observations["actor"].terms["projected_gravity"].delay_max_lag = 2 
+  cfg.observations["actor"].terms["projected_gravity"].delay_max_lag = 2
 
   cfg.observations["actor"].terms["joint_pos"].delay_min_lag = 1
-  cfg.observations["actor"].terms["joint_pos"].delay_max_lag = 3 # 20-60ms
+  cfg.observations["actor"].terms["joint_pos"].delay_max_lag = 3  # 20-60ms
 
   cfg.observations["actor"].terms["joint_vel"].delay_min_lag = 1
   cfg.observations["actor"].terms["joint_vel"].delay_max_lag = 3
-  
+
+  # Anneal observation delay so the policy learns a clean dynamic gait first, then
+  # gains robustness to the real delay. Stages align with the command_vel ramp.
+  cfg.curriculum["observation_delay"] = CurriculumTermCfg(
+    func=mdp.observation_delay,
+    params={
+      "group_name": "actor",
+      "delay_stages": [
+        {
+          "step": 0,
+          "lags": {
+            "base_ang_vel": (0, 0),
+            "projected_gravity": (0, 0),
+            "joint_pos": (0, 0),
+            "joint_vel": (0, 0),
+          },
+        },
+        {
+          "step": 9000 * 24,
+          "lags": {
+            "base_ang_vel": (0, 1),
+            "projected_gravity": (0, 1),
+            "joint_pos": (0, 2),
+            "joint_vel": (0, 2),
+          },
+        },
+        {
+          "step": 18000 * 24,
+          "lags": {
+            "base_ang_vel": (0, 2),
+            "projected_gravity": (0, 2),
+            "joint_pos": (1, 3),
+            "joint_vel": (1, 3),
+          },
+        },
+      ],
+    },
+  )
+
   cfg.sim.mujoco.ccd_iterations = 500
   cfg.sim.contact_sensor_maxmatch = 500
   cfg.sim.nconmax = 45
@@ -164,9 +214,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   for reward_name in ["foot_clearance", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
-    
+
   cfg.rewards["feet_distance"].params["asset_cfg"].site_names = site_names
-  cfg.rewards["feet_distance"].params["nominal_distance"] = (0.2336)  # keyframe lateral separation
+  cfg.rewards["feet_distance"].params["nominal_distance"] = (
+    0.2336  # keyframe lateral separation
+  )
   cfg.rewards["feet_distance"].params["sharpness"] = 8.0
 
   cfg.rewards["body_ang_vel"].weight = -0.05

@@ -173,6 +173,35 @@ class DelayBuffer:
     return self._buffer.is_initialized
 
   @property
+  def max_capacity(self) -> int:
+    """Largest lag the underlying ring buffer can serve.
+
+    The ring is sized once at construction to ``max_lag + 1``, so the lag range
+    can be raised at runtime only up to this value. Construct the buffer with the
+    final (largest) ``max_lag`` if you intend to anneal the lag upward.
+    """
+    return self._buffer.max_length - 1
+
+  def set_lag_range(self, min_lag: int, max_lag: int) -> None:
+    """Update the lag sampling range in place (e.g. for a delay curriculum).
+
+    Args:
+      min_lag: New minimum lag (inclusive). Must be >= 0.
+      max_lag: New maximum lag (inclusive). Must be in [min_lag, max_capacity].
+    """
+    if min_lag < 0:
+      raise ValueError(f"min_lag must be >= 0, got {min_lag}")
+    if max_lag < min_lag:
+      raise ValueError(f"max_lag ({max_lag}) must be >= min_lag ({min_lag})")
+    if max_lag > self.max_capacity:
+      raise ValueError(
+        f"max_lag ({max_lag}) exceeds buffer capacity ({self.max_capacity}). "
+        "Construct the DelayBuffer with the final max_lag before annealing up."
+      )
+    self.min_lag = min_lag
+    self.max_lag = max_lag
+
+  @property
   def current_lags(self) -> torch.Tensor:
     """Current lag per environment. Shape: (batch_size,)."""
     return self._current_lags

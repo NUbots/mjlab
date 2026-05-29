@@ -22,6 +22,12 @@ class VelocityStage(TypedDict):
   ang_vel_z: tuple[float, float] | None
 
 
+class DelayStage(TypedDict):
+  step: int
+  # Maps observation term name to its (min_lag, max_lag) for this stage onward.
+  lags: dict[str, tuple[int, int]]
+
+
 def terrain_levels_vel(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
@@ -106,3 +112,38 @@ def commands_vel(
     "ang_vel_z_min": torch.tensor(cfg.ranges.ang_vel_z[0]),
     "ang_vel_z_max": torch.tensor(cfg.ranges.ang_vel_z[1]),
   }
+
+
+def observation_delay(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  delay_stages: list[DelayStage],
+  group_name: str = "actor",
+) -> dict[str, torch.Tensor]:
+  """Anneal observation delay over training.
+
+  Lets the policy learn a clean dynamic gait at low/no delay first, then ramps the
+  lag range up for sim-to-real robustness. The corresponding observation terms must
+  be configured with ``delay_max_lag`` equal to the largest ``max_lag`` any stage
+  requests, so the underlying ring buffer is sized to serve it.
+  """
+  del env_ids  # Unused; delay schedule is global on the step counter.
+  obs_manager = env.observation_manager
+
+  active: dict[str, tuple[int, int]] = {}
+  for stage in delay_stages:
+    if env.common_step_counter >= stage["step"]:
+      active.update(stage["lags"])
+
+  metrics: dict[str, torch.Tensor] = {}
+  for term_name, (min_lag, max_lag) in active.items():
+    buffer = obs_manager.get_delay_buffer(group_name, term_name)
+    if buffer is None:
+      raise ValueError(
+        f"Observation term '{term_name}' in group '{group_name}' has no delay "
+        "buffer. Set its delay_max_lag to the curriculum's largest max_lag."
+      )
+    buffer.set_lag_range(min_lag, max_lag)
+    metrics[f"{term_name}_min_lag"] = torch.tensor(float(min_lag))
+    metrics[f"{term_name}_max_lag"] = torch.tensor(float(max_lag))
+  return metrics
