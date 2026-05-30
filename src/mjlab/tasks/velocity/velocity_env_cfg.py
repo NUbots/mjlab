@@ -226,10 +226,10 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       interval_range_s=(5.0, 10.0),
       params={
         "velocity_range": {
-          "x": (-0.5, 0.5),
-          "y": (-0.5, 0.5),
-          "z": (-0.1, 0.1),
-          "roll": (-0.00, 0.00),
+          "x": (-0.2, 0.2),
+          "y": (-0.2, 0.2),
+          "z": (-0.0, 0.0),
+          "roll": (-0.05, 0.05),
           "pitch": (-0.05, 0.05),
           "yaw": (-0.0, 0.00),
         },
@@ -287,13 +287,13 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
   rewards = {
     "track_linear_velocity": RewardTermCfg(
       func=mdp.track_linear_velocity,
-      weight=2.0,
-      params={"command_name": "twist", "std": math.sqrt(0.25)},
+      weight=20.0,
+      params={"command_name": "twist", "std": math.sqrt(0.01)}, # sqrt(0.01) = 0.1 m/s
     ),
     "track_angular_velocity": RewardTermCfg(
       func=mdp.track_angular_velocity,
-      weight=2.0,
-      params={"command_name": "twist", "std": math.sqrt(0.5)},
+      weight=3.0,
+      params={"command_name": "twist", "std": math.sqrt(0.01)},
     ),
     "upright": RewardTermCfg(
       func=mdp.upright,
@@ -457,26 +457,26 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
           {
             "step": 0,
             "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.2, 0.2),
-            "ang_vel_z": (-0.4, 0.4),
+            "lin_vel_y": (-0.05, 0.05),
+            "ang_vel_z": (-0.05, 0.05),
           },
           {
             "step": 9000 * 24,
-            "lin_vel_x": (-1.0, 1.0),
-            "lin_vel_y": (-0.5, 0.5),
-            "ang_vel_z": (-0.5, 0.5),
+            "lin_vel_x": (-0.5, 0.5),
+            "lin_vel_y": (-0.2, 0.2),
+            "ang_vel_z": (-0.1, 0.1),
           },
           {
             "step": 18000 * 24,
-            "lin_vel_x": (-1.5, 2.0),
-            "lin_vel_y": (-1.0, 1.0),
-            "ang_vel_z": (-0.7, 0.7),
+            "lin_vel_x": (-0.5, 0.5),
+            "lin_vel_y": (-0.2, 0.2),
+            "ang_vel_z": (-0.2, 0.2),
           },
           {
             "step": 27000 * 24,
-            "lin_vel_x": (-2.0, 3.0),
-            "lin_vel_y": (-1.0, 1.0),
-            "ang_vel_z": (-1.0, 1.0),
+            "lin_vel_x": (-0.7, 0.7),
+            "lin_vel_y": (-0.2, 0.2),
+            "ang_vel_z": (-0.2, 0.2),
           },
         ],
       },
