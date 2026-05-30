@@ -103,6 +103,20 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     },
   )
 
+  # Anneal actuator command delay alongside the observation delay. The actuator
+  # ring buffers are sized by delay_max_lag in nugus_constants.py (currently 4),
+  # so the final stage must not exceed that.
+  cfg.curriculum["actuator_delay"] = CurriculumTermCfg(
+    func=mdp.actuator_delay,
+    params={
+      "delay_stages": [
+        {"step": 0, "lag": (0, 0)},
+        {"step": 9000 * 24, "lag": (0, 2)},
+        {"step": 18000 * 24, "lag": (1, 4)},
+      ],
+    },
+  )
+
   cfg.sim.mujoco.ccd_iterations = 500
   cfg.sim.contact_sensor_maxmatch = 500
   cfg.sim.nconmax = 45

@@ -175,6 +175,15 @@ class Actuator(ABC, Generic[ActuatorCfgT]):
     return self.cfg.delay_max_lag > 0
 
   @property
+  def delay_buffer(self) -> DelayBuffer | None:
+    """The underlying delay buffer, or ``None`` if delay is not configured.
+
+    For builtin actuators that are fused into a shared delay group, this is the
+    shared buffer — multiple actuators in the same group return the same object.
+    """
+    return self._delay_buffer
+
+  @property
   def command_field(self) -> CommandField | None:
     """The primary command field this actuator consumes.
 

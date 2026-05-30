@@ -28,6 +28,12 @@ class DelayStage(TypedDict):
   lags: dict[str, tuple[int, int]]
 
 
+class ActuatorDelayStage(TypedDict):
+  step: int
+  # (min_lag, max_lag) applied uniformly to every delayed actuator on the asset.
+  lag: tuple[int, int]
+
+
 def terrain_levels_vel(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
@@ -147,3 +153,41 @@ def observation_delay(
     metrics[f"{term_name}_min_lag"] = torch.tensor(float(min_lag))
     metrics[f"{term_name}_max_lag"] = torch.tensor(float(max_lag))
   return metrics
+
+
+def actuator_delay(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  delay_stages: list[ActuatorDelayStage],
+  asset_cfg: SceneEntityCfg = _DEFAULT_SCENE_CFG,
+) -> dict[str, torch.Tensor]:
+  """Anneal actuator command delay over training.
+
+  Mirrors :func:`observation_delay` but on the actuator side: lets the policy
+  learn a clean dynamic gait with no command lag first, then ramps the lag range
+  up for sim-to-real robustness. Every delayed actuator on the asset must be
+  configured with ``delay_max_lag`` >= the largest ``max_lag`` any stage requests.
+  """
+  del env_ids  # Unused; delay schedule is global on the step counter.
+  asset: Entity = env.scene[asset_cfg.name]
+
+  active: tuple[int, int] | None = None
+  for stage in delay_stages:
+    if env.common_step_counter >= stage["step"]:
+      active = stage["lag"]
+  if active is None:
+    return {}
+
+  min_lag, max_lag = active
+  # Builtin actuators may share a fused buffer across actuators; dedupe by id.
+  seen: set[int] = set()
+  for act in asset.actuators:
+    buffer = act.delay_buffer
+    if buffer is None or id(buffer) in seen:
+      continue
+    seen.add(id(buffer))
+    buffer.set_lag_range(min_lag, max_lag)
+  return {
+    "min_lag": torch.tensor(float(min_lag)),
+    "max_lag": torch.tensor(float(max_lag)),
+  }
