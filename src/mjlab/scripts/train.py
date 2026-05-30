@@ -44,6 +44,27 @@ class TrainConfig:
     return TrainConfig(env=env_cfg, agent=agent_cfg)
 
 
+def _scale_by_num_envs(cfg: TrainConfig, actual_num_envs: int) -> None:
+  """Scale max_iterations and curriculum stage steps inversely with num_envs.
+
+  When num_envs increases, each iteration collects proportionally more data, so
+  max_iterations (and any stage thresholds) should decrease by the same factor to
+  keep total environment transitions constant.
+  """
+  base = cfg.agent.base_num_envs
+  if base is None or base == actual_num_envs:
+    return
+  scale = base / actual_num_envs
+  cfg.agent.max_iterations = max(1, round(cfg.agent.max_iterations * scale))
+  for term_cfg in cfg.env.curriculum.values():
+    for val in term_cfg.params.values():
+      if isinstance(val, list) and all(
+        isinstance(s, dict) and "step" in s for s in val
+      ):
+        for stage in val:
+          stage["step"] = round(stage["step"] * scale)
+
+
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
   if cuda_visible == "":
@@ -101,6 +122,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   if cfg.enable_nan_guard:
     cfg.env.sim.nan_guard.enabled = True
     print(f"[INFO] NaN guard enabled, output dir: {cfg.env.sim.nan_guard.output_dir}")
+
+  _scale_by_num_envs(cfg, cfg.env.scene.num_envs)
 
   if rank == 0:
     print(f"[INFO] Logging experiment in directory: {log_dir}")

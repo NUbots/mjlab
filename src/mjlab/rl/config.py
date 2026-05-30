@@ -122,6 +122,10 @@ class RslRlBaseRunnerCfg:
   upload_model: bool = True
   """Whether to upload model files (.pt, .onnx) to W&B on save. Set to
   False to keep metric logging but avoid storage usage. Default is True."""
+  base_num_envs: int | None = None
+  """Reference num_envs for which max_iterations and curriculum stage steps are tuned.
+  When set, both are scaled by base_num_envs / actual_num_envs at runtime, so training
+  collects the same total transitions regardless of the chosen num_envs."""
 
 
 @dataclass

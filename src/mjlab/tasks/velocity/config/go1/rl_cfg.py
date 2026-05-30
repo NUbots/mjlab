@@ -43,4 +43,5 @@ def unitree_go1_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     save_interval=50,
     num_steps_per_env=24,
     max_iterations=10_000,
+    base_num_envs=4096,
   )
