@@ -82,19 +82,19 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
-      noise=Unoise(n_min=-0.2, n_max=0.2), # Override for nugus
+      noise=Unoise(n_min=-0.2, n_max=0.2),  # Override for nugus
     ),
     "projected_gravity": ObservationTermCfg(
       func=mdp.projected_gravity,
-      noise=Unoise(n_min=-0.05, n_max=0.05), # Override for nugus
+      noise=Unoise(n_min=-0.05, n_max=0.05),  # Override for nugus
     ),
     "joint_pos": ObservationTermCfg(
       func=mdp.joint_pos_rel,
-      noise=Unoise(n_min=-0.01, n_max=0.01), # Override for nugus 
+      noise=Unoise(n_min=-0.01, n_max=0.01),  # Override for nugus
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
-      noise=Unoise(n_min=-1.5, n_max=1.5), # Override for nugus
+      noise=Unoise(n_min=-1.5, n_max=1.5),  # Override for nugus
     ),
     "actions": ObservationTermCfg(func=mdp.last_action),
     "command": ObservationTermCfg(
@@ -287,12 +287,12 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
   rewards = {
     "track_linear_velocity": RewardTermCfg(
       func=mdp.track_linear_velocity,
-      weight=20.0,
-      params={"command_name": "twist", "std": math.sqrt(0.01)}, # sqrt(0.01) = 0.1 m/s
+      weight=3.0,
+      params={"command_name": "twist", "std": math.sqrt(0.01)},  # sqrt(0.01) = 0.1 m/s
     ),
     "track_angular_velocity": RewardTermCfg(
       func=mdp.track_angular_velocity,
-      weight=3.0,
+      weight=2.0,
       params={"command_name": "twist", "std": math.sqrt(0.01)},
     ),
     "upright": RewardTermCfg(
@@ -422,6 +422,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_threshold": 0.05,
       },
     ),
+    "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-10.0),
   }
 
   ##
@@ -432,7 +433,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
     "fell_over": TerminationTermCfg(
       func=mdp.bad_orientation,
-      params={"limit_angle": math.radians(70.0)},
+      params={"limit_angle": math.radians(50.0)},
     ),
     "out_of_terrain_bounds": TerminationTermCfg(
       func=mdp.out_of_terrain_bounds,
@@ -457,25 +458,19 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
           {
             "step": 0,
             "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.05, 0.05),
+            "lin_vel_y": (-0.0, 0.0),
             "ang_vel_z": (-0.05, 0.05),
           },
           {
             "step": 9000 * 24,
             "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.2, 0.2),
+            "lin_vel_y": (-0.0, 0.0),
             "ang_vel_z": (-0.1, 0.1),
           },
           {
-            "step": 18000 * 24,
+            "step": 12000 * 24,
             "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.2, 0.2),
-            "ang_vel_z": (-0.2, 0.2),
-          },
-          {
-            "step": 27000 * 24,
-            "lin_vel_x": (-0.7, 0.7),
-            "lin_vel_y": (-0.2, 0.2),
+            "lin_vel_y": (-0.0, 0.0),
             "ang_vel_z": (-0.2, 0.2),
           },
         ],

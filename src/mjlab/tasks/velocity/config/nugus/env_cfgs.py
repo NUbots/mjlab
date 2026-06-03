@@ -35,24 +35,32 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.observations["critic"].terms.pop("height_scan")
 
   # Override observation sensor noise parameters with more realistic values based on real sensor measurements.
-  cfg.observations["actor"].terms["base_ang_vel"].noise = Gnoise(mean=0.0, std=(0.02, 0.03, 0.03)) # rads/s stdev for gyroscope noise (measured from real IMU) * 10 for factor of safety.
-  cfg.observations["actor"].terms["projected_gravity"].noise = Gnoise(mean=0.0, std=(3.9e-03, 4.3e-03, 5.9e-04)) # From measurements of Z component of Htw Rotation matrix (rounded) then * 10 for factor of safety.
-  cfg.observations["actor"].terms["joint_pos"].noise = Gnoise(mean=0.0, std=0.01) # Came from the motor position units (0.088 deg for the MX series) * factor of safety.
-  cfg.observations["actor"].terms["joint_vel"].noise = Gnoise(mean=0.0, std=0.05) # Came from the motor velocity units (0.229 rpm for the X series) * factor of safety. 
+  cfg.observations["actor"].terms["base_ang_vel"].noise = Gnoise(
+    mean=0.0, std=(0.02, 0.03, 0.03)
+  )  # rads/s stdev for gyroscope noise (measured from real IMU) * 10 for factor of safety.
+  cfg.observations["actor"].terms["projected_gravity"].noise = Gnoise(
+    mean=0.0, std=(3.9e-03, 4.3e-03, 5.9e-04)
+  )  # From measurements of Z component of Htw Rotation matrix (rounded) then * 10 for factor of safety.
+  cfg.observations["actor"].terms["joint_pos"].noise = Gnoise(
+    mean=0.0, std=0.01
+  )  # Came from the motor position units (0.088 deg for the MX series) * factor of safety.
+  cfg.observations["actor"].terms["joint_vel"].noise = Gnoise(
+    mean=0.0, std=0.05
+  )  # Came from the motor velocity units (0.229 rpm for the X series) * factor of safety.
 
   # Sensor delays
   cfg.observations["actor"].terms["base_ang_vel"].delay_min_lag = 0
-  cfg.observations["actor"].terms["base_ang_vel"].delay_max_lag = 2 # 0-40ms
+  cfg.observations["actor"].terms["base_ang_vel"].delay_max_lag = 2  # 0-40ms
 
   cfg.observations["actor"].terms["projected_gravity"].delay_min_lag = 0
-  cfg.observations["actor"].terms["projected_gravity"].delay_max_lag = 2 
+  cfg.observations["actor"].terms["projected_gravity"].delay_max_lag = 2
 
   cfg.observations["actor"].terms["joint_pos"].delay_min_lag = 0
-  cfg.observations["actor"].terms["joint_pos"].delay_max_lag = 3 # 20-60ms
+  cfg.observations["actor"].terms["joint_pos"].delay_max_lag = 3  # 20-60ms
 
   cfg.observations["actor"].terms["joint_vel"].delay_min_lag = 0
   cfg.observations["actor"].terms["joint_vel"].delay_max_lag = 3
-  
+
   cfg.sim.mujoco.ccd_iterations = 500
   cfg.sim.contact_sensor_maxmatch = 500
   cfg.sim.nconmax = 45
@@ -164,9 +172,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   for reward_name in ["foot_clearance", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
-    
+
   cfg.rewards["feet_distance"].params["asset_cfg"].site_names = site_names
-  cfg.rewards["feet_distance"].params["nominal_distance"] = (0.2336)  # keyframe lateral separation
+  cfg.rewards["feet_distance"].params["nominal_distance"] = (
+    0.2336  # keyframe lateral separation
+  )
   cfg.rewards["feet_distance"].params["sharpness"] = 8.0
 
   cfg.rewards["body_ang_vel"].weight = -0.05
@@ -227,7 +237,7 @@ def nubots_nugus_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   if play:
     twist_cmd = cfg.commands["twist"]
     assert isinstance(twist_cmd, UniformVelocityCommandCfg)
-    twist_cmd.ranges.lin_vel_x = (0.5, 1.5)
+    twist_cmd.ranges.lin_vel_x = (0.1, 0.5)
     twist_cmd.ranges.lin_vel_y = (0.0, 0.0)
     twist_cmd.ranges.ang_vel_z = (-0.0, 0.0)
 

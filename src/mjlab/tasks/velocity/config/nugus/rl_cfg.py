@@ -40,7 +40,7 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="nugus_velocity",
-    save_interval=500,
+    save_interval=250,
     num_steps_per_env=24,
-    max_iterations=35_000,
+    max_iterations=15_000,
   )

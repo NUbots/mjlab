@@ -80,7 +80,7 @@ NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
   effort_limit=ACTUATOR_MX64.effort_limit,
   armature=ACTUATOR_MX64.reflected_inertia,
   delay_min_lag=1,
-  delay_max_lag=3, 
+  delay_max_lag=3,
 )
 
 NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
@@ -93,7 +93,7 @@ NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
   effort_limit=ACTUATOR_MX106.effort_limit,
   armature=ACTUATOR_MX106.reflected_inertia,
   delay_min_lag=1,
-  delay_max_lag=3, 
+  delay_max_lag=3,
 )
 
 NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
@@ -244,7 +244,7 @@ for a in NUGUS_ARTICULATION.actuators:
   names = a.target_names_expr
   assert e is not None
   for n in names:
-    NUGUS_ACTION_SCALE[n] = 0.25 * e / s # Approx 0.049
+    NUGUS_ACTION_SCALE[n] = 0.25 * e / s  # Approx 0.049
 
 if __name__ == "__main__":
   import mujoco.viewer as viewer

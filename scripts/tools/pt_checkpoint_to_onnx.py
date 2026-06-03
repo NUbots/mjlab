@@ -20,6 +20,7 @@ runner.load(CHECKPOINT, load_cfg={"actor": True}, strict=True)
 
 # Export to ONNX (saved next to the .pt file)
 from pathlib import Path
+
 ckpt_path = Path(CHECKPOINT)
 runner.export_policy_to_onnx(str(ckpt_path.parent), f"{ckpt_path.stem}.onnx")
 env.close()

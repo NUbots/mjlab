@@ -58,6 +58,8 @@ class UniformVelocityCommand(CommandTerm):
     # Initialize tracking metrics
     self.metrics["error_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["error_vel_x"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["error_vel_y"] = torch.zeros(self.num_envs, device=self.device
 
     # Set by create_gui() when the viewer is active.
     self._joystick_enabled: viser.GuiCheckboxHandle | None = None
@@ -83,6 +85,15 @@ class UniformVelocityCommand(CommandTerm):
     # Accumulate normalized yaw angular velocity error
     self.metrics["error_vel_yaw"] += (
       torch.abs(self.vel_command_b[:, 2] - self.robot.data.root_link_ang_vel_b[:, 2])
+      / max_command_step
+    )
+    # Accumulate separate x and y linear velocity errors for analysis
+    self.metrics["error_vel_x"] += (
+      torch.abs(self.vel_command_b[:, 0] - self.robot.data.root_link_lin_vel_b[:, 0])
+      / max_command_step
+    )
+    self.metrics["error_vel_y"] += (
+      torch.abs(self.vel_command_b[:, 1] - self.robot.data.root_link_lin_vel_b[:, 1])
       / max_command_step
     )
 
