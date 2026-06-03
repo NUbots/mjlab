@@ -59,7 +59,7 @@ class UniformVelocityCommand(CommandTerm):
     self.metrics["error_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_vel_x"] = torch.zeros(self.num_envs, device=self.device)
-    self.metrics["error_vel_y"] = torch.zeros(self.num_envs, device=self.device
+    self.metrics["error_vel_y"] = torch.zeros(self.num_envs, device=self.device)
 
     # Set by create_gui() when the viewer is active.
     self._joystick_enabled: viser.GuiCheckboxHandle | None = None
