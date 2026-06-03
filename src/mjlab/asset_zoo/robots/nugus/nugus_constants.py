@@ -56,14 +56,14 @@ ACTUATOR_XH540 = ElectricActuator(
 
 # Natural frequency and damping ratio for PD control
 # Use kp values from xml directly as stiffness
-STIFFNESS_MX106 = 56.052
-DAMPING_MX106 = 1.6548
+STIFFNESS_MX106 = 31.5
+DAMPING_MX106 = 1.7
 
-STIFFNESS_MX64 = 31.1558
-DAMPING_MX64 = 0.6782
+STIFFNESS_MX64 = 18.8
+DAMPING_MX64 = 0.66
 
-STIFFNESS_XH540 = 56.052
-DAMPING_XH540 = 1.6548
+STIFFNESS_XH540 = 31.5
+DAMPING_XH540 = 1.7
 
 # Actuator configs for different joint groups
 NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
