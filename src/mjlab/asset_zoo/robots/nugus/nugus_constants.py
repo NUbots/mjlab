@@ -79,8 +79,8 @@ NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
   damping=DAMPING_MX64,
   effort_limit=ACTUATOR_MX64.effort_limit,
   armature=ACTUATOR_MX64.reflected_inertia,
-  delay_min_lag=1, # 5ms minimum
-  delay_max_lag=4, # 20ms maximum
+  delay_min_lag=1,
+  delay_max_lag=3, 
 )
 
 NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
@@ -93,7 +93,7 @@ NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
   effort_limit=ACTUATOR_MX106.effort_limit,
   armature=ACTUATOR_MX106.reflected_inertia,
   delay_min_lag=1,
-  delay_max_lag=4, 
+  delay_max_lag=3, 
 )
 
 NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
@@ -114,7 +114,7 @@ NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
   effort_limit=ACTUATOR_XH540.effort_limit,
   armature=ACTUATOR_XH540.reflected_inertia,
   delay_min_lag=1,
-  delay_max_lag=4,
+  delay_max_lag=3,
 )
 
 NUGUS_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
@@ -124,7 +124,7 @@ NUGUS_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
   effort_limit=ACTUATOR_MX64.effort_limit,
   armature=ACTUATOR_MX64.reflected_inertia,
   delay_min_lag=1,
-  delay_max_lag=4,
+  delay_max_lag=3,
 )
 
 ##

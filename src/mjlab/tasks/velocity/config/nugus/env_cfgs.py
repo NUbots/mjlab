@@ -47,10 +47,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["actor"].terms["projected_gravity"].delay_min_lag = 0
   cfg.observations["actor"].terms["projected_gravity"].delay_max_lag = 2 
 
-  cfg.observations["actor"].terms["joint_pos"].delay_min_lag = 1
+  cfg.observations["actor"].terms["joint_pos"].delay_min_lag = 0
   cfg.observations["actor"].terms["joint_pos"].delay_max_lag = 3 # 20-60ms
 
-  cfg.observations["actor"].terms["joint_vel"].delay_min_lag = 1
+  cfg.observations["actor"].terms["joint_vel"].delay_min_lag = 0
   cfg.observations["actor"].terms["joint_vel"].delay_max_lag = 3
   
   cfg.sim.mujoco.ccd_iterations = 500
