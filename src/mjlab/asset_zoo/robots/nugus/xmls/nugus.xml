@@ -128,6 +128,10 @@
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.286275 0.286275 0.286275 1" mesh="left_foot_visual"/>\
                   <geom name="left_foot_collision" class="foot" pos="0.02 0.01 0.02" size="0.02 0.06 0.105" rgba=".2 .6 .2 .3"/>
                   <site name="left_foot" rgba="1 0 0 1" pos="0.02 0 0"/>
+                  <site name="left_foot_c0" rgba="0 1 0 1" pos="0.039 -0.05  0.125"/>
+                  <site name="left_foot_c1" rgba="0 1 0 1" pos="0.039 -0.05 -0.085"/>
+                  <site name="left_foot_c2" rgba="0 1 0 1" pos="0.039 0.07  0.125"/>
+                  <site name="left_foot_c3" rgba="0 1 0 1" pos="0.039 0.07 -0.085"/>
                 </body>
               </body>
             </body>
@@ -167,6 +171,10 @@
                   <geom pos="0.038 0 0" quat="0.707105 0 -0.707108 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.615686 0.811765 0.929412 1" mesh="right_foot_base_visual"/>
                   <geom name="right_foot_collision" class="foot" pos="0.02 -0.01 0.02" size="0.02 0.06 0.105" rgba=".2 .6 .2 .3"/>
                   <site name="right_foot" rgba="1 0 0 1" pos="0.02 0 0"/>
+                  <site name="right_foot_c0" rgba="0 1 0 1" pos="0.039 0.05 0.125"/>
+                  <site name="right_foot_c1" rgba="0 1 0 1" pos="0.039 0.05 -0.085"/>
+                  <site name="right_foot_c2" rgba="0 1 0 1" pos="0.039 -0.07 0.125"/>
+                  <site name="right_foot_c3" rgba="0 1 0 1" pos="0.039 -0.07 -0.085"/>
                 </body>
               </body>
             </body>

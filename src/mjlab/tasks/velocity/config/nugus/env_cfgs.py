@@ -77,14 +77,30 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   site_names = ("left_foot", "right_foot")
   geom_names = tuple(f"{side}_foot_collision" for side in ("left", "right"))
 
-  # Wire foot height scan to per-foot sites.
+  # Wire foot height scan to per-foot-corner sites.
+  # 4 corners per foot ordered left-foot-first, right-foot-second.
+  # group_size=4 reduces each group of 4 corners to one clearance value (the
+  # minimum, i.e. the lowest corner), so heights retains shape [B, 2].
+  corner_site_names = (
+    "left_foot_c0",
+    "left_foot_c1",
+    "left_foot_c2",
+    "left_foot_c3",
+    "right_foot_c0",
+    "right_foot_c1",
+    "right_foot_c2",
+    "right_foot_c3",
+  )
   for sensor in cfg.scene.sensors or ():
     if sensor.name == "foot_height_scan":
       assert isinstance(sensor, TerrainHeightSensorCfg)
       sensor.frame = tuple(
-        ObjRef(type="site", name=s, entity="robot") for s in site_names
+        ObjRef(type="site", name=s, entity="robot") for s in corner_site_names
       )
-      sensor.pattern = RingPatternCfg.single_ring(radius=0.03, num_samples=6)
+      # Single downward ray per corner — the corners are already spread across
+      # the foot geometry, so no ring needed.
+      sensor.pattern = RingPatternCfg(rings=(), include_center=True)
+      sensor.group_size = 4
 
   feet_ground_cfg = ContactSensorCfg(
     name="feet_ground_contact",
