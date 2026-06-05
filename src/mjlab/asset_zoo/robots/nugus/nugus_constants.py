@@ -1,11 +1,11 @@
 from pathlib import Path
+
 import mujoco
 
 from mjlab import MJLAB_SRC_PATH
 from mjlab.actuator import BuiltinPositionActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.utils.actuator import ElectricActuator
-from mjlab.utils.os import update_assets
 from mjlab.utils.spec_config import CollisionCfg
 
 ##
@@ -16,6 +16,22 @@ NUGUS_XML: Path = (
   MJLAB_SRC_PATH / "asset_zoo" / "robots" / "nugus" / "xmls" / "nugus.xml"
 )
 assert NUGUS_XML.exists(), f"XML not found: {NUGUS_XML}"
+
+##
+# Servo backlash model.
+##
+
+# Default backlash play (radians) used by the backlash_joint default class in
+# nugus.xml. Each actuated joint has a passive sibling "<name>_backlash" joint
+# with the same axis, bounded to ±NUGUS_BACKLASH_VALUE, that adds gear /
+# transmission play between the motor and the link. Inspired by the bitbots
+# wolfgang model.
+NUGUS_BACKLASH_VALUE: float = 0.035
+
+# Regex matching only motor joints (i.e. excludes the passive *_backlash siblings).
+# Use this anywhere a config wants "all actuated joints" so the passive backlash
+# joints aren't accidentally included in observations/rewards/events.
+NUGUS_MOTOR_JOINT_REGEX: str = r"^(?!.*_backlash$).*"
 
 
 def get_spec() -> mujoco.MjSpec:
@@ -132,28 +148,28 @@ NUGUS_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
 ##
 
 STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
-  pos=(0, 0, 0.473774),
+  pos=(0, 0, 0.49500),
   joint_pos={
-    "right_shoulder_pitch": 1.71,
-    "left_shoulder_pitch": 1.71,
-    "right_shoulder_roll": -0.197,
-    "left_shoulder_roll": 0.197,
-    "right_elbow_pitch": -0.718,
-    "left_elbow_pitch": -0.713,
-    "right_hip_yaw": -0.0329,
-    "left_hip_yaw": 0.0339,
+    "right_shoulder_pitch": 1.714,
+    "left_shoulder_pitch": 1.716,
+    "right_shoulder_roll": -0.198,
+    "left_shoulder_roll": 0.198,
+    "right_elbow_pitch": -0.720,
+    "left_elbow_pitch": -0.715,
+    "right_hip_yaw": -0.033,
+    "left_hip_yaw": 0.034,
     "right_hip_roll": -0.162,
     "left_hip_roll": 0.163,
-    "right_hip_pitch": -0.904,
-    "left_hip_pitch": -0.904,
-    "right_knee_pitch": 1.20,
-    "left_knee_pitch": 1.20,
-    "right_ankle_pitch": -0.508,
-    "left_ankle_pitch": -0.510,
-    "right_ankle_roll": 0.167,
-    "left_ankle_roll": -0.166,
+    "right_hip_pitch": -0.604,
+    "left_hip_pitch": -0.604,
+    "right_knee_pitch": 0.800,
+    "left_knee_pitch": 0.800,
+    "right_ankle_pitch": -0.310,
+    "left_ankle_pitch": -0.310,
+    "right_ankle_roll": 0.168,
+    "left_ankle_roll": -0.167,
     "neck_yaw": 0.0,
-    "head_pitch": 0.0000645,
+    "head_pitch": 0.0,
   },
   joint_vel={".*": 0.0},
 )

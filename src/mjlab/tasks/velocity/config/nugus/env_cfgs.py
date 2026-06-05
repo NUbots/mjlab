@@ -2,13 +2,14 @@
 
 from mjlab.asset_zoo.robots import (
   NUGUS_ACTION_SCALE,
+  NUGUS_MOTOR_JOINT_REGEX,
   get_nugus_robot_cfg,
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.event_manager import EventTermCfg
-from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import (
   ContactMatch,
   ContactSensorCfg,
@@ -19,6 +20,7 @@ from mjlab.sensor import (
 )
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
+from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 
 
 def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -66,6 +68,24 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.sim.nconmax = 45
 
   cfg.scene.entities = {"robot": get_nugus_robot_cfg()}
+
+  # Scope joint observations / rewards / events to motor joints only so the
+  # passive *_backlash sibling joints (servo gear play) aren't included.
+  def motor_cfg() -> SceneEntityCfg:
+    return SceneEntityCfg("robot", joint_names=(NUGUS_MOTOR_JOINT_REGEX,))
+
+  for group in ("actor", "critic"):
+    for term_name in ("joint_pos", "joint_vel"):
+      term = cfg.observations[group].terms.get(term_name)
+      if term is not None:
+        term.params["asset_cfg"] = motor_cfg()
+  cfg.events["reset_robot_joints"].params["asset_cfg"] = motor_cfg()
+  for reward_name in ("pose", "actuation_power"):
+    cfg.rewards[reward_name].params["asset_cfg"].joint_names = (
+      NUGUS_MOTOR_JOINT_REGEX,
+    )
+  # joint_pos_limits has no asset_cfg param by default; add one scoped to motors.
+  cfg.rewards["dof_pos_limits"].params["asset_cfg"] = motor_cfg()
 
   # Set raycast sensor frame to Nugus torso.
   for sensor in cfg.scene.sensors or ():
@@ -180,7 +200,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["limb_symmetry"].params["velocity_weight"] = 0.2
   cfg.rewards["limb_symmetry"].params["position_weight"] = 1.0
 
-  cfg.rewards["cot_proxy"].params["asset_cfg"].joint_names = (".*",)
+  cfg.rewards["cot_proxy"].params["asset_cfg"].joint_names = (NUGUS_MOTOR_JOINT_REGEX,)
   cfg.rewards["cot_proxy"].params["speed_floor"] = 0.12
   cfg.rewards["cot_proxy"].params["command_threshold"] = 0.02
 
