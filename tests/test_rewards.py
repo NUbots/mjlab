@@ -13,9 +13,11 @@ from mjlab.entity import Entity, EntityArticulationInfoCfg, EntityCfg
 from mjlab.envs.mdp.rewards import electrical_power_cost, joint_torques_l2
 from mjlab.managers.reward_manager import RewardManager, RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
 from mjlab.sim.sim import Simulation, SimulationCfg
 from mjlab.tasks.velocity.mdp.rewards import (
   cost_of_transport_proxy,
+  gait_phase,
   gait_phase_regularity_cost,
 )
 
@@ -461,3 +463,258 @@ def test_joint_torques_l2_all_actuators(mock_env):
   # All actuators: 1^2 + 2^2 + 3^2 = 14.0
   expected = torch.full((4,), 14.0)
   assert torch.allclose(result, expected)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for gait_phase tests
+# ---------------------------------------------------------------------------
+
+
+class _FakeHeightSensor(TerrainHeightSensor):
+  """Minimal TerrainHeightSensor subclass that passes isinstance checks."""
+
+  def __init__(self, heights: torch.Tensor) -> None:
+    self._heights = heights
+
+  @property
+  def num_frames(self) -> int:
+    return self._heights.shape[1]
+
+  @property
+  def data(self):
+    return SimpleNamespace(heights=self._heights)
+
+
+def _make_gait_phase_env(num_envs: int = 4, step_dt: float = 0.02) -> Mock:
+  env = Mock()
+  env.num_envs = num_envs
+  env.device = "cpu"
+  env.step_dt = step_dt
+  env.extras = {"log": {}}
+  env.command_manager.get_command = Mock(
+    return_value=torch.ones(num_envs, 3)  # non-zero command
+  )
+  return env
+
+
+def _build_gait_phase(env: Mock, heights: torch.Tensor) -> gait_phase:
+  """Instantiate gait_phase, bypassing the manager infrastructure."""
+  sensor = _FakeHeightSensor(heights)
+  env.scene = {"foot_height_scan": sensor}
+  cfg = RewardTermCfg(
+    func=gait_phase,
+    weight=1.0,
+    params={"height_sensor_name": "foot_height_scan"},
+  )
+  return gait_phase(cfg, env)
+
+
+# ---------------------------------------------------------------------------
+# gait_phase static method tests
+# ---------------------------------------------------------------------------
+
+
+def test_gait_phase_bezier_monotone_rising():
+  """_cubic_bezier should rise monotonically from y_start to y_end."""
+  x = torch.linspace(0.0, 1.0, 50)
+  y_start = torch.zeros_like(x)
+  y_end = torch.ones_like(x)
+  y = gait_phase._cubic_bezier(y_start, y_end, x)
+  assert y[0] == pytest.approx(0.0, abs=1e-6)
+  assert y[-1] == pytest.approx(1.0, abs=1e-6)
+  assert (y[1:] >= y[:-1] - 1e-6).all(), "Rising bezier is not monotone"
+
+
+def test_gait_phase_target_height_boundaries():
+  """Target height should be zero at phase=-pi and phase=+pi (stance boundaries)."""
+  # At the very start and end of the cycle the foot is on the ground.
+  phase = torch.tensor([[-torch.pi, -torch.pi]])  # [1, 2]
+  heights = gait_phase._target_height(phase, stance_height=0.0, swing_height=0.1)
+  assert heights.abs().max().item() == pytest.approx(0.0, abs=1e-5)
+
+  phase = torch.tensor([[torch.pi - 1e-6, torch.pi - 1e-6]])
+  heights = gait_phase._target_height(phase, stance_height=0.0, swing_height=0.1)
+  assert heights.abs().max().item() < 0.01  # near zero at end of cycle
+
+
+def test_gait_phase_target_height_stance_baseline():
+  """At stance boundaries the target should equal stance_height, not zero."""
+  phase = torch.tensor([[-torch.pi, -torch.pi]])
+  heights = gait_phase._target_height(phase, stance_height=0.055, swing_height=0.1)
+  assert heights.abs().max().item() == pytest.approx(0.055, abs=1e-5)
+
+
+def test_gait_phase_target_height_peak():
+  """Target height should peak at swing_height when phase=0 (mid-swing)."""
+  phase = torch.tensor([[0.0, 0.0]])  # mid-swing for both feet
+  heights = gait_phase._target_height(phase, stance_height=0.0, swing_height=0.12)
+  assert heights[0, 0].item() == pytest.approx(0.12, abs=1e-5)
+
+
+def test_gait_phase_target_height_antiphase():
+  """Left foot at 0 (mid-swing) and right foot at pi (mid-stance) are anti-phase."""
+  phase = torch.tensor([[0.0, torch.pi]])
+  heights = gait_phase._target_height(phase, stance_height=0.0, swing_height=0.1)
+  # Left foot: mid-swing → peak height.
+  assert heights[0, 0].item() == pytest.approx(0.1, abs=1e-5)
+  # Right foot: phase=pi maps to x≈1 → near stance (height ≈ 0).
+  assert heights[0, 1].item() < 0.01
+
+
+# ---------------------------------------------------------------------------
+# gait_phase reward integration tests
+# ---------------------------------------------------------------------------
+
+
+def test_gait_phase_perfect_tracking_gives_max_reward():
+  """When actual foot heights match the target exactly, reward should be 1.0."""
+  num_envs, num_feet = 4, 2
+  env = _make_gait_phase_env(num_envs=num_envs)
+
+  # Placeholder heights; we will replace them with the exact target.
+  heights = torch.zeros(num_envs, num_feet)
+  reward_fn = _build_gait_phase(env, heights)
+
+  # Compute what the target heights are for the initial phase.
+  target = gait_phase._target_height(
+    reward_fn._phase, stance_height=0.055, swing_height=0.08
+  )
+  env.scene["foot_height_scan"]._heights = target
+
+  result = reward_fn(
+    env,
+    height_sensor_name="foot_height_scan",
+    freq=1.25,
+    stance_height=0.055,
+    swing_height=0.08,
+    sigma=0.1,
+  )
+  assert torch.allclose(result, torch.ones(num_envs), atol=1e-5)
+
+
+def test_gait_phase_error_reduces_reward():
+  """Non-zero foot height error should reduce the reward below 1.0."""
+  num_envs, num_feet = 2, 2
+  env = _make_gait_phase_env(num_envs=num_envs)
+
+  # Set actual heights to zero — the initial phase has non-zero target for one foot.
+  heights = torch.zeros(num_envs, num_feet)
+  reward_fn = _build_gait_phase(env, heights)
+  env.scene["foot_height_scan"]._heights = heights
+
+  result = reward_fn(
+    env,
+    height_sensor_name="foot_height_scan",
+    freq=1.25,
+    stance_height=0.0,
+    swing_height=0.08,
+    sigma=0.1,
+  )
+  # Phase starts at [0, pi]: left foot should be at peak, so error > 0.
+  assert (result < 1.0).all()
+
+
+def test_gait_phase_advances_each_step():
+  """Phase should advance by 2*pi*freq*step_dt each step."""
+  num_envs, num_feet = 2, 2
+  step_dt = 0.02
+  freq = 1.25
+  env = _make_gait_phase_env(num_envs=num_envs, step_dt=step_dt)
+
+  heights = torch.zeros(num_envs, num_feet)
+  reward_fn = _build_gait_phase(env, heights)
+  env.scene["foot_height_scan"]._heights = heights
+
+  phase_before = reward_fn._phase.clone()
+  reward_fn(
+    env,
+    height_sensor_name="foot_height_scan",
+    freq=freq,
+    stance_height=0.0,
+    swing_height=0.08,
+    sigma=0.1,
+  )
+  phase_after = reward_fn._phase
+
+  expected_advance = 2.0 * torch.pi * freq * step_dt
+  # Check that phase advanced by the expected amount (modulo wrapping).
+  delta = (phase_after - phase_before + torch.pi) % (2 * torch.pi) - torch.pi
+  assert torch.allclose(delta, torch.full_like(delta, expected_advance), atol=1e-5)
+
+
+def test_gait_phase_command_threshold_zeroes_inactive_envs():
+  """Reward should be zero for environments whose command is below threshold."""
+  num_envs = 4
+  env = _make_gait_phase_env(num_envs=num_envs)
+  # Envs 0 and 2 are active, 1 and 3 are inactive.
+  commands = torch.zeros(num_envs, 3)
+  commands[[0, 2], 0] = 1.0
+  env.command_manager.get_command = Mock(return_value=commands)
+
+  heights = torch.zeros(num_envs, 2)
+  reward_fn = _build_gait_phase(env, heights)
+  env.scene["foot_height_scan"]._heights = heights
+
+  result = reward_fn(
+    env,
+    height_sensor_name="foot_height_scan",
+    freq=1.25,
+    stance_height=0.0,
+    swing_height=0.08,
+    sigma=0.1,
+    command_name="twist",
+    command_threshold=0.5,
+  )
+  assert result[0] > 0.0
+  assert result[1] == pytest.approx(0.0)
+  assert result[2] > 0.0
+  assert result[3] == pytest.approx(0.0)
+
+
+def test_gait_phase_reset_randomizes_phase():
+  """Reset should randomize phase while preserving the inter-foot offset."""
+  num_envs, num_feet = 8, 2
+  env = _make_gait_phase_env(num_envs=num_envs)
+  heights = torch.zeros(num_envs, num_feet)
+  reward_fn = _build_gait_phase(env, heights)
+
+  phase_before = reward_fn._phase.clone()
+  reward_fn.reset(env_ids=torch.arange(num_envs))
+  phase_after = reward_fn._phase
+
+  # Phase should have changed for at least some envs.
+  assert not torch.allclose(phase_before, phase_after)
+  # Inter-foot offset is preserved at pi.
+  inter_foot = (phase_after[:, 1] - phase_after[:, 0] + torch.pi) % (
+    2 * torch.pi
+  ) - torch.pi
+  assert torch.allclose(inter_foot.abs(), torch.full((num_envs,), torch.pi), atol=1e-5)
+
+
+def test_gait_phase_partial_reset_leaves_other_envs_unchanged():
+  """Resetting a subset of envs should not affect the others."""
+  num_envs, num_feet = 8, 2
+  env = _make_gait_phase_env(num_envs=num_envs)
+  heights = torch.zeros(num_envs, num_feet)
+  reward_fn = _build_gait_phase(env, heights)
+
+  # Advance phase several steps so it's non-trivial.
+  env.scene["foot_height_scan"]._heights = heights
+  for _ in range(10):
+    reward_fn(
+      env,
+      height_sensor_name="foot_height_scan",
+      freq=1.25,
+      stance_height=0.0,
+      swing_height=0.08,
+      sigma=0.1,
+    )
+
+  phase_before = reward_fn._phase.clone()
+  reset_ids = torch.tensor([1, 3, 5])
+  keep_ids = torch.tensor([0, 2, 4, 6, 7])
+
+  reward_fn.reset(env_ids=reset_ids)
+
+  # Envs NOT in reset_ids should be unchanged.
+  assert torch.allclose(reward_fn._phase[keep_ids], phase_before[keep_ids])

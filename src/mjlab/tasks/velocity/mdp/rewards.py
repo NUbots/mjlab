@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import TYPE_CHECKING
 
@@ -714,3 +715,120 @@ class variable_posture:
     error_squared = torch.square(current_joint_pos - desired_joint_pos)
 
     return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
+
+
+class gait_phase:
+  """Reward for tracking a clock-based gait phase foot height trajectory.
+
+  Maintains a per-foot sinusoidal gait clock and rewards the agent for matching
+  foot clearance heights to the clock-derived target. This enforces an alternating
+  swing-stance pattern without relying on contact history statistics.
+
+  Each foot has a phase angle that advances by ``2 * pi * freq * step_dt`` per
+  step. The target clearance height is derived from the phase via cubic Bezier
+  interpolation: ``stance_height`` while planted, peaking at ``swing_height``
+  mid-swing. The reward is ``exp(-sum_squared_error / sigma^2)``.
+
+  Both heights are *absolute* clearances as read by the sensor. ``stance_height``
+  must equal the natural standing clearance of the foot frame (the sensor frame
+  usually sits well above the sole), otherwise the stance target is unreachable
+  and the policy is pushed to press the feet down to chase it.
+
+  Initial phases are ``[0, pi]`` (left, right) so feet are anti-phase. On reset
+  the initial phase is randomized uniformly to improve robustness.
+
+  Args:
+    height_sensor_name: Name of a :class:`TerrainHeightSensor` providing foot
+      clearance above terrain, shape ``[B, F]``.
+    freq: Gait clock frequency in Hz.
+    stance_height: Target clearance while the foot is planted (metres). Set to
+      the sensor's natural standing reading.
+    swing_height: Target peak clearance at mid-swing (metres).
+    sigma: Gaussian width for the exponential reward kernel.
+    command_name: Optional velocity command name; reward is zeroed when the
+      command magnitude is below ``command_threshold``.
+    command_threshold: Minimum command magnitude to activate the reward.
+  """
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv) -> None:
+    self._step_dt = env.step_dt
+    height_sensor = env.scene[cfg.params["height_sensor_name"]]
+    assert isinstance(height_sensor, TerrainHeightSensor), (
+      f"gait_phase requires a TerrainHeightSensor, got {type(height_sensor).__name__}"
+    )
+    num_feet = height_sensor.num_frames
+    # Left foot leads at phase=0, right foot is anti-phase.
+    phase_init = torch.zeros(num_feet, device=env.device)
+    phase_init[1::2] = math.pi
+    self._phase = phase_init.unsqueeze(0).expand(env.num_envs, -1).clone()  # [B, F]
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    # RewardManager passes ``slice(None)`` (not None) on full resets.
+    if env_ids is None or isinstance(env_ids, slice):
+      env_ids = torch.arange(self._phase.shape[0], device=self._phase.device)
+    num_feet = self._phase.shape[1]
+    # Randomize the starting cycle offset but preserve the inter-foot offsets.
+    offset = torch.rand(len(env_ids), device=self._phase.device) * (2 * math.pi)
+    base = torch.zeros(num_feet, device=self._phase.device)
+    base[1::2] = math.pi
+    self._phase[env_ids] = (base.unsqueeze(0) + offset.unsqueeze(1)) % (
+      2 * math.pi
+    ) - math.pi
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    height_sensor_name: str,
+    freq: float,
+    stance_height: float,
+    swing_height: float,
+    sigma: float,
+    command_name: str | None = None,
+    command_threshold: float = 0.05,
+  ) -> torch.Tensor:
+    height_sensor: TerrainHeightSensor = env.scene[height_sensor_name]
+    foot_heights = height_sensor.data.heights  # [B, F]
+
+    target_heights = self._target_height(
+      self._phase, stance_height, swing_height
+    )  # [B, F]
+    error = torch.sum(torch.square(foot_heights - target_heights), dim=1)  # [B]
+    reward = torch.exp(-error / sigma**2)
+
+    if command_name is not None:
+      command = env.command_manager.get_command(command_name)
+      if command is not None:
+        linear_norm = torch.norm(command[:, :2], dim=1)
+        angular_norm = torch.abs(command[:, 2])
+        active = ((linear_norm + angular_norm) > command_threshold).float()
+        reward = reward * active
+
+    phase_dt = 2.0 * math.pi * freq * self._step_dt
+    self._phase = torch.fmod(self._phase + phase_dt + math.pi, 2 * math.pi) - math.pi
+
+    env.extras["log"]["Metrics/gait_phase_rmse"] = torch.mean(
+      torch.sqrt(error / foot_heights.shape[1])
+    )
+    return reward
+
+  @staticmethod
+  def _cubic_bezier(
+    y_start: torch.Tensor, y_end: torch.Tensor, x: torch.Tensor
+  ) -> torch.Tensor:
+    bezier = x**3 + 3.0 * (x**2 * (1.0 - x))
+    return y_start + (y_end - y_start) * bezier
+
+  @staticmethod
+  def _target_height(
+    phase: torch.Tensor, stance_height: float, swing_height: float
+  ) -> torch.Tensor:
+    """Return target foot clearance for each foot given their phase angles."""
+    # Map phase from [-pi, pi] to x in [0, 1].
+    x = (phase + math.pi) / (2.0 * math.pi)
+    hi = torch.full_like(x, swing_height)
+    lo = torch.full_like(x, stance_height)
+    # First half-cycle [0, 0.5]: stance → peak (rising).
+    rising = gait_phase._cubic_bezier(lo, hi, 2.0 * x)
+    # Second half-cycle [0.5, 1]: peak → stance (falling).
+    falling = gait_phase._cubic_bezier(hi, lo, 2.0 * x - 1.0)
+    return torch.where(x <= 0.5, rising, falling)

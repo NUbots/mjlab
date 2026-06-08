@@ -15,7 +15,6 @@ from mjlab.asset_zoo.robots.nugus.nugus_constants import (
 from mjlab.entity import Entity
 from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_flat_env_cfg
 
-
 # Expected joint ordering for joint_pos / joint_vel / actions in the actor
 # observation vector. This is the MuJoCo joint order, dictated by body-tree
 # traversal of nugus.xml (left leg, then right leg, then head, then left arm,

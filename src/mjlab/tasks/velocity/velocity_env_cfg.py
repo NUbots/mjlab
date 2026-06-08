@@ -372,6 +372,19 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_threshold": 0.05,
       },
     ),
+    "gait_phase": RewardTermCfg(
+      func=mdp.gait_phase,
+      weight=0.0,  # Override per-robot.
+      params={
+        "height_sensor_name": "foot_height_scan",
+        "freq": 1.25,
+        "stance_height": 0.0,  # Override per-robot to the natural stance reading.
+        "swing_height": 0.08,
+        "sigma": 0.1,
+        "command_name": "twist",
+        "command_threshold": 0.05,
+      },
+    ),
     "foot_clearance": RewardTermCfg(
       func=mdp.feet_clearance,
       weight=-2.0,

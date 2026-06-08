@@ -8,7 +8,6 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.event_manager import EventTermCfg
-from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 from mjlab.sensor import (
   ContactMatch,
   ContactSensorCfg,
@@ -19,6 +18,7 @@ from mjlab.sensor import (
 )
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
+from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 
 
 def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -170,6 +170,17 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["gait_phase_regularity"].params["command_threshold"] = 0.02
 
+  # Gait phase clock: drives an alternating swing-stance pattern at ~1.25 Hz.
+  # The foot sites read ~0.055 m clearance in the standing keyframe, so the
+  # stance target is set there (not 0) to keep the planted-foot target
+  # reachable; swing_height lifts the site to 0.1 m (~4.5 cm of foot lift).
+  # sigma=0.1 so ~1 cm RMS error gives exp(-0.01/0.01)=e^{-1} ≈ 37% reward.
+  cfg.rewards["gait_phase"].params["freq"] = 1.25
+  cfg.rewards["gait_phase"].params["stance_height"] = 0.055
+  cfg.rewards["gait_phase"].params["swing_height"] = 0.1
+  cfg.rewards["gait_phase"].params["sigma"] = 0.1
+  cfg.rewards["gait_phase"].params["command_threshold"] = 0.02
+
   for reward_name in ["foot_clearance", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
 
@@ -181,10 +192,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["body_ang_vel"].weight = -0.05
   cfg.rewards["angular_momentum"].weight = -0.01
-  cfg.rewards["air_time"].weight = 0.08
+  cfg.rewards["air_time"].weight = 0.0  # Replaced by gait_phase clock
   cfg.rewards["actuation_power"].weight = 0.0  # Disable (debugging)
-  cfg.rewards["cot_proxy"].weight = -0.05
-  cfg.rewards["gait_phase_regularity"].weight = -0.1
+  cfg.rewards["cot_proxy"].weight = -0.00
+  cfg.rewards["gait_phase_regularity"].weight = -0.00
+  cfg.rewards["gait_phase"].weight = 2.0
   cfg.rewards["limb_symmetry"].weight = -0.0  # Disable (debugging)
   cfg.rewards["feet_distance"].weight = -0.1
 
