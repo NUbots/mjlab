@@ -19,10 +19,22 @@ Added
   task observations, rewards, and reset events are scoped to motor joints
   only via ``NUGUS_MOTOR_JOINT_REGEX`` so the passive joints do not appear
   in the policy's view.
+- Added a ``reset_joint_targets_to_default`` event that sets joint position
+  targets to the default pose for the selected joints. Scene reset zeroes
+  all position targets, so actuated joints excluded from the action space
+  would otherwise be driven to position 0 instead of holding the default
+  pose.
 
 Changed
 ^^^^^^^
 
+- Restricted the NUbots Nugus velocity task action space to the 14
+  locomotion-relevant joints via ``NUGUS_LOCOMOTION_ACTUATOR_REGEX``.
+  Head/neck, shoulder roll, and elbow pitch are no longer commanded by the
+  policy; they are held at the default pose by a
+  ``reset_joint_targets_to_default`` reset event. The actor observation
+  vector shrinks from 69 to 63 dimensions (the ``actions`` term drops from
+  20 to 14) and the policy output is now 14-dimensional.
 - Replaced the single ``scale`` parameter in ``DifferentialIKActionCfg`` with
   separate ``delta_pos_scale`` and ``delta_ori_scale`` for independent scaling
   of position and orientation components.

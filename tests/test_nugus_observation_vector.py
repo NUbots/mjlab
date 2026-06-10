@@ -10,11 +10,11 @@ import pytest
 
 from mjlab.asset_zoo.robots.nugus.nugus_constants import (
   NUGUS_ARTICULATION,
+  NUGUS_LOCOMOTION_ACTUATOR_REGEX,
   get_nugus_robot_cfg,
 )
 from mjlab.entity import Entity
 from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_flat_env_cfg
-
 
 # Expected joint ordering for joint_pos / joint_vel / actions in the actor
 # observation vector. This is the MuJoCo joint order, dictated by body-tree
@@ -42,6 +42,27 @@ EXPECTED_JOINT_ORDER: tuple[str, ...] = (
   "right_shoulder_pitch",
   "right_shoulder_roll",
   "right_elbow_pitch",
+)
+
+# Expected joint ordering for the action vector. The action space is
+# restricted to locomotion-relevant joints via
+# NUGUS_LOCOMOTION_ACTUATOR_REGEX: head/neck, shoulder roll, and elbow pitch
+# are excluded. Same natural (XML) order as EXPECTED_JOINT_ORDER, filtered.
+EXPECTED_ACTION_JOINT_ORDER: tuple[str, ...] = (
+  "left_hip_yaw",
+  "left_hip_roll",
+  "left_hip_pitch",
+  "left_knee_pitch",
+  "left_ankle_pitch",
+  "left_ankle_roll",
+  "right_hip_yaw",
+  "right_hip_roll",
+  "right_hip_pitch",
+  "right_knee_pitch",
+  "right_ankle_pitch",
+  "right_ankle_roll",
+  "left_shoulder_pitch",
+  "right_shoulder_pitch",
 )
 
 
@@ -123,26 +144,28 @@ def test_observation_vector_slices(
 ) -> None:
   """Verify each term occupies the expected index slice in the actor observation vector.
 
-  With 20 motor joints the layout is:
+  With 20 motor joints and 14 action joints the layout is:
     base_ang_vel       [0:3]
     projected_gravity  [3:6]
     joint_pos          [6:26]
     joint_vel          [26:46]
-    actions            [46:66]
-    command            [66:69]
+    actions            [46:60]
+    command            [60:63]
   """
   # joint_pos/joint_vel observations are scoped to motor joints only via the
   # asset_cfg override in nubots_nugus_*_env_cfg — passive ``_backlash`` joints
   # do not appear in the observation vector.
   n = len(EXPECTED_JOINT_ORDER)  # 20
+  a = len(EXPECTED_ACTION_JOINT_ORDER)  # 14
 
-  # Known dimensions: sensor/gravity outputs are 3D, joints give n dims, command is 3D.
+  # Known dimensions: sensor/gravity outputs are 3D, joints give n dims,
+  # actions give a dims, command is 3D.
   term_dims = {
     "base_ang_vel": 3,
     "projected_gravity": 3,
     "joint_pos": n,
     "joint_vel": n,
-    "actions": n,
+    "actions": a,
     "command": 3,
   }
 
@@ -152,14 +175,15 @@ def test_observation_vector_slices(
   assert slices["projected_gravity"] == slice(3, 6)
   assert slices["joint_pos"] == slice(6, 6 + n)
   assert slices["joint_vel"] == slice(6 + n, 6 + 2 * n)
-  assert slices["actions"] == slice(6 + 2 * n, 6 + 3 * n)
-  assert slices["command"] == slice(6 + 3 * n, 6 + 3 * n + 3)
+  assert slices["actions"] == slice(6 + 2 * n, 6 + 2 * n + a)
+  assert slices["command"] == slice(6 + 2 * n + a, 6 + 2 * n + a + 3)
 
 
 def test_total_observation_dim(nugus_entity: Entity, nugus_actor_terms: dict) -> None:
   n = len(EXPECTED_JOINT_ORDER)  # 20
-  expected_dim = 3 + 3 + n + n + n + 3  # 69
-  assert expected_dim == 69
+  a = len(EXPECTED_ACTION_JOINT_ORDER)  # 14
+  expected_dim = 3 + 3 + n + n + a + 3  # 63
+  assert expected_dim == 63
 
 
 def test_entity_motor_joint_name_order(nugus_entity: Entity) -> None:
@@ -180,17 +204,20 @@ def test_entity_motor_joint_name_order(nugus_entity: Entity) -> None:
 def test_action_joint_order(nugus_entity: Entity) -> None:
   """Pin the action joint mapping.
 
-  The velocity task's ``joint_pos`` action term uses
-  ``actuator_names=(".*",)``, which goes through
-  ``find_joints_by_actuator_names`` and resolves to actuated joints in
-  ``entity.joint_names`` natural order. action[i] must target
-  ``EXPECTED_JOINT_ORDER[i]`` for deployed policies to remain valid.
+  The NUgus velocity task's ``joint_pos`` action term uses
+  ``actuator_names=(NUGUS_LOCOMOTION_ACTUATOR_REGEX,)``, which goes through
+  ``find_joints_by_actuator_names`` and resolves to the locomotion subset of
+  actuated joints in ``entity.joint_names`` natural order. action[i] must
+  target ``EXPECTED_ACTION_JOINT_ORDER[i]`` for deployed policies to remain
+  valid.
   """
-  joint_ids, joint_names = nugus_entity.find_joints_by_actuator_names(".*")
-  assert tuple(joint_names) == EXPECTED_JOINT_ORDER
+  joint_ids, joint_names = nugus_entity.find_joints_by_actuator_names(
+    (NUGUS_LOCOMOTION_ACTUATOR_REGEX,)
+  )
+  assert tuple(joint_names) == EXPECTED_ACTION_JOINT_ORDER
   # joint_ids index into entity.joint_names; confirm they line up too.
   resolved = tuple(nugus_entity.joint_names[i] for i in joint_ids)
-  assert resolved == EXPECTED_JOINT_ORDER
+  assert resolved == EXPECTED_ACTION_JOINT_ORDER
 
 
 def test_action_scale_covers_all_joints(nugus_entity: Entity) -> None:

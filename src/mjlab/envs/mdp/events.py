@@ -318,6 +318,34 @@ def reset_joints_by_offset(
   )
 
 
+def reset_joint_targets_to_default(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Set joint position targets to the default pose for the selected joints.
+
+  Scene reset zeroes all actuator position targets, so actuated joints that no
+  action term controls are driven to qpos 0 instead of the default pose. Add
+  this reset event scoped to those joints to hold them at the default pose.
+  Encoder bias is subtracted from the target to mirror JointPositionAction.
+  """
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
+
+  asset: Entity = env.scene[asset_cfg.name]
+  joint_ids = asset_cfg.joint_ids
+  target = (
+    asset.data.default_joint_pos[env_ids][:, joint_ids]
+    - asset.data.encoder_bias[env_ids][:, joint_ids]
+  )
+  if isinstance(joint_ids, list):
+    joint_ids_tensor = torch.tensor(joint_ids, device=env.device)
+    asset.set_joint_position_target(target, joint_ids_tensor, env_ids[:, None])
+  else:
+    asset.set_joint_position_target(target, joint_ids, env_ids)
+
+
 def push_by_setting_velocity(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,

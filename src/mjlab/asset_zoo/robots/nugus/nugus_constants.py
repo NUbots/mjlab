@@ -33,6 +33,24 @@ NUGUS_BACKLASH_VALUE: float = 0.035
 # joints aren't accidentally included in observations/rewards/events.
 NUGUS_MOTOR_JOINT_REGEX: str = r"^(?!.*_backlash$).*"
 
+# Joints excluded from the locomotion action space: head/neck (neck_yaw,
+# head_pitch), shoulder roll, and elbow pitch. They have negligible effect on
+# gait and only slow convergence.
+_NON_LOCOMOTION_SUFFIXES = "neck_yaw|head_pitch|shoulder_roll|elbow_pitch"
+
+# Regex matching only the locomotion-relevant actuators: excludes the
+# non-locomotion joints above in addition to the passive backlash siblings.
+# Use for the action space of locomotion policies.
+NUGUS_LOCOMOTION_ACTUATOR_REGEX: str = (
+  rf"^(?!.*({_NON_LOCOMOTION_SUFFIXES}|_backlash)).*"
+)
+
+# Regex matching the actuated joints excluded from the locomotion action
+# space. Use with reset_joint_targets_to_default so these actuators hold the
+# default pose instead of being driven to qpos 0 after scene reset zeroes all
+# position targets.
+NUGUS_NON_LOCOMOTION_JOINT_REGEX: str = rf".*({_NON_LOCOMOTION_SUFFIXES})$"
+
 
 def get_spec() -> mujoco.MjSpec:
   return mujoco.MjSpec.from_file(str(NUGUS_XML))

@@ -13,7 +13,13 @@ from mjlab.asset_zoo.robots.nugus.nugus_constants import (
   NUGUS_BACKLASH_VALUE as NUGUS_BACKLASH_VALUE,
 )
 from mjlab.asset_zoo.robots.nugus.nugus_constants import (
+  NUGUS_LOCOMOTION_ACTUATOR_REGEX as NUGUS_LOCOMOTION_ACTUATOR_REGEX,
+)
+from mjlab.asset_zoo.robots.nugus.nugus_constants import (
   NUGUS_MOTOR_JOINT_REGEX as NUGUS_MOTOR_JOINT_REGEX,
+)
+from mjlab.asset_zoo.robots.nugus.nugus_constants import (
+  NUGUS_NON_LOCOMOTION_JOINT_REGEX as NUGUS_NON_LOCOMOTION_JOINT_REGEX,
 )
 from mjlab.asset_zoo.robots.nugus.nugus_constants import (
   get_nugus_robot_cfg as get_nugus_robot_cfg,

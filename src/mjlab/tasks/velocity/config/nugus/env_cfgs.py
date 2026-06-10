@@ -1,8 +1,12 @@
 """NUbots Nugus velocity environment confiurations."""
 
+import re
+
 from mjlab.asset_zoo.robots import (
   NUGUS_ACTION_SCALE,
+  NUGUS_LOCOMOTION_ACTUATOR_REGEX,
   NUGUS_MOTOR_JOINT_REGEX,
+  NUGUS_NON_LOCOMOTION_JOINT_REGEX,
   get_nugus_robot_cfg,
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
@@ -142,7 +146,31 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
-  joint_pos_action.scale = NUGUS_ACTION_SCALE  # Note: This is really small (0.05)-> seems to correspond to a less falling over early on in training.
+  # Restrict action space to locomotion-relevant joints only. Head/neck,
+  # shoulder roll, and elbow pitch are excluded — they have negligible effect
+  # on gait and removing them reduces the action dimension, aiding convergence.
+  joint_pos_action.actuator_names = (NUGUS_LOCOMOTION_ACTUATOR_REGEX,)
+  # Filter the scale dict to the controlled joints: scale resolution errors on
+  # dict keys that match no action target.
+  # Note: The scale is really small (0.05) -> seems to correspond to less
+  # falling over early on in training.
+  joint_pos_action.scale = {
+    name: scale
+    for name, scale in NUGUS_ACTION_SCALE.items()
+    if re.fullmatch(NUGUS_LOCOMOTION_ACTUATOR_REGEX, name)
+  }
+  # The excluded joints are still actuated, and scene reset zeroes every
+  # position target. Without this event their actuators would drive them to
+  # qpos 0 instead of holding the default (keyframe) pose.
+  cfg.events["hold_non_locomotion_joints"] = EventTermCfg(
+    func=envs_mdp.reset_joint_targets_to_default,
+    mode="reset",
+    params={
+      "asset_cfg": SceneEntityCfg(
+        "robot", joint_names=(NUGUS_NON_LOCOMOTION_JOINT_REGEX,)
+      ),
+    },
+  )
   cfg.viewer.body_name = "torso"
 
   twist_cmd = cfg.commands["twist"]
