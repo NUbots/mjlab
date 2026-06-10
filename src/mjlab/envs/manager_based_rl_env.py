@@ -197,7 +197,8 @@ class ManagerBasedRlEnv:
     self.sim = Simulation(
       num_envs=self.scene.num_envs,
       cfg=self.cfg.sim,
-      model=self.scene.compile(),
+      spec=self.scene.spec,
+      variant_info=self.scene.collect_variant_info(),
       device=device,
     )
 
@@ -235,7 +236,11 @@ class ManagerBasedRlEnv:
     self._offline_renderer: OffscreenRenderer | None = None
     if self.render_mode == "rgb_array":
       renderer = OffscreenRenderer(
-        model=self.sim.mj_model, cfg=self.cfg.viewer, scene=self.scene
+        model=self.sim.mj_model,
+        cfg=self.cfg.viewer,
+        scene=self.scene,
+        sim_model=self.sim.model,
+        expanded_fields=self.sim.expanded_fields,
       )
       renderer.initialize()
       self._offline_renderer = renderer
@@ -360,6 +365,7 @@ class ManagerBasedRlEnv:
       env_ids = torch.arange(self.num_envs, dtype=torch.int64, device=self.device)
     if seed is not None:
       self.seed(seed)
+    self.extras["log"] = dict()
     self._reset_idx(env_ids)
     self.scene.write_data_to_sim()
     self.sim.forward()
@@ -409,6 +415,7 @@ class ManagerBasedRlEnv:
         "reset(env_ids=...) before calling step() again when auto_reset=False."
       )
 
+    self.extras["log"] = dict()
     self.action_manager.process_action(action.to(self.device))
 
     for _ in range(self.cfg.decimation):
@@ -470,6 +477,9 @@ class ManagerBasedRlEnv:
       self.reset_time_outs,
       self.extras,
     )
+
+  def get_observations(self) -> dict:
+    return self.observation_manager.compute()
 
   def render(self) -> np.ndarray | None:
     if self.render_mode == "human" or self.render_mode is None:
@@ -552,7 +562,6 @@ class ManagerBasedRlEnv:
       )
 
     # NOTE: This is order sensitive.
-    self.extras["log"] = dict()
     # observation manager.
     info = self.observation_manager.reset(env_ids)
     self.extras["log"].update(info)
