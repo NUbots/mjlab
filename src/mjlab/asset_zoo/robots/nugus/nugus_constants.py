@@ -26,7 +26,7 @@ assert NUGUS_XML.exists(), f"XML not found: {NUGUS_XML}"
 # with the same axis, bounded to ±NUGUS_BACKLASH_VALUE, that adds gear /
 # transmission play between the motor and the link. Inspired by the bitbots
 # wolfgang model.
-NUGUS_BACKLASH_VALUE: float = 0.02
+NUGUS_BACKLASH_VALUE: float = 0.005 # ~20 arcmin (from robotis spec)
 
 # Regex matching only motor joints (i.e. excludes the passive *_backlash siblings).
 # Use this anywhere a config wants "all actuated joints" so the passive backlash
