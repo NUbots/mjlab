@@ -59,7 +59,7 @@
     <link rel="prev" title="Architecture Overview" href="../architecture_overview.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
-    <meta name="docbuild:last-update" content="May 27, 2026"/>
+    <meta name="docbuild:last-update" content="Jun 10, 2026"/>
   </head>
   
   
@@ -189,6 +189,7 @@
 <li class="toctree-l1"><a class="reference internal" href="../architecture_overview.html">Architecture Overview</a></li>
 <li class="toctree-l1 current active has-children"><a class="current reference internal" href="#">Entity</a><details open="open"><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
 <li class="toctree-l2"><a class="reference internal" href="entity_data.html">Entity Data</a></li>
+<li class="toctree-l2"><a class="reference internal" href="per_world_mesh.html">Heterogeneous Worlds</a></li>
 </ul>
 </details></li>
 <li class="toctree-l1"><a class="reference internal" href="../actuators.html">Actuators</a></li>
@@ -467,6 +468,7 @@ document.write(`
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#init-state"><code class="docutils literal notranslate"><span class="pre">init_state</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#articulation"><code class="docutils literal notranslate"><span class="pre">articulation</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#spec-editors">Spec editors</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#heterogeneous-worlds">Heterogeneous worlds</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#subclassing-entity">Subclassing Entity</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#finding-elements">Finding elements</a></li>
 </ul>
@@ -687,6 +689,16 @@ example, a <code class="docutils literal notranslate"><span class="pre">Collisio
 sets contact parameters only on foot geoms. See the asset zoo
 (<code class="docutils literal notranslate"><span class="pre">mjlab.asset_zoo.robots</span></code>) for complete examples.</p>
 </section>
+<section id="heterogeneous-worlds">
+<h3>Heterogeneous worlds<a class="headerlink" href="#heterogeneous-worlds" title="Link to this heading">#</a></h3>
+<p>For scenes that need different mesh assets in different parallel worlds
+(for example, training a manipulation policy that generalizes across
+object shapes), use <code class="docutils literal notranslate"><span class="pre">VariantEntityCfg</span></code> instead of <code class="docutils literal notranslate"><span class="pre">EntityCfg</span></code>. Each
+world is assigned a variant proportional to a configurable weight, and
+mesh-dependent compiled constants (collision bounds, body inertials,
+subtree mass) are stored as per-world arrays so domain randomization and
+viewers stay consistent. See <a class="reference internal" href="per_world_mesh.html#heterogeneous-worlds"><span class="std std-ref">Heterogeneous Worlds</span></a>.</p>
+</section>
 <section id="subclassing-entity">
 <h3>Subclassing Entity<a class="headerlink" href="#subclassing-entity" title="Link to this heading">#</a></h3>
 <p><code class="docutils literal notranslate"><span class="pre">Entity</span></code> and <code class="docutils literal notranslate"><span class="pre">EntityCfg</span></code> can be subclassed for specialized behavior.
@@ -797,6 +809,7 @@ their corresponding data views without manual index bookkeeping.</p>
 <div class="toctree-wrapper compound">
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="entity_data.html">Entity Data</a></li>
+<li class="toctree-l1"><a class="reference internal" href="per_world_mesh.html">Heterogeneous Worlds</a></li>
 </ul>
 </div>
 </section>
@@ -853,6 +866,7 @@ their corresponding data views without manual index bookkeeping.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#init-state"><code class="docutils literal notranslate"><span class="pre">init_state</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#articulation"><code class="docutils literal notranslate"><span class="pre">articulation</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#spec-editors">Spec editors</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#heterogeneous-worlds">Heterogeneous worlds</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#subclassing-entity">Subclassing Entity</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#finding-elements">Finding elements</a></li>
 </ul>
@@ -896,7 +910,7 @@ By The mjlab Developers
   
   <div class="footer-item">
     <p class="last-updated">
-  Last updated on May 27, 2026.
+  Last updated on Jun 10, 2026.
   <br/>
 </p>
   </div>
