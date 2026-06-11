@@ -45,9 +45,9 @@
       <geom contype="0" conaffinity="0" group="1" rgba="0.286275 0.286275 0.286275 1"/>
     </default>
     <!-- Passive sibling joint that models servo backlash (gear play).
-         No damping/armature/friction; bounded ±BACKLASH_VALUE around 0. -->
+         No armature/friction, tiny damping; bounded ±BACKLASH_VALUE around 0. -->
     <default class="backlash_joint">
-      <joint damping="0.0" armature="0.0" frictionloss="0.0" limited="true" range="-0.035 0.035"/>
+      <joint damping="0.001" armature="0.0" frictionloss="0.0" limited="true" range="-0.005 0.005"/>
     </default>
   </default>
 
