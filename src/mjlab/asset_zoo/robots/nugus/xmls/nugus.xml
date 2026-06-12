@@ -171,7 +171,7 @@
               <geom name="right_shin_collision" class="collision" size="0.114601 0.0155 0.039" pos="0.100101 0.001 0" rgba=".2 .6 .2 .3"/>
               <body name="right_ankle" pos="0.200203 0 0" quat="1 0 0 0">
                 <inertial pos="-0.015733 0.0218226 0.000508968" quat="0.51022 0.492773 -0.489643 0.507051" mass="0.329993" diaginertia="0.00026369 0.000263648 0.000157719"/>
-                <joint name="right_ankle_pitch" pos="0 0 0" axis="0 0 1" limited="false"/>
+                <joint name="right_ankle_pitch" pos="0 0 0" axis="0 0 1" limited="true" range="-3.14159 3.14159"/>
                 <joint name="right_ankle_pitch_backlash" pos="0 0 0" axis="0 0 1" class="backlash_joint"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.286275 0.286275 0.286275 1" mesh="right_ankle_visual"/>
                 <geom size="0.0328441 0.047044 0.02765" pos="-0.0177559 0.026944 -0.00166756" type="box" rgba="0.286275 0.286275 0.286275 0"/>
