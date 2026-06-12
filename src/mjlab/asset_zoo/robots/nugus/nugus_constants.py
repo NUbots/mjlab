@@ -65,14 +65,14 @@ ACTUATOR_XH540 = ElectricActuator(
 
 # Natural frequency and damping ratio for PD control
 # Use kp values from xml directly as stiffness
-STIFFNESS_MX106 = 31.5
-DAMPING_MX106 = 1.7
+STIFFNESS_MX106 = 56.052
+DAMPING_MX106 = 1.6548
 
-STIFFNESS_MX64 = 18.8
-DAMPING_MX64 = 0.66
+STIFFNESS_MX64 = 31.1558
+DAMPING_MX64 = 0.6782
 
-STIFFNESS_XH540 = 31.5
-DAMPING_XH540 = 1.7
+STIFFNESS_XH540 = 56.052
+DAMPING_XH540 = 1.6548
 
 # Actuator configs for different joint groups
 NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
@@ -280,7 +280,7 @@ for a in NUGUS_ARTICULATION.actuators:
   names = a.target_names_expr
   assert e is not None
   for n in names:
-    NUGUS_ACTION_SCALE[n] = 0.25 * e / s  # Approx 0.049
+    NUGUS_ACTION_SCALE[n] = (0.25 * e / s) * 5 # Approx 0.049 * 5 = 0.245
 
 if __name__ == "__main__":
   import mujoco.viewer as viewer
