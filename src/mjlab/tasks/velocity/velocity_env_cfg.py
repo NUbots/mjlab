@@ -223,7 +223,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
-      interval_range_s=(5.0, 10.0),
+      interval_range_s=(3.0, 10.0),
       params={
         "velocity_range": {
           "x": (-0.2, 0.4),
@@ -241,7 +241,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "asset_cfg": SceneEntityCfg("robot", geom_names=()),  # Set per-robot.
         "operation": "abs",
-        "ranges": (0.8, 1.2),
+        "ranges": (0.7, 1.3),
         # Per-foot independent friction so the policy sees asymmetric traction.
         "shared_random": False,
       },
@@ -287,13 +287,13 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
   rewards = {
     "track_linear_velocity": RewardTermCfg(
       func=mdp.track_linear_velocity,
-      weight=3.0,
-      params={"command_name": "twist", "std": math.sqrt(0.001)},  # sqrt(0.001) = 0.0316 m/s
+      weight=2.0,
+      params={"command_name": "twist", "std": math.sqrt(0.05)}, 
     ),
     "track_angular_velocity": RewardTermCfg(
       func=mdp.track_angular_velocity,
       weight=2.0,
-      params={"command_name": "twist", "std": math.sqrt(0.001)},
+      params={"command_name": "twist", "std": math.sqrt(0.05)},
     ),
     "upright": RewardTermCfg(
       func=mdp.upright,
@@ -360,7 +360,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "threshold_min": 0.05,
         "threshold_max": 0.5,
         "command_name": "twist",
-        "command_threshold": 0.5,
+        "command_threshold": 0.01, # Minimum command magnitude for which this reward is active
       },
     ),
     "gait_phase_regularity": RewardTermCfg(
