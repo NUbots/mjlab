@@ -73,8 +73,14 @@ def _compute_slices(
   return slices
 
 
-def test_nugus_has_20_joints(nugus_entity: Entity) -> None:
-  assert nugus_entity.num_joints == 20
+def test_nugus_has_20_motor_joints(nugus_entity: Entity) -> None:
+  # 20 motor joints, each paired with a passive ``_backlash`` sibling joint
+  # that models servo gear play. Only the motor joints are actuated.
+  motor_joints = [n for n in nugus_entity.joint_names if not n.endswith("_backlash")]
+  backlash_joints = [n for n in nugus_entity.joint_names if n.endswith("_backlash")]
+  assert len(motor_joints) == 20
+  assert len(backlash_joints) == 20
+  assert nugus_entity.num_joints == 40
   assert nugus_entity.num_actuators == 20
 
 
@@ -117,7 +123,7 @@ def test_observation_vector_slices(
 ) -> None:
   """Verify each term occupies the expected index slice in the actor observation vector.
 
-  With 20 joints the layout is:
+  With 20 motor joints the layout is:
     base_ang_vel       [0:3]
     projected_gravity  [3:6]
     joint_pos          [6:26]
@@ -125,7 +131,10 @@ def test_observation_vector_slices(
     actions            [46:66]
     command            [66:69]
   """
-  n = nugus_entity.num_joints  # 20
+  # joint_pos/joint_vel observations are scoped to motor joints only via the
+  # asset_cfg override in nubots_nugus_*_env_cfg — passive ``_backlash`` joints
+  # do not appear in the observation vector.
+  n = len(EXPECTED_JOINT_ORDER)  # 20
 
   # Known dimensions: sensor/gravity outputs are 3D, joints give n dims, command is 3D.
   term_dims = {
@@ -148,20 +157,24 @@ def test_observation_vector_slices(
 
 
 def test_total_observation_dim(nugus_entity: Entity, nugus_actor_terms: dict) -> None:
-  n = nugus_entity.num_joints  # 20
+  n = len(EXPECTED_JOINT_ORDER)  # 20
   expected_dim = 3 + 3 + n + n + n + 3  # 69
   assert expected_dim == 69
 
 
-def test_entity_joint_name_order(nugus_entity: Entity) -> None:
-  """Pin the MuJoCo joint order.
+def test_entity_motor_joint_name_order(nugus_entity: Entity) -> None:
+  """Pin the MuJoCo motor-joint order.
 
-  ``joint_pos`` and ``joint_vel`` observations use the default
-  ``SceneEntityCfg("robot")`` (``joint_ids=slice(None)``), so they index
-  ``entity.data.joint_pos`` directly, giving ``entity.joint_names`` order.
-  A change here means every deployed policy's joint mapping is wrong.
+  ``joint_pos`` and ``joint_vel`` observations are scoped to motor joints
+  via ``SceneEntityCfg("robot", joint_names=(NUGUS_MOTOR_JOINT_REGEX,))``,
+  so they index ``entity.data.joint_pos`` using the motor-joint subset in
+  ``entity.joint_names`` natural order. A change here means every deployed
+  policy's joint mapping is wrong.
   """
-  assert tuple(nugus_entity.joint_names) == EXPECTED_JOINT_ORDER
+  motor_joints = tuple(
+    n for n in nugus_entity.joint_names if not n.endswith("_backlash")
+  )
+  assert motor_joints == EXPECTED_JOINT_ORDER
 
 
 def test_action_joint_order(nugus_entity: Entity) -> None:
@@ -190,6 +203,9 @@ def test_action_scale_covers_all_joints(nugus_entity: Entity) -> None:
   from mjlab.asset_zoo.robots.nugus.nugus_constants import NUGUS_ACTION_SCALE
 
   for name in nugus_entity.joint_names:
+    if name.endswith("_backlash"):
+      # Passive backlash joints are not actuated and don't need an action scale.
+      continue
     assert name in NUGUS_ACTION_SCALE, f"missing action scale for {name}"
 
 

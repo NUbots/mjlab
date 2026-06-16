@@ -12,6 +12,13 @@ Added
   primary names in the order they appear along the per-contact axis of the
   output tensors. This makes it possible to map a contact-data column back
   to the primary it belongs to (:issue:`914`).
+- Added a servo backlash model to the NUbots Nugus robot. Each actuated
+  joint now has a passive ``_backlash`` sibling joint with the same axis
+  bounded to ±``NUGUS_BACKLASH_VALUE`` (default 0.035 rad) that models
+  transmission play between the motor and the link. The nugus velocity
+  task observations, rewards, and reset events are scoped to motor joints
+  only via ``NUGUS_MOTOR_JOINT_REGEX`` so the passive joints do not appear
+  in the policy's view.
 
 Changed
 ^^^^^^^
