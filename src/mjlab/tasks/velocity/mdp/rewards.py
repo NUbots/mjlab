@@ -354,6 +354,58 @@ def feet_slip(
   return cost
 
 
+def feet_flat_orientation(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  command_name: str,
+  command_threshold: float = 0.05,
+  sole_normal_axis: int = 2,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Penalize foot-sole tilt during swing to encourage flat-footed stepping.
+
+  The foot sole lies in the plane perpendicular to one of the foot body's local
+  axes (``sole_normal_axis``). Projecting world gravity into the foot frame gives
+  a unit vector that points purely along that axis when the sole is level; its
+  two in-plane (tangent) components measure tilt. Penalizing them keeps the sole
+  parallel to the ground so the toe/front edge does not pitch down and dig in on
+  touchdown.
+
+  For the Nugus foot the four corner sites share the same local-X coordinate, so
+  the sole normal is the local X axis (``sole_normal_axis=0``); the tangent
+  components then correspond to fore-aft pitch and medial-lateral roll.
+
+  Only swing feet (no ground contact) are penalized so the term does not fight
+  terrain conformance during stance.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  contact_sensor: ContactSensor = env.scene[sensor_name]
+  assert contact_sensor.data.found is not None
+
+  foot_quat_w = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :]  # [B, F, 4]
+  num_feet = foot_quat_w.shape[1]
+  gravity_w = asset.data.gravity_vec_w.unsqueeze(1).expand(-1, num_feet, -1)
+  gravity_b = quat_apply_inverse(foot_quat_w, gravity_w)  # [B, F, 3]
+
+  tangent_axes = [a for a in range(3) if a != sole_normal_axis]
+  tilt = torch.sum(torch.square(gravity_b[..., tangent_axes]), dim=-1)  # [B, F]
+
+  in_air = (contact_sensor.data.found == 0).float()  # [B, F]
+  cost = torch.sum(tilt * in_air, dim=1)  # [B]
+
+  command = env.command_manager.get_command(command_name)
+  if command is not None:
+    linear_norm = torch.norm(command[:, :2], dim=1)
+    angular_norm = torch.abs(command[:, 2])
+    total_command = linear_norm + angular_norm
+    active = (total_command > command_threshold).float()
+    cost = cost * active
+
+  num_in_air = torch.clamp(torch.sum(in_air), min=1)
+  env.extras["log"]["Metrics/foot_tilt_mean"] = torch.sum(tilt * in_air) / num_in_air
+  return cost
+
+
 class cost_of_transport_proxy:
   """Penalize energy per traveled distance to improve transport efficiency.
 

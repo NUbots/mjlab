@@ -8,6 +8,10 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added an optional ``feet_flat_orientation`` reward for velocity tasks that
+  penalizes foot-sole tilt during swing, encouraging flat-footed stepping so
+  the toe/front edge does not pitch down and dig into the ground on touchdown.
+  Enabled and tuned for NUbots Nugus.
 - Added ``ContactSensor.primary_names`` property to expose the resolved
   primary names in the order they appear along the per-contact axis of the
   output tensors. This makes it possible to map a contact-data column back
@@ -30,6 +34,10 @@ Changed
   optional left-right limb symmetry and actuation power cost rewards, and
   slowed velocity command curriculum ramp-up. Enabled/tuned these rewards for
   NUbots Nugus.
+- Enabled the left-right limb symmetry reward for NUbots Nugus (previously
+  disabled) and expanded it to cover the full leg (hip yaw/roll/pitch, knee,
+  ankle pitch/roll) rather than only the sagittal pitch joints, to address a
+  lop-sided trained gait.
 - Added an optional feet-separation penalty for velocity tasks to discourage
   feet from getting too close; enabled and tuned for NUbots Nugus.
 - Added optional ``cot_proxy`` and ``gait_phase_regularity`` rewards for

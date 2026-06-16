@@ -288,7 +288,10 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "track_linear_velocity": RewardTermCfg(
       func=mdp.track_linear_velocity,
       weight=3.0,
-      params={"command_name": "twist", "std": math.sqrt(0.001)},  # sqrt(0.001) = 0.0316 m/s
+      params={
+        "command_name": "twist",
+        "std": math.sqrt(0.001),
+      },  # sqrt(0.001) = 0.0316 m/s
     ),
     "track_angular_velocity": RewardTermCfg(
       func=mdp.track_angular_velocity,
@@ -402,6 +405,17 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_name": "twist",
         "command_threshold": 0.05,
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
+      },
+    ),
+    "foot_flat": RewardTermCfg(
+      func=mdp.feet_flat_orientation,
+      weight=0.0,  # Override per-robot.
+      params={
+        "sensor_name": "feet_ground_contact",
+        "command_name": "twist",
+        "command_threshold": 0.05,
+        "sole_normal_axis": 2,  # Set per-robot.
+        "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
       },
     ),
     "feet_distance": RewardTermCfg(

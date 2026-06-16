@@ -194,8 +194,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("torso",)
   cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("torso",)
+  # Cover the full leg (roll/yaw included, not just sagittal pitch) so the term
+  # also penalizes the side-leaning, uneven weight-shift asymmetry that produces
+  # a lop-sided walk.
   cfg.rewards["limb_symmetry"].params["asset_cfg"].joint_names = (
-    r"^(left|right)_(hip_pitch|knee_pitch|ankle_pitch)$",
+    r"^(left|right)_(hip_yaw|hip_roll|hip_pitch|knee_pitch|ankle_pitch|ankle_roll)$",
   )
   cfg.rewards["limb_symmetry"].params["velocity_weight"] = 0.2
   cfg.rewards["limb_symmetry"].params["position_weight"] = 1.0
@@ -209,6 +212,14 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   for reward_name in ["foot_clearance", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
 
+  # Flat-foot shaping: the Nugus foot sole is perpendicular to the foot body's
+  # local X axis (all four corner sites share the same local-X coord), so the
+  # sole normal is axis 0. Penalizing in-swing tilt keeps the foot level and
+  # stops the toe from pitching down and digging into the turf on touchdown.
+  cfg.rewards["foot_flat"].params["asset_cfg"].body_names = ("left_foot", "right_foot")
+  cfg.rewards["foot_flat"].params["sole_normal_axis"] = 0
+  cfg.rewards["foot_flat"].params["command_threshold"] = 0.02
+
   cfg.rewards["feet_distance"].params["asset_cfg"].site_names = site_names
   cfg.rewards["feet_distance"].params["nominal_distance"] = (
     0.2336  # keyframe lateral separation
@@ -221,8 +232,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["actuation_power"].weight = 0.0  # Disable (debugging)
   cfg.rewards["cot_proxy"].weight = -0.00  # Disable (debugging)
   cfg.rewards["gait_phase_regularity"].weight = -0.1
-  cfg.rewards["limb_symmetry"].weight = -0.0  # Disable (debugging)
+  cfg.rewards["limb_symmetry"].weight = -0.5  # Enforce left/right amplitude symmetry.
   cfg.rewards["feet_distance"].weight = -0.1
+  cfg.rewards["foot_flat"].weight = -0.5  # Encourage flat-footed, level swing.
 
   # Apply play mode overrides.
   if play:

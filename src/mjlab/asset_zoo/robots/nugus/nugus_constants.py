@@ -265,7 +265,7 @@ def get_nugus_robot_cfg() -> EntityCfg:
   the config is shared across multiple places.
   """
   return EntityCfg(
-    init_state=STAND_BENT_KNEES_KEYFRAME, # Change the keyframe here
+    init_state=STAND_BENT_KNEES_KEYFRAME,  # Change the keyframe here
     collisions=(FEET_COLLISION,),
     spec_fn=get_spec,
     articulation=NUGUS_ARTICULATION,
@@ -280,7 +280,7 @@ for a in NUGUS_ARTICULATION.actuators:
   names = a.target_names_expr
   assert e is not None
   for n in names:
-    NUGUS_ACTION_SCALE[n] = (0.25 * e / s) * 5 # Approx 0.049 * 5 = 0.245
+    NUGUS_ACTION_SCALE[n] = (0.25 * e / s) * 5  # Approx 0.049 * 5 = 0.245
 
 if __name__ == "__main__":
   import mujoco.viewer as viewer
