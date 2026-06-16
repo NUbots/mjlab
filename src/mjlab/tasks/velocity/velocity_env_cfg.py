@@ -226,7 +226,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       interval_range_s=(5.0, 10.0),
       params={
         "velocity_range": {
-          "x": (-0.2, 0.2),
+          "x": (-0.2, 0.4),
           "y": (-0.2, 0.2),
           "z": (-0.0, 0.0),
           "roll": (-0.05, 0.05),
