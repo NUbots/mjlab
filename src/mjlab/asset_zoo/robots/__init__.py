@@ -10,9 +10,6 @@ from mjlab.asset_zoo.robots.nugus.nugus_constants import (
 
 # Nugus Robot
 from mjlab.asset_zoo.robots.nugus.nugus_constants import (
-  NUGUS_BACKLASH_VALUE as NUGUS_BACKLASH_VALUE,
-)
-from mjlab.asset_zoo.robots.nugus.nugus_constants import (
   NUGUS_MOTOR_JOINT_REGEX as NUGUS_MOTOR_JOINT_REGEX,
 )
 from mjlab.asset_zoo.robots.nugus.nugus_constants import (

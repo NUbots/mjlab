@@ -288,12 +288,12 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "track_linear_velocity": RewardTermCfg(
       func=mdp.track_linear_velocity,
       weight=3.0,
-      params={"command_name": "twist", "std": math.sqrt(0.01)},  # sqrt(0.01) = 0.1 m/s
+      params={"command_name": "twist", "std": math.sqrt(0.001)},  # sqrt(0.001) = 0.0316 m/s
     ),
     "track_angular_velocity": RewardTermCfg(
       func=mdp.track_angular_velocity,
       weight=2.0,
-      params={"command_name": "twist", "std": math.sqrt(0.01)},
+      params={"command_name": "twist", "std": math.sqrt(0.001)},
     ),
     "upright": RewardTermCfg(
       func=mdp.upright,
@@ -312,7 +312,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "std_standing": {},  # Set per-robot.
         "std_walking": {},  # Set per-robot.
         "std_running": {},  # Set per-robot.
-        "walking_threshold": 0.05,
+        "walking_threshold": 0.01,
         "running_threshold": 1.5,
       },
     ),
@@ -458,20 +458,20 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
           {
             "step": 0,
             "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.0, 0.0),
+            "lin_vel_y": (-0.1, 0.1),
             "ang_vel_z": (-0.05, 0.05),
           },
           {
             "step": 9000 * 24,
             "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.0, 0.0),
+            "lin_vel_y": (-0.2, 0.2),
             "ang_vel_z": (-0.1, 0.1),
           },
           {
             "step": 12000 * 24,
             "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.0, 0.0),
-            "ang_vel_z": (-0.2, 0.2),
+            "lin_vel_y": (-0.1, 0.1),
+            "ang_vel_z": (-0.5, 0.5),
           },
         ],
       },

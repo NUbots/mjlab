@@ -45,9 +45,9 @@
       <geom contype="0" conaffinity="0" group="1" rgba="0.286275 0.286275 0.286275 1"/>
     </default>
     <!-- Passive sibling joint that models servo backlash (gear play).
-         No damping/armature/friction; bounded ±BACKLASH_VALUE around 0. -->
+         No armature/friction, tiny damping; bounded ±BACKLASH_VALUE around 0. -->
     <default class="backlash_joint">
-      <joint damping="0.0" armature="0.0" frictionloss="0.0" limited="true" range="-0.035 0.035"/>
+      <joint damping="0.001" armature="0.0" frictionloss="0.0" limited="true" range="-0.005 0.005"/>
     </default>
   </default>
 
@@ -96,7 +96,7 @@
 
   <worldbody>
     <body name="torso">
-      <inertial pos="-0.000971341 -7.63301e-05 0.0898493" quat="1.944034 0.00199235 0.0599357 0.0182343" mass="1.83264" diaginertia="0.0156368 0.0131516 0.00578565"/>
+      <inertial pos="-0.000971341 -7.63301e-05 0.0898493" quat="0.998034 0.00199235 0.0599357 0.0182343" mass="1.83264" diaginertia="0.0156368 0.0131516 0.00578565"/>
       <joint name="torso_free_joint" type="free"/>
       <site name='imu' size='0.01' pos='0 0 0'/>
       <camera name="track" pos="0.805 -1.105 0.2" xyaxes="0.814 0.580 0.000 -0.140 0.196 0.971" mode="trackcom"/>
@@ -175,7 +175,7 @@
               <geom name="right_shin_collision" class="collision" size="0.114601 0.0155 0.039" pos="0.100101 0.001 0" rgba=".2 .6 .2 .3"/>
               <body name="right_ankle" pos="0.200203 0 0" quat="1 0 0 0">
                 <inertial pos="-0.015733 0.0218226 0.000508968" quat="0.51022 0.492773 -0.489643 0.507051" mass="0.329993" diaginertia="0.00026369 0.000263648 0.000157719"/>
-                <joint name="right_ankle_pitch" pos="0 0 0" axis="0 0 1" limited="false"/>
+                <joint name="right_ankle_pitch" pos="0 0 0" axis="0 0 1" limited="true" range="-3.14159 3.14159"/>
                 <joint name="right_ankle_pitch_backlash" pos="0 0 0" axis="0 0 1" class="backlash_joint"/>
                 <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.286275 0.286275 0.286275 1" mesh="right_ankle_visual"/>
                 <geom size="0.0328441 0.047044 0.02765" pos="-0.0177559 0.026944 -0.00166756" type="box" rgba="0.286275 0.286275 0.286275 0"/>
