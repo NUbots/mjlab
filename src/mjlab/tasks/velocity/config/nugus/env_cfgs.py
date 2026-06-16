@@ -219,8 +219,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["angular_momentum"].weight = -0.01
   cfg.rewards["air_time"].weight = 0.08
   cfg.rewards["actuation_power"].weight = 0.0  # Disable (debugging)
-  cfg.rewards["cot_proxy"].weight = -0.0
-  cfg.rewards["gait_phase_regularity"].weight = -0.5
+  cfg.rewards["cot_proxy"].weight = -0.00  # Disable (debugging)
+  cfg.rewards["gait_phase_regularity"].weight = -0.1
   cfg.rewards["limb_symmetry"].weight = -0.0  # Disable (debugging)
   cfg.rewards["feet_distance"].weight = -0.1
 
