@@ -293,7 +293,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "track_angular_velocity": RewardTermCfg(
       func=mdp.track_angular_velocity,
       weight=2.0,
-      params={"command_name": "twist", "std": math.sqrt(0.05)},
+      params={"command_name": "twist", "std": math.sqrt(0.5)},
     ),
     "upright": RewardTermCfg(
       func=mdp.upright,
@@ -312,7 +312,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "std_standing": {},  # Set per-robot.
         "std_walking": {},  # Set per-robot.
         "std_running": {},  # Set per-robot.
-        "walking_threshold": 0.01,
+        "walking_threshold": 0.03,
         "running_threshold": 1.5,
       },
     ),
@@ -360,7 +360,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "threshold_min": 0.05,
         "threshold_max": 0.5,
         "command_name": "twist",
-        "command_threshold": 0.01, # Minimum command magnitude for which this reward is active
+        "command_threshold": 0.03, # Minimum command magnitude for which this reward is active
       },
     ),
     "gait_phase_regularity": RewardTermCfg(
