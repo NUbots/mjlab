@@ -232,7 +232,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["actuation_power"].weight = 0.0  # Disable (debugging)
   cfg.rewards["cot_proxy"].weight = -0.00  # Disable (debugging)
   cfg.rewards["gait_phase_regularity"].weight = -0.1
-  cfg.rewards["limb_symmetry"].weight = -0.5  # Enforce left/right amplitude symmetry.
+  cfg.rewards["limb_symmetry"].weight = -0.0  # Disable (debugging)
   cfg.rewards["feet_distance"].weight = -0.1
   cfg.rewards["foot_flat"].weight = -0.5  # Encourage flat-footed, level swing.
 
