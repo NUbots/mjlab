@@ -357,7 +357,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=0.0,  # Override per-robot.
       params={
         "sensor_name": "feet_ground_contact",
-        "threshold_min": 0.05,
+        "threshold_min": 0.1,
         "threshold_max": 0.5,
         "command_name": "twist",
         "command_threshold": 0.03, # Minimum command magnitude for which this reward is active
@@ -376,7 +376,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.feet_clearance,
       weight=-2.0,
       params={
-        "target_height": 0.1,
+        "target_height": 0.12,
         "height_sensor_name": "foot_height_scan",
         "command_name": "twist",
         "command_threshold": 0.05,
@@ -385,11 +385,11 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "foot_swing_height": RewardTermCfg(
       func=mdp.feet_swing_height,
-      weight=-0.25,
+      weight=-1.0,
       params={
         "sensor_name": "feet_ground_contact",
         "height_sensor_name": "foot_height_scan",
-        "target_height": 0.1,
+        "target_height": 0.12,
         "command_name": "twist",
         "command_threshold": 0.05,
       },
