@@ -10,7 +10,13 @@ import torch
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import RayCastData, RayCastSensor
-from mjlab.tasks.velocity.mdp.rewards import upright
+from mjlab.sensor.contact_sensor import ContactSensor
+from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
+from mjlab.tasks.velocity.mdp.rewards import (
+  _swing_height_profile,
+  feet_swing_height_tracking,
+  upright,
+)
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
 
 
@@ -94,6 +100,105 @@ def _make_env_and_reward(
 
   reward_fn = upright(cfg, env)
   return env, reward_fn, params
+
+
+def _make_swing_env(
+  air_time: torch.Tensor,
+  foot_heights: torch.Tensor,
+  command: torch.Tensor | None = None,
+):
+  """Build a mocked env with a contact sensor + terrain height sensor."""
+  contact = MagicMock(spec=ContactSensor)
+  contact.data.current_air_time = air_time
+
+  height_sensor = MagicMock(spec=TerrainHeightSensor)
+  height_sensor.data.heights = foot_heights
+
+  sensors = {"feet_ground_contact": contact, "foot_height_scan": height_sensor}
+  env = MagicMock()
+  env.scene.__getitem__ = MagicMock(side_effect=lambda n: sensors[n])
+  env.extras = {"log": {}}
+  if command is None:
+    env.command_manager.get_command = MagicMock(return_value=None)
+  else:
+    env.command_manager.get_command = MagicMock(return_value=command)
+  return env
+
+
+def _swing_reward(env, **overrides):
+  params = dict(
+    sensor_name="feet_ground_contact",
+    height_sensor_name="foot_height_scan",
+    target_height=0.1,
+    swing_duration=0.3,
+    std=0.05,
+    profile="sin",
+  )
+  params.update(overrides)
+  return feet_swing_height_tracking(env, **params)
+
+
+def test_swing_profiles_peak_at_midswing():
+  """Both profiles vanish at the endpoints and peak at the amplitude mid-swing."""
+  psi = torch.tensor([0.0, 0.5, 1.0])
+  for profile in ("sin", "bump"):
+    h = _swing_height_profile(psi, amplitude=0.1, profile=profile)
+    assert h[0].item() == 0.0
+    assert h[2].item() < 1e-6
+    torch.testing.assert_close(h[1], torch.tensor(0.1), atol=1e-6, rtol=0)
+
+
+def test_swing_tracking_rewards_matching_height():
+  """A swing foot sitting exactly on the desired profile scores ~1 per foot."""
+  # Two feet, both mid-swing (psi = 0.5) → desired height = amplitude = 0.1.
+  air_time = torch.tensor([[0.15, 0.15]])  # swing_duration/2
+  foot_heights = torch.tensor([[0.1, 0.1]])
+  env = _make_swing_env(air_time, foot_heights)
+  r = _swing_reward(env)
+  assert r.shape == (1,)
+  torch.testing.assert_close(r, torch.tensor([2.0]), atol=1e-4, rtol=0)
+
+
+def test_swing_tracking_penalizes_deviation():
+  """A foot far from the target scores well below a foot that matches it."""
+  air_time = torch.tensor([[0.15, 0.15]])
+  foot_heights = torch.tensor([[0.1, 0.3]])  # second foot way too high
+  env = _make_swing_env(air_time, foot_heights)
+  r = _swing_reward(env)
+  # First foot ~1, second foot strongly attenuated.
+  assert 1.0 < r.item() < 1.05
+
+
+def test_swing_tracking_ignores_stance_feet():
+  """A foot in contact (air_time == 0) contributes nothing."""
+  air_time = torch.tensor([[0.0, 0.15]])  # first foot in stance
+  foot_heights = torch.tensor([[0.1, 0.1]])
+  env = _make_swing_env(air_time, foot_heights)
+  r = _swing_reward(env)
+  torch.testing.assert_close(r, torch.tensor([1.0]), atol=1e-4, rtol=0)
+
+
+def test_swing_tracking_command_gate():
+  """Reward is zeroed when the command is below threshold."""
+  air_time = torch.tensor([[0.15, 0.15]])
+  foot_heights = torch.tensor([[0.1, 0.1]])
+  command = torch.tensor([[0.0, 0.0, 0.0]])
+  env = _make_swing_env(air_time, foot_heights, command=command)
+  r = _swing_reward(env, command_name="twist", command_threshold=0.05)
+  torch.testing.assert_close(r, torch.tensor([0.0]), atol=1e-6, rtol=0)
+
+
+def test_swing_tracking_phase_saturates():
+  """A foot lingering past the swing duration is pulled back toward the ground."""
+  # Overrun: air_time > swing_duration → psi clamps to 1 → desired height ~0.
+  air_time = torch.tensor([[0.6]])
+  on_ground = _make_swing_env(air_time, torch.tensor([[0.0]]))
+  still_high = _make_swing_env(air_time, torch.tensor([[0.1]]))
+  r_ground = _swing_reward(on_ground)
+  r_high = _swing_reward(still_high)
+  # Being on the ground when phase has saturated is rewarded; staying high isn't.
+  assert r_ground.item() > 0.99
+  assert r_high.item() < r_ground.item()
 
 
 def test_world_up_identity_gives_max_reward():

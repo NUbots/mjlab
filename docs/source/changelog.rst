@@ -8,6 +8,13 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added a phase-based dense ``feet_swing_height_tracking`` reward for velocity
+  tasks. A per-foot phase clock derived from the contact sensor's air time
+  drives a desired swing-height profile (``sin`` or quartic ``bump``), and each
+  swing foot is rewarded by ``exp(-(h - h_des)^2 / std^2)`` on every step rather
+  than only scoring the peak height at landing. This replaces the sparse
+  peak-at-touchdown ``feet_swing_height`` cost in the default velocity reward
+  set, giving the policy a dense target it can follow throughout swing.
 - Added an optional ``feet_flat_orientation`` reward for velocity tasks that
   penalizes foot-sole tilt during swing, encouraging flat-footed stepping so
   the toe/front edge does not pitch down and dig into the ground on touchdown.

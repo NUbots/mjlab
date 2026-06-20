@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
@@ -322,6 +323,95 @@ class feet_swing_height:
       self.peak_heights,
     )
     return cost
+
+
+def _swing_height_profile(
+  phase: torch.Tensor,
+  amplitude: float,
+  profile: Literal["sin", "bump"],
+) -> torch.Tensor:
+  """Desired foot height as a function of normalized swing phase ``psi``.
+
+  ``phase`` (``psi``) runs from 0 at takeoff to 1 at the nominal landing. Both
+  profiles vanish at the endpoints and peak at ``amplitude`` mid-swing, so the
+  target traces a single lift-and-lower arc:
+
+  - ``"sin"``: ``A * sin(pi * psi)``. Smooth, but has nonzero slope at the
+    endpoints (the foot is still rising at takeoff / falling at landing).
+  - ``"bump"``: ``A * 16 * psi^2 * (1 - psi)^2``. A quartic bump with zero
+    slope at both endpoints, so the target eases away from and back to the
+    ground -- gentler near takeoff and touchdown.
+  """
+  if profile == "sin":
+    return amplitude * torch.sin(math.pi * phase)
+  if profile == "bump":
+    return amplitude * 16.0 * torch.square(phase) * torch.square(1.0 - phase)
+  raise ValueError(f"Unknown swing-height profile '{profile}'.")
+
+
+def feet_swing_height_tracking(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  height_sensor_name: str,
+  target_height: float,
+  swing_duration: float,
+  std: float,
+  profile: Literal["sin", "bump"] = "sin",
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Dense per-step reward for tracking a desired swing-height profile.
+
+  Unlike :class:`feet_swing_height`, which only scores the peak height once at
+  landing (a sparse, hard-to-credit signal), this term gives the policy a
+  target it can follow on every swing step. A per-foot phase clock advances
+  with the contact sensor's air time, ``psi = clamp(t_air / swing_duration,
+  0, 1)``, and drives a desired height ``h_des(psi)`` (see
+  :func:`_swing_height_profile`). Each swing foot is rewarded by
+  ``exp(-(h - h_des)^2 / std^2)`` against its measured terrain clearance, summed
+  over feet.
+
+  Only airborne feet contribute (``in_air`` mask); stance feet score zero rather
+  than being penalized. If ``t_air`` overruns ``swing_duration`` the phase
+  saturates at 1 and the target returns to the ground, encouraging a foot that
+  has lingered aloft to come down. Requires ``track_air_time=True`` on the
+  contact sensor.
+  """
+  contact_sensor: ContactSensor = env.scene[sensor_name]
+  height_sensor = env.scene[height_sensor_name]
+  assert isinstance(height_sensor, TerrainHeightSensor), (
+    "feet_swing_height_tracking requires a TerrainHeightSensor, got "
+    f"{type(height_sensor).__name__}"
+  )
+  assert contact_sensor.data.current_air_time is not None, (
+    f"Sensor '{sensor_name}' must have track_air_time=True."
+  )
+
+  foot_heights = height_sensor.data.heights  # [B, F]
+  air_time = contact_sensor.data.current_air_time  # [B, F]
+  in_air = (air_time > 0.0).float()  # [B, F]
+
+  phase = torch.clamp(air_time / swing_duration, 0.0, 1.0)  # [B, F]
+  desired = _swing_height_profile(phase, target_height, profile)  # [B, F]
+  error = foot_heights - desired  # [B, F]
+  tracking = torch.exp(-torch.square(error) / std**2)  # [B, F]
+  reward = torch.sum(tracking * in_air, dim=1)  # [B]
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      total_command = linear_norm + angular_norm
+      active = (total_command > command_threshold).float()
+      reward = reward * active
+
+  num_in_air = torch.clamp(torch.sum(in_air), min=1.0)
+  mean_height_error = torch.sum(torch.abs(error) * in_air) / num_in_air
+  mean_desired_height = torch.sum(desired * in_air) / num_in_air
+  env.extras["log"]["Metrics/swing_height_error_mean"] = mean_height_error
+  env.extras["log"]["Metrics/swing_desired_height_mean"] = mean_desired_height
+  return reward
 
 
 def feet_slip(
