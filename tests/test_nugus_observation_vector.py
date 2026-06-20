@@ -92,6 +92,7 @@ def test_actor_terms_present(nugus_actor_terms: dict) -> None:
     "joint_vel",
     "actions",
     "command",
+    "gait_clock",
   }
   assert set(nugus_actor_terms.keys()) == expected
 
@@ -114,6 +115,7 @@ def test_actor_term_order(nugus_actor_terms: dict) -> None:
     "joint_vel",
     "actions",
     "command",
+    "gait_clock",
   ]
   assert list(nugus_actor_terms.keys()) == expected_order
 
@@ -130,6 +132,7 @@ def test_observation_vector_slices(
     joint_vel          [26:46]
     actions            [46:66]
     command            [66:69]
+    gait_clock         [69:71]
   """
   # joint_pos/joint_vel observations are scoped to motor joints only via the
   # asset_cfg override in nubots_nugus_*_env_cfg — passive ``_backlash`` joints
@@ -144,6 +147,7 @@ def test_observation_vector_slices(
     "joint_vel": n,
     "actions": n,
     "command": 3,
+    "gait_clock": 2,
   }
 
   slices = _compute_slices(list(nugus_actor_terms.keys()), term_dims)
@@ -154,6 +158,7 @@ def test_observation_vector_slices(
   assert slices["joint_vel"] == slice(6 + n, 6 + 2 * n)
   assert slices["actions"] == slice(6 + 2 * n, 6 + 3 * n)
   assert slices["command"] == slice(6 + 3 * n, 6 + 3 * n + 3)
+  assert slices["gait_clock"] == slice(6 + 3 * n + 3, 6 + 3 * n + 3 + 2)
 
 
 def test_total_observation_dim(nugus_entity: Entity, nugus_actor_terms: dict) -> None:
