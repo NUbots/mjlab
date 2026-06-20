@@ -8,6 +8,13 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added a ``feet_swing_height_clock`` velocity reward and a matching
+  ``gait_clock`` observation. An independent, fixed-frequency gait clock (not
+  controlled by the policy) drives a desired per-foot swing-height arc, densely
+  rewarding the foot for tracking it; the same clock is fed to the policy as a
+  ``[sin, cos]`` phase observation. A larger clock ``period`` commands a slower
+  cadence. Enabled for NUbots Nugus to encourage larger, slower steps with more
+  foot clearance.
 - Added an optional ``feet_flat_orientation`` reward for velocity tasks that
   penalizes foot-sole tilt during swing, encouraging flat-footed stepping so
   the toe/front edge does not pitch down and dig into the ground on touchdown.
@@ -27,6 +34,11 @@ Added
 Changed
 ^^^^^^^
 
+- Added ``power`` and ``only_below`` parameters to the ``feet_clearance``
+  velocity reward. ``power=2`` uses a squared height error (stronger gradient
+  far below target) and ``only_below=True`` penalizes only feet below the
+  target height, leaving a high swing apex unpenalized. Defaults preserve the
+  previous linear, symmetric behavior; enabled for NUbots Nugus.
 - Replaced the single ``scale`` parameter in ``DifferentialIKActionCfg`` with
   separate ``delta_pos_scale`` and ``delta_ori_scale`` for independent scaling
   of position and orientation components.

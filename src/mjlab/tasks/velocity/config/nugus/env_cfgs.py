@@ -9,6 +9,7 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import (
   ContactMatch,
@@ -18,6 +19,7 @@ from mjlab.sensor import (
   RingPatternCfg,
   TerrainHeightSensorCfg,
 )
+from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
@@ -211,6 +213,43 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   for reward_name in ["foot_clearance", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
+
+  # De-game foot_clearance (E5): squared, one-sided (below-target only) error so
+  # the gradient grows as the foot sits below target and a high apex is never
+  # penalized. Velocity weighting is kept as the swing/stance gate. The squared
+  # one-sided form is ~10-15x smaller than the original linear |Δ|, so the
+  # weight is bumped to keep the term's magnitude meaningful -- retune against
+  # the logged reward value.
+  cfg.rewards["foot_clearance"].params["power"] = 2
+  cfg.rewards["foot_clearance"].params["only_below"] = True
+  cfg.rewards["foot_clearance"].weight = -30.0  # Starting point; tune.
+
+  # Independent gait-clock swing-height tracking (improved E2). A fixed-frequency
+  # clock the policy does not control drives a desired per-foot swing arc, so the
+  # foot is genuinely penalized for not lifting on schedule (unlike the previous
+  # air-time-driven phase, whose target adapted to whatever the foot did). The
+  # clock is also fed to the policy as an observation so it can step
+  # periodically. ``GAIT_PERIOD`` is the full gait-cycle duration -- a larger
+  # value commands a slower cadence, which is the main knob for "larger, slower
+  # steps"; ``swing_ratio`` is the swing fraction of each cycle. The obs and
+  # reward MUST share ``GAIT_PERIOD``.
+  GAIT_PERIOD = 0.7  # seconds per full gait cycle; raise for a slower gait.
+  clock_obs = ObservationTermCfg(func=mdp.gait_clock, params={"period": GAIT_PERIOD})
+  cfg.observations["actor"].terms["gait_clock"] = clock_obs
+  cfg.observations["critic"].terms["gait_clock"] = clock_obs
+  swing_height = cfg.rewards["foot_swing_height"]
+  swing_height.func = mdp.feet_swing_height_clock
+  swing_height.weight = 1.0  # Positive: tracking reward. Tune.
+  swing_height.params = {
+    "height_sensor_name": "foot_height_scan",
+    "target_height": 0.1,
+    "period": GAIT_PERIOD,
+    "swing_ratio": 0.45,
+    "std": 0.05,
+    "profile": "sin",
+    "command_name": "twist",
+    "command_threshold": 0.05,
+  }
 
   # Flat-foot shaping: the Nugus foot sole is perpendicular to the foot body's
   # local X axis (all four corner sites share the same local-X coord), so the

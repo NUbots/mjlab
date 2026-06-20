@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import math
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
@@ -245,9 +246,25 @@ def feet_clearance(
   height_sensor_name: str,
   command_name: str | None = None,
   command_threshold: float = 0.01,
+  power: int = 1,
+  only_below: bool = False,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Penalize deviation from target clearance height, weighted by foot velocity."""
+  """Penalize deviation from target clearance height, weighted by foot speed.
+
+  Horizontal foot speed acts as a swing/stance gate: at lift-off and touchdown
+  the foot is necessarily low *and* slow, so the penalty fades there and the
+  term only shapes clearance while the foot is travelling mid-swing.
+
+  Args:
+    power: Exponent on the height error. ``1`` is the original absolute
+      deviation; ``2`` gives a squared error whose gradient grows the further
+      below target the foot sits, so it is harder to "buy out" with a small
+      constant offset.
+    only_below: If ``True``, only penalize the foot for being *below* the
+      target. Clearing higher than ``target_height`` is then never penalized,
+      removing the symmetric pull that drags a high apex back down to target.
+  """
   asset: Entity = env.scene[asset_cfg.name]
   height_sensor = env.scene[height_sensor_name]
   assert isinstance(height_sensor, TerrainHeightSensor), (
@@ -256,8 +273,11 @@ def feet_clearance(
   foot_height = height_sensor.data.heights  # [B, F]
   foot_vel_xy = asset.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]  # [B, F, 2]
   vel_norm = torch.norm(foot_vel_xy, dim=-1)  # [B, F]
-  delta = torch.abs(foot_height - target_height)  # [B, F]
-  cost = torch.sum(delta * vel_norm, dim=1)  # [B]
+  if only_below:
+    delta = (foot_height - target_height).neg().clamp(min=0.0)  # [B, F]
+  else:
+    delta = torch.abs(foot_height - target_height)  # [B, F]
+  cost = torch.sum(delta.pow(power) * vel_norm, dim=1)  # [B]
   if command_name is not None:
     command = env.command_manager.get_command(command_name)
     if command is not None:
@@ -322,6 +342,110 @@ class feet_swing_height:
       self.peak_heights,
     )
     return cost
+
+
+def _swing_height_profile(
+  phase: torch.Tensor,
+  amplitude: float,
+  profile: Literal["sin", "bump"],
+) -> torch.Tensor:
+  """Desired foot height as a function of normalized swing phase ``psi``.
+
+  ``phase`` (``psi``) runs from 0 at takeoff to 1 at the nominal landing. Both
+  profiles vanish at the endpoints and peak at ``amplitude`` mid-swing, so the
+  target traces a single lift-and-lower arc:
+
+  - ``"sin"``: ``A * sin(pi * psi)``. Smooth, but has nonzero slope at the
+    endpoints (the foot is still rising at takeoff / falling at landing).
+  - ``"bump"``: ``A * 16 * psi^2 * (1 - psi)^2``. A quartic bump with zero
+    slope at both endpoints, so the target eases away from and back to the
+    ground -- gentler near takeoff and touchdown.
+  """
+  if profile == "sin":
+    return amplitude * torch.sin(math.pi * phase)
+  if profile == "bump":
+    return amplitude * 16.0 * torch.square(phase) * torch.square(1.0 - phase)
+  raise ValueError(f"Unknown swing-height profile '{profile}'.")
+
+
+def feet_swing_height_clock(
+  env: ManagerBasedRlEnv,
+  height_sensor_name: str,
+  target_height: float,
+  period: float,
+  swing_ratio: float,
+  std: float,
+  foot_offsets: tuple[float, ...] = (0.0, 0.5),
+  profile: Literal["sin", "bump"] = "sin",
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Dense swing-height tracking against an *independent* gait clock.
+
+  Unlike :class:`feet_swing_height` (sparse, scored once at landing) and unlike
+  an air-time-driven phase (self-referential: the target adapts to whatever the
+  foot does, so a quick low step always matches a low target), this term drives
+  the desired height from a fixed-frequency clock that the policy does not
+  control. The clock advances with episode time and resets with the episode::
+
+      base_phase = (episode_time / period) mod 1
+      foot_phase = (base_phase + foot_offset) mod 1   # offsets put feet out of
+                                                      # phase, e.g. (0, 0.5)
+
+  Each foot's cycle is split into a swing window ``foot_phase < swing_ratio``
+  (desired height follows the lift-and-lower arc, see
+  :func:`_swing_height_profile`) and a stance window (desired height 0, i.e.
+  foot on the ground). The foot is scored every step by
+  ``exp(-(h - h_des)^2 / std^2)`` against its measured terrain clearance, summed
+  over feet. Because the target reaches ``target_height`` mid-swing regardless
+  of what the foot is doing, a foot that fails to lift on schedule is genuinely
+  penalized -- which is what forces a higher, slower step.
+
+  ``period`` is the full gait-cycle duration (both feet complete one
+  swing+stance); a larger ``period`` commands a slower cadence. Feed the same
+  clock to the policy as an observation (``mdp.gait_clock`` with a matching
+  ``period``) so it can act periodically.
+  """
+  height_sensor = env.scene[height_sensor_name]
+  assert isinstance(height_sensor, TerrainHeightSensor), (
+    "feet_swing_height_clock requires a TerrainHeightSensor, got "
+    f"{type(height_sensor).__name__}"
+  )
+
+  foot_heights = height_sensor.data.heights  # [B, F]
+  num_feet = foot_heights.shape[1]
+  assert len(foot_offsets) == num_feet, (
+    f"foot_offsets has {len(foot_offsets)} entries but sensor reports {num_feet} feet."
+  )
+
+  t = env.episode_length_buf.float() * env.step_dt  # [B]
+  base_phase = torch.remainder(t / period, 1.0)  # [B]
+  offsets = torch.tensor(foot_offsets, device=env.device, dtype=foot_heights.dtype)
+  foot_phase = torch.remainder(base_phase[:, None] + offsets[None, :], 1.0)  # [B, F]
+
+  in_swing = foot_phase < swing_ratio  # [B, F]
+  psi = torch.clamp(foot_phase / swing_ratio, 0.0, 1.0)  # [B, F]
+  arc = _swing_height_profile(psi, target_height, profile)  # [B, F]
+  desired = torch.where(in_swing, arc, torch.zeros_like(arc))  # [B, F]
+
+  error = foot_heights - desired  # [B, F]
+  tracking = torch.exp(-torch.square(error) / std**2)  # [B, F]
+  reward = torch.sum(tracking, dim=1)  # [B]
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      total_command = linear_norm + angular_norm
+      active = (total_command > command_threshold).float()
+      reward = reward * active
+
+  swing_mask = in_swing.float()
+  num_swing = torch.clamp(torch.sum(swing_mask), min=1.0)
+  mean_swing_error = torch.sum(torch.abs(error) * swing_mask) / num_swing
+  env.extras["log"]["Metrics/swing_clock_error_mean"] = mean_swing_error
+  return reward
 
 
 def feet_slip(
