@@ -12,7 +12,12 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 
-def gait_clock(env: ManagerBasedRlEnv, period: float) -> torch.Tensor:
+def gait_clock(
+  env: ManagerBasedRlEnv,
+  period: float,
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
   """Independent gait-clock phase as ``[sin(2*pi*phase), cos(2*pi*phase)]``.
 
   The phase advances with episode time and resets with the episode,
@@ -22,12 +27,31 @@ def gait_clock(env: ManagerBasedRlEnv, period: float) -> torch.Tensor:
   feet_swing_height_clock` reward so the observed clock and the rewarded clock
   agree.
 
+  When ``command_name`` is given, the clock is zeroed for environments whose
+  command magnitude is below ``command_threshold``. This collapses the signal to
+  the origin (off the unit circle) at standstill, presenting the policy with a
+  distinct "standing" input rather than a walking phase. Without this gate the
+  clock keeps sweeping at zero command and drives the policy to march on the
+  spot even though the gait reward is gated off. Use the same ``command_name``
+  and ``command_threshold`` as the matching
+  :func:`mjlab.tasks.velocity.mdp.rewards.feet_swing_height_clock` reward so the
+  observed clock vanishes exactly when the reward turns off.
+
   Returns:
     Tensor of shape [B, 2].
   """
   t = env.episode_length_buf.float() * env.step_dt  # [B]
   angle = 2.0 * math.pi * torch.remainder(t / period, 1.0)  # [B]
-  return torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)  # [B, 2]
+  clock = torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)  # [B, 2]
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      total_command = linear_norm + angular_norm
+      active = (total_command > command_threshold).float().unsqueeze(-1)  # [B, 1]
+      clock = clock * active
+  return clock  # [B, 2]
 
 
 def foot_height(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:

@@ -312,7 +312,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "std_standing": {},  # Set per-robot.
         "std_walking": {},  # Set per-robot.
         "std_running": {},  # Set per-robot.
-        "walking_threshold": 0.03,
+        "walking_threshold": 0.05,
         "running_threshold": 1.5,
       },
     ),
@@ -376,7 +376,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.feet_clearance,
       weight=-2.0,
       params={
-        "target_height": 0.1,
+        "target_height": 0.08,
         "height_sensor_name": "foot_height_scan",
         "command_name": "twist",
         "command_threshold": 0.05,
@@ -389,7 +389,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "sensor_name": "feet_ground_contact",
         "height_sensor_name": "foot_height_scan",
-        "target_height": 0.1,
+        "target_height": 0.08,
         "command_name": "twist",
         "command_threshold": 0.05,
       },

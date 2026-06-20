@@ -164,8 +164,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["pose"].params["std_walking"] = {
     # Lower body.
     r".*hip_pitch.*": 0.3,
-    r".*hip_roll.*": 0.15,
-    r".*hip_yaw.*": 0.15,
+    r".*hip_roll.*": 0.10,
+    r".*hip_yaw.*": 0.10,
     r".*knee.*": 0.35,
     r".*ankle_pitch.*": 0.25,
     r".*ankle_roll.*": 0.1,
@@ -222,7 +222,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # the logged reward value.
   cfg.rewards["foot_clearance"].params["power"] = 2
   cfg.rewards["foot_clearance"].params["only_below"] = True
-  cfg.rewards["foot_clearance"].weight = -30.0  # Starting point; tune.
+  cfg.rewards["foot_clearance"].weight = -15.0  # Starting point; tune.
 
   # Independent gait-clock swing-height tracking (improved E2). A fixed-frequency
   # clock the policy does not control drives a desired per-foot swing arc, so the
@@ -234,15 +234,22 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # steps"; ``swing_ratio`` is the swing fraction of each cycle. The obs and
   # reward MUST share ``GAIT_PERIOD``.
   GAIT_PERIOD = 0.7  # seconds per full gait cycle; raise for a slower gait.
-  clock_obs = ObservationTermCfg(func=mdp.gait_clock, params={"period": GAIT_PERIOD})
+  clock_obs = ObservationTermCfg(
+    func=mdp.gait_clock,
+    params={
+      "period": GAIT_PERIOD,
+      "command_name": "twist",
+      "command_threshold": 0.05,
+    },
+  )
   cfg.observations["actor"].terms["gait_clock"] = clock_obs
   cfg.observations["critic"].terms["gait_clock"] = clock_obs
   swing_height = cfg.rewards["foot_swing_height"]
   swing_height.func = mdp.feet_swing_height_clock
-  swing_height.weight = 1.0  # Positive: tracking reward. Tune.
+  swing_height.weight = 0.75
   swing_height.params = {
     "height_sensor_name": "foot_height_scan",
-    "target_height": 0.1,
+    "target_height": 0.08,
     "period": GAIT_PERIOD,
     "swing_ratio": 0.45,
     "std": 0.05,

@@ -11,6 +11,7 @@ from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import RayCastData, RayCastSensor
 from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
+from mjlab.tasks.velocity.mdp.observations import gait_clock
 from mjlab.tasks.velocity.mdp.rewards import (
   _swing_height_profile,
   feet_swing_height_clock,
@@ -251,3 +252,49 @@ def test_clock_reward_gated_off_when_not_commanded():
   still = torch.tensor([[0.0, 0.0, 0.0]])
   r = _clock_reward(_make_clock_env(torch.tensor([[0.1, 0.0]]), 2, still))
   assert r.item() == 0.0
+
+
+def _make_clock_obs_env(episode_step: int, command: torch.Tensor):
+  """Mock env exposing just what gait_clock reads."""
+  env = MagicMock()
+  env.step_dt = 0.1
+  env.episode_length_buf = torch.tensor([episode_step], dtype=torch.long)
+  env.command_manager.get_command = MagicMock(return_value=command)
+  return env
+
+
+def test_gait_clock_advances_with_episode_time():
+  # period=0.8, step_dt=0.1: at episode_step=2 the phase is 0.25, so the clock
+  # is at angle pi/2 -> [sin, cos] = [1, 0].
+  moving = torch.tensor([[0.5, 0.0, 0.0]])
+  clock = gait_clock(
+    _make_clock_obs_env(2, moving),
+    period=0.8,
+    command_name="twist",
+    command_threshold=0.05,
+  )
+  assert clock.shape == (1, 2)
+  assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
+  assert math.isclose(clock[0, 1].item(), 0.0, abs_tol=1e-6)
+
+
+def test_gait_clock_zeroed_when_not_commanded():
+  # At zero command the clock must collapse to the origin so the policy gets a
+  # distinct standing signal instead of a sweeping walking phase (which would
+  # otherwise drive marching on the spot).
+  still = torch.tensor([[0.0, 0.0, 0.0]])
+  clock = gait_clock(
+    _make_clock_obs_env(2, still),
+    period=0.8,
+    command_name="twist",
+    command_threshold=0.05,
+  )
+  assert torch.equal(clock, torch.zeros(1, 2))
+
+
+def test_gait_clock_ungated_without_command_name():
+  # Without command_name the clock always ticks regardless of command.
+  still = torch.tensor([[0.0, 0.0, 0.0]])
+  clock = gait_clock(_make_clock_obs_env(2, still), period=0.8)
+  assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
+  assert math.isclose(clock[0, 1].item(), 0.0, abs_tol=1e-6)
