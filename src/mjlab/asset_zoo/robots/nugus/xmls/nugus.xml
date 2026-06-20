@@ -47,7 +47,7 @@
     <!-- Passive sibling joint that models servo backlash (gear play).
          No armature/friction, tiny damping; bounded ±BACKLASH_VALUE around 0. -->
     <default class="backlash_joint">
-      <joint damping="0.001" armature="0.0" frictionloss="0.0" limited="true" range="-0.000 0.000"/> <!-- TODO: Re-enable -->
+      <joint damping="0.001" armature="0.0" frictionloss="0.0" limited="true" range="-0.00001 0.00001"/> <!-- TODO: Re-enable -->
     </default>
   </default>
 
