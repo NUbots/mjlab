@@ -644,10 +644,11 @@ def feet_lateral_distance_cost(
   rotation does not affect the measurement. Only the body-Y component is used,
   isolating lateral spread from fore-aft offset during a stride.
 
-  The penalty shape is ``exp(sharpness * shortfall) - 1`` where
-  ``shortfall = max(0, nominal_distance - lateral_distance)``. This is zero at
-  the nominal, grows slowly for small shortfalls, and accelerates hard for
-  large ones. Increasing ``sharpness`` steepens the curve sooner.
+
+  The penalty shape is ``exp(sharpness * shortfall) - 1`` where 
+  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``. 
+  When nominal_distance == lateral_distance the cost is zero. For 
+  anything else, the cost grows exponentially with the difference. 
   """
   asset: Entity = env.scene[asset_cfg.name]
   foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
@@ -669,7 +670,7 @@ def feet_lateral_distance_cost(
 
   pair_distance = torch.abs(delta_b[..., 1])  # body-Y component [B, P]
 
-  shortfall = torch.clamp(nominal_distance - pair_distance, min=0.0)
+  shortfall = torch.clamp(abs(nominal_distance - pair_distance), min=0.0)
   cost = torch.sum(torch.exp(sharpness * shortfall) - 1.0, dim=1)
 
   min_pair_distance = torch.amin(pair_distance, dim=1)
