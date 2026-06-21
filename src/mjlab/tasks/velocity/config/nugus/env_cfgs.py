@@ -268,7 +268,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["feet_distance"].params["asset_cfg"].site_names = site_names
   cfg.rewards["feet_distance"].params["nominal_distance"] = (
-    0.2336  # keyframe lateral separation
+    0.2536  # keyframe lateral separation
   )
   cfg.rewards["feet_distance"].params["sharpness"] = 8.0
 
