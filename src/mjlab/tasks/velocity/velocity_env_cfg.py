@@ -328,6 +328,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
+    "action_acc_l2": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.1),
     "actuation_power": RewardTermCfg(
       func=mdp.electrical_power_cost,
       weight=0.0,  # Override per-robot.
