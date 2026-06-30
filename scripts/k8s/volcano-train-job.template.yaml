@@ -77,11 +77,11 @@ spec:
                   value: "all"
                 # Pin commit + force fresh, isolated runs regardless of the shared
                 # mjlab-train-config configmap (which is rewritten by other tooling).
-                # NOTE: b0c0fa7 adds stand-still shaping with per-axis gating so
-                # lateral strafing is not treated as standing, plus the v3 grid
-                # STAND_W sweep ({0.1, 0.3}) with JOULE_W fixed at 3e-4.
+                # NOTE: a7a43f7 restores symmetric backward/forward and lateral
+                # velocity command ranges from stage 0 (replacing forward-only
+                # early curriculum) while keeping v3 stand-still shaping.
                 - name: GIT_COMMIT
-                  value: "b0c0fa7f1be01dd223eca6c1cc832f230c3c80ec"
+                  value: "a7a43f78db3a0cb7cd796c18ba87f813c83fe4f5"
                 - name: RESUME
                   value: "false"
                 - name: WANDB_RUN_PATH
