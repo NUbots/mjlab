@@ -19,9 +19,18 @@ if [[ ! -d "$REPO_DIR/.git" ]]; then
   echo "[INFO] Cloning ${GIT_REPO} (ref: ${GIT_REF})..."
   git clone --depth 1 --branch "${GIT_REF}" "${GIT_REPO}" "$REPO_DIR"
 elif [[ -n "${GIT_COMMIT:-}" ]]; then
-  echo "[INFO] Checking out commit ${GIT_COMMIT}..."
-  git -C "$REPO_DIR" fetch origin "${GIT_COMMIT}"
-  git -C "$REPO_DIR" checkout "${GIT_COMMIT}"
+  current="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+  if [[ "$current" == "$GIT_COMMIT" ]] || [[ "$current" == "${GIT_COMMIT}"* ]]; then
+    echo "[INFO] Already at commit ${GIT_COMMIT} (${current}); skipping checkout."
+  else
+    echo "[INFO] Checking out commit ${GIT_COMMIT}..."
+    lockfile="$REPO_DIR/.git/mjlab-checkout.lock"
+    (
+      flock -w 600 9 || exit 1
+      git -C "$REPO_DIR" fetch origin "${GIT_COMMIT}"
+      git -C "$REPO_DIR" checkout "${GIT_COMMIT}"
+    ) 9>"$lockfile"
+  fi
 else
   echo "[INFO] Updating branch ${GIT_REF}..."
   git -C "$REPO_DIR" fetch origin "${GIT_REF}"
@@ -89,7 +98,11 @@ if [[ -n "${WANDB_PROJECT:-}" ]]; then
   TRAIN_ARGS+=(--agent.wandb-project "${WANDB_PROJECT}")
 fi
 if [[ -n "${WANDB_TAGS:-}" ]]; then
-  TRAIN_ARGS+=(--agent.wandb-tags ${WANDB_TAGS//,/ })
+  IFS=',' read -ra _wandb_tags <<< "${WANDB_TAGS}"
+  TRAIN_ARGS+=(--agent.wandb-tags)
+  for _tag in "${_wandb_tags[@]}"; do
+    TRAIN_ARGS+=("${_tag}")
+  done
 fi
 if [[ "${RESUME:-false}" == "true" ]]; then
   TRAIN_ARGS+=(--agent.resume)
