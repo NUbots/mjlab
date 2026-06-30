@@ -718,7 +718,7 @@ class actuator_torque_rate_l2:
 
   def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
     asset: Entity = env.scene[cfg.params["asset_cfg"].name]
-    _, actuator_ids = asset.find_actuators(
+    actuator_ids, _ = asset.find_actuators(
       cfg.params["asset_cfg"].joint_names,
     )
     self._actuator_ids = torch.tensor(actuator_ids, device=env.device, dtype=torch.long)
