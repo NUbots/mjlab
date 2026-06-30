@@ -84,12 +84,20 @@ export SEED="${SEED:-}"
 
 TRAIN_ARGS=(
   "${TASK}"
-  --gpu-ids "${GPU_IDS}"
   --agent.logger "${LOGGER}"
   --agent.experiment-name "${EXPERIMENT_NAME}"
   --env.scene.num-envs "${NUM_ENVS}"
   --agent.max-iterations "${MAX_ITERATIONS}"
 )
+
+# tyro union parsing for --gpu-ids rejects a lone "0"; default [0] is correct for 1-GPU jobs.
+if [[ -n "${GPU_IDS}" && "${GPU_IDS}" != "0" ]]; then
+  IFS=',' read -ra _gpu_ids <<< "${GPU_IDS}"
+  TRAIN_ARGS+=(--gpu-ids)
+  for _gid in "${_gpu_ids[@]}"; do
+    TRAIN_ARGS+=("${_gid}")
+  done
+fi
 
 if [[ -n "${RUN_NAME}" ]]; then
   TRAIN_ARGS+=(--agent.run-name "${RUN_NAME}")
@@ -98,11 +106,14 @@ if [[ -n "${WANDB_PROJECT:-}" ]]; then
   TRAIN_ARGS+=(--agent.wandb-project "${WANDB_PROJECT}")
 fi
 if [[ -n "${WANDB_TAGS:-}" ]]; then
+  # tyro Tuple[str, ...] accepts a single Python tuple literal, not space-separated tags.
   IFS=',' read -ra _wandb_tags <<< "${WANDB_TAGS}"
-  TRAIN_ARGS+=(--agent.wandb-tags)
+  _tags_literal="("
   for _tag in "${_wandb_tags[@]}"; do
-    TRAIN_ARGS+=("${_tag}")
+    _tags_literal+="'${_tag}',"
   done
+  _tags_literal="${_tags_literal%,})"
+  TRAIN_ARGS+=(--agent.wandb-tags "${_tags_literal}")
 fi
 if [[ "${RESUME:-false}" == "true" ]]; then
   TRAIN_ARGS+=(--agent.resume)
