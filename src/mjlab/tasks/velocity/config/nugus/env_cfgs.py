@@ -88,9 +88,17 @@ def effort_limit_drift(
   joint_names = asset_cfg.joint_names
   if joint_names is None:
     raise ValueError("effort_limit_drift requires joint_names on asset_cfg")
-  actuator_ids, _ = asset.find_actuators(joint_names)
-  for actuator_index in actuator_ids:
-    actuator = asset.actuators[actuator_index]
+
+  if isinstance(asset_cfg.actuator_ids, list):
+    actuators = [asset.actuators[i] for i in asset_cfg.actuator_ids]
+  elif isinstance(asset_cfg.actuator_ids, slice):
+    actuators = asset.actuators[asset_cfg.actuator_ids]
+  else:
+    actuators = [asset.actuators[asset_cfg.actuator_ids]]
+  if not isinstance(actuators, list):
+    actuators = [actuators]
+
+  for actuator in actuators:
     ctrl_ids = actuator.global_ctrl_ids
     env.sim.model.actuator_forcerange[env_ids[:, None], ctrl_ids, 0] *= drift_factor
     env.sim.model.actuator_forcerange[env_ids[:, None], ctrl_ids, 1] *= drift_factor
