@@ -127,6 +127,12 @@ Changed
 Fixed
 ^^^^^
 
+- Fixed ONNX policies no longer being uploaded to W&B after the upgrade to
+  ``rsl-rl-lib`` 5.4.0. The runners gated the upload (and the run-name
+  metadata) on ``logger_type == "wandb"``, but rsl-rl now reports the wandb
+  logger type as ``"WandbLogWriter"``, so the ``wandb.save`` call was silently
+  skipped and the ``run_path`` baked into the model fell back to ``"local"``.
+  The check now accepts both names.
 - Fixed the NUbots Nugus Phase-C energy/smoothness reward curriculum
   (``joule_heating``, ``joint_acc_l2``, ``torque_rate``, ``soft_landing``,
   ``base_height``). The schedule previously held a weight of zero until

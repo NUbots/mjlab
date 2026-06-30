@@ -57,6 +57,16 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
       dynamo=False,
     )
 
+  @property
+  def _is_wandb_logger(self) -> bool:
+    """Whether the active logger uploads to W&B.
+
+    rsl-rl>=5.1 renamed the wandb ``logger_type`` from ``"wandb"`` to
+    ``"WandbLogWriter"``; accept both so ONNX uploads keep working across
+    versions.
+    """
+    return self.logger.logger_type in ("wandb", "WandbLogWriter")
+
   @staticmethod
   def _get_export_paths(checkpoint_path: str) -> tuple[Path, str, Path]:
     """Resolve ONNX export paths from a checkpoint path."""
