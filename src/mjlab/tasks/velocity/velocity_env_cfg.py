@@ -529,19 +529,19 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "velocity_stages": [
           {
             "step": 0,
-            "lin_vel_x": (0.0, 0.7),
-            "lin_vel_y": (-0.05, 0.05),
+            "lin_vel_x": (-0.5, 0.5),
+            "lin_vel_y": (-0.1, 0.1),
             "ang_vel_z": (-0.05, 0.05),
           },
           {
             "step": 9000 * 24,
-            "lin_vel_x": (0.0, 0.7),
-            "lin_vel_y": (-0.15, 0.15),
-            "ang_vel_z": (-0.15, 0.15),
+            "lin_vel_x": (-0.5, 0.5),
+            "lin_vel_y": (-0.2, 0.2),
+            "ang_vel_z": (-0.1, 0.1),
           },
           {
             "step": 12000 * 24,
-            "lin_vel_x": (-0.3, 0.8),
+            "lin_vel_x": (-0.5, 0.5),
             "lin_vel_y": (-0.3, 0.3),
             "ang_vel_z": (-0.5, 0.5),
           },

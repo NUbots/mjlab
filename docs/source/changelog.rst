@@ -86,9 +86,10 @@ Changed
   and ``dr.joint_armature`` in ``reset`` mode, moved ``dr.pd_gains`` to
   ``reset`` mode (re-sampled per episode), and added an interval-mode
   effort-limit drift to model intra-episode strength loss (heating/sag).
-- Narrowed the early velocity command curriculum to a forward-biased range
-  with reduced lateral/yaw diversity, widening in later stages, to make a
-  clean forward walk easier to learn first.
+- Restored symmetric backward/forward and lateral velocity command ranges from
+  the first curriculum stage onward (replacing the forward-only early stages
+  introduced for initial walk learning). Final stage keeps wider lateral
+  (``lin_vel_y`` ±0.3) with symmetric ``lin_vel_x`` ±0.5.
 - Raised the velocity ``soft_landing`` default weight from ``-1e-5`` (which
   was effectively inert) to a meaningful value.
 - Added ``power`` and ``only_below`` parameters to the ``feet_clearance``
