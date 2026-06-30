@@ -77,11 +77,20 @@ JOULE_W_VALUES=(1e-4 3e-4)
 PHASE_C_FRACS=(0.5 0.7)
 SEEDS=(1)
 
+# Batch identifier. Distinguishes successive grid-search runs of the same
+# matrix so a new batch does not collide with jobs from an earlier batch and is
+# easy to filter in W&B/TensorBoard. It is appended to every Kubernetes job
+# name (kept DNS-1123: lowercase alphanumeric + dashes), the run_name, and a
+# W&B tag, and it scopes the shared experiment_name so each batch groups under
+# its own TensorBoard tree. Override with BATCH=<id> (use a short, DNS-safe
+# token such as v3 or a date like 20260630).
+BATCH="${BATCH:-v2}"
+
 # Fixed across the grid
 GAIT_PERIOD="${GAIT_PERIOD:-0.7}"
 EFFORT_LO="${EFFORT_LO:-0.7}"
 EFFORT_HI="${EFFORT_HI:-1.2}"
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-nugus_gridsearch}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-nugus_gridsearch_${BATCH}}"
 LOGGER="${LOGGER:-wandb}"
 WANDB_PROJECT="${WANDB_PROJECT:-mjlab}"
 
@@ -107,9 +116,9 @@ for variant in "${VARIANTS[@]}"; do
     for phase_c_frac in "${PHASE_C_FRACS[@]}"; do
       for seed in "${SEEDS[@]}"; do
         joule_label="$(joule_tag "$joule_w")"
-        run_name="${variant}__joule-${joule_label}__pc-${phase_c_frac}__s${seed}"
-        job_name="mjlab-gs-$(k8s_slug "${variant}-joule-${joule_label}-pc-${phase_c_frac}-s${seed}")"
-        wandb_tags="${variant},joule-${joule_label},pc-${phase_c_frac},seed-${seed},gridsearch"
+        run_name="${variant}__joule-${joule_label}__pc-${phase_c_frac}__s${seed}__${BATCH}"
+        job_name="mjlab-gs-$(k8s_slug "${BATCH}-${variant}-joule-${joule_label}-pc-${phase_c_frac}-s${seed}")"
+        wandb_tags="${variant},joule-${joule_label},pc-${phase_c_frac},seed-${seed},gridsearch,batch-${BATCH}"
 
         export JOB_NAME="$job_name"
         export MJLAB_VARIANT="$variant"

@@ -70,8 +70,24 @@ spec:
                   value: "${WANDB_PROJECT}"
                 - name: WANDB_TAGS
                   value: "${WANDB_TAGS}"
+                # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
-                  value: "0"
+                  value: "all"
+                # Pin commit + force fresh, isolated runs regardless of the shared
+                # mjlab-train-config configmap (which is rewritten by other tooling).
+                # NOTE: ec02edd fixes the Phase-C reward curriculum so the
+                # energy/smoothness penalties ramp from p2 (PHASE_C_FRAC) to p3
+                # instead of jumping to full weight only at 0.85*max_iterations,
+                # making PHASE_C_FRAC meaningful. It is the branch HEAD that includes
+                # the earlier 2b02fd6 effort_limit_drift fix and trains cleanly.
+                - name: GIT_COMMIT
+                  value: "ec02edd5ff57de11fb72b76e70aeca391eed598e"
+                - name: RESUME
+                  value: "false"
+                - name: WANDB_RUN_PATH
+                  value: ""
+                - name: WANDB_RUN_NAME
+                  value: ""
               envFrom:
                 - configMapRef:
                     name: mjlab-train-config
@@ -80,9 +96,9 @@ spec:
                     optional: true
               resources:
                 requests:
-                  nvidia.com/gpu: "1"
+                  nvidia.com/gpu: "4"
                 limits:
-                  nvidia.com/gpu: "1"
+                  nvidia.com/gpu: "4"
               volumeMounts:
                 - name: workspace
                   mountPath: /workspace
@@ -93,9 +109,12 @@ spec:
                 - name: dshm
                   mountPath: /dev/shm
           volumes:
+            # Per-pod clone instead of the shared mjlab-workspace PVC: that PVC is
+            # longhorn-local pinned to node munin, which forces every job onto munin
+            # and leaves hugin idle. emptyDir lets each 4-GPU job land on any GPU node
+            # (one on munin, one on hugin) and clone the repo fresh at the pinned commit.
             - name: workspace
-              persistentVolumeClaim:
-                claimName: mjlab-workspace
+              emptyDir: {}
             - name: logs
               persistentVolumeClaim:
                 claimName: mjlab-logs

@@ -18,6 +18,16 @@ fi
 if [[ ! -d "$REPO_DIR/.git" ]]; then
   echo "[INFO] Cloning ${GIT_REPO} (ref: ${GIT_REF})..."
   git clone --depth 1 --branch "${GIT_REF}" "${GIT_REPO}" "$REPO_DIR"
+  # A fresh clone lands on branch HEAD; if a commit is pinned, check it out so
+  # ephemeral (emptyDir) workspaces are still reproducible at GIT_COMMIT.
+  if [[ -n "${GIT_COMMIT:-}" ]]; then
+    current="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+    if [[ "$current" != "$GIT_COMMIT" && "$current" != "${GIT_COMMIT}"* ]]; then
+      echo "[INFO] Checking out pinned commit ${GIT_COMMIT} after clone..."
+      git -C "$REPO_DIR" fetch origin "${GIT_COMMIT}"
+      git -C "$REPO_DIR" checkout "${GIT_COMMIT}"
+    fi
+  fi
 elif [[ -n "${GIT_COMMIT:-}" ]]; then
   current="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
   if [[ "$current" == "$GIT_COMMIT" ]] || [[ "$current" == "${GIT_COMMIT}"* ]]; then
