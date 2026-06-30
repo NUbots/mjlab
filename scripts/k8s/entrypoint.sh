@@ -2,10 +2,12 @@
 # Clone or update mjlab on the workspace PVC, sync deps, and run training.
 #
 # Uses ghcr.io/mujocolab/mjlab:latest for CUDA, uv, Python, and system libs.
-# Source and project deps come from the git checkout on the workspace PVC.
+# Source comes from the git checkout on the workspace PVC; deps sync into the
+# image venv at /app/.venv (workspace .venv causes SIGBUS on CUDA init).
 set -euo pipefail
 
 REPO_DIR=/workspace/mjlab
+VENV=/app/.venv
 PYTHON_VERSION="${PYTHON_VERSION:-3.13}"
 
 if [[ -d "$REPO_DIR/.git" ]] && ! git -C "$REPO_DIR" status >/dev/null 2>&1; then
@@ -32,30 +34,36 @@ cd "$REPO_DIR"
 mkdir -p logs
 ln -sfn /logs logs/rsl_rl
 
-if [[ -d .venv ]] && ! .venv/bin/python -c "import sympy" 2>/dev/null; then
-  echo "[INFO] Removing incomplete .venv (missing CUDA extra deps)..."
+# Stale workspace venvs break CUDA (SIGBUS); always use the image venv.
+if [[ -d .venv ]]; then
+  echo "[INFO] Removing workspace .venv (use ${VENV} instead)..."
   rm -rf .venv
 fi
 
-if [[ -d .venv ]]; then
-  VENV_PY="$(
-    .venv/bin/python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' \
-      2>/dev/null || echo unknown
-  )"
-  WANT_PY="${PYTHON_VERSION%%.*}.$(echo "${PYTHON_VERSION}" | cut -d. -f2)"
-  if [[ "$VENV_PY" != "$WANT_PY" ]]; then
-    echo "[INFO] Removing .venv (Python ${VENV_PY}, want ${WANT_PY})..."
-    rm -rf .venv
-  fi
-fi
-
-echo "[INFO] Installing Python ${PYTHON_VERSION} and syncing dependencies..."
+echo "[INFO] Syncing dependencies into ${VENV}..."
+export UV_COMPILE_BYTECODE=0
+export UV_PROJECT_ENVIRONMENT="${VENV}"
+export UV_LINK_MODE=copy
 uv python install "${PYTHON_VERSION}"
 uv sync --locked --no-dev --extra cu128 --python "${PYTHON_VERSION}"
 
-echo "[INFO] Starting training: task=${TASK}, num_envs=${NUM_ENVS}, max_iterations=${MAX_ITERATIONS}"
-exec uv run --no-dev --extra cu128 --python "${PYTHON_VERSION}" train "${TASK}" \
-  --gpu-ids all \
+echo "[INFO] Preflight: CUDA and mjlab imports..."
+"${VENV}/bin/python" - <<'PY'
+import torch
+
+print(
+  f"torch={torch.__version__} cuda={torch.cuda.is_available()} "
+  f"devices={torch.cuda.device_count()}"
+)
+import mjlab.tasks  # noqa: F401
+
+print("mjlab.tasks import ok")
+PY
+
+GPU_IDS="${GPU_IDS:-all}"
+echo "[INFO] Starting training: task=${TASK}, num_envs=${NUM_ENVS}, max_iterations=${MAX_ITERATIONS}, gpu_ids=${GPU_IDS}"
+exec "${VENV}/bin/train" "${TASK}" \
+  --gpu-ids "${GPU_IDS}" \
   --agent.logger tensorboard \
   --env.scene.num-envs "${NUM_ENVS}" \
   --agent.max-iterations "${MAX_ITERATIONS}"

@@ -15,4 +15,5 @@ data:
   TASK: Mjlab-Velocity-Flat-Unitree-G1
   NUM_ENVS: "4096"
   MAX_ITERATIONS: "1500"
+  GPU_IDS: all
   TENSORBOARD_HOST: mjlab.4ai.systems
