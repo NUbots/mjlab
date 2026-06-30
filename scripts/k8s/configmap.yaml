@@ -1,0 +1,18 @@
+# Training parameters and git source. Edit and re-apply, or:
+#   kubectl -n mjlab edit configmap mjlab-train-config
+#
+# TensorBoard UI: https://mjlab.4ai.systems (see tensorboard.yaml HTTPRoute)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mjlab-train-config
+  namespace: mjlab
+data:
+  GIT_REPO: https://github.com/NUbots/mjlab.git
+  GIT_REF: add-phase-clock
+  GIT_COMMIT: ""
+  PYTHON_VERSION: "3.13"
+  TASK: Mjlab-Velocity-Flat-Unitree-G1
+  NUM_ENVS: "4096"
+  MAX_ITERATIONS: "1500"
+  TENSORBOARD_HOST: mjlab.4ai.systems

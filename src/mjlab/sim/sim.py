@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, cast
@@ -150,10 +151,20 @@ class SimulationCfg:
 
   Constraint arrays are batched by world: no world may have more than njmax
   constraints. If None, a heuristic value is used."""
-  ls_parallel: bool = True  # Boosts perf quite noticeably.
+  ls_parallel: bool | None = None
+  """Deprecated and ignored. Parallel linesearch was removed in MuJoCo Warp 3.10."""
   contact_sensor_maxmatch: int = 64
   mujoco: MujocoCfg = field(default_factory=MujocoCfg)
   nan_guard: NanGuardCfg = field(default_factory=NanGuardCfg)
+
+  def __post_init__(self) -> None:
+    if self.ls_parallel is not None:
+      warnings.warn(
+        "SimulationCfg.ls_parallel is deprecated and ignored; parallel "
+        "linesearch was removed in MuJoCo Warp 3.10.",
+        DeprecationWarning,
+        stacklevel=2,
+      )
 
 
 class Simulation:
@@ -197,7 +208,6 @@ class Simulation:
     # MJWarp model and data.
     with wp.ScopedDevice(self.wp_device):
       self._wp_model = mjwarp.put_model(self._mj_model)
-      self._wp_model.opt.ls_parallel = cfg.ls_parallel
       self._wp_model.opt.contact_sensor_maxmatch = cfg.contact_sensor_maxmatch
 
       self._wp_data = mjwarp.put_data(

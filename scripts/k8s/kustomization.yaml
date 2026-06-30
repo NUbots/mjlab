@@ -1,0 +1,34 @@
+# AI-Cluster 4-GPU mjlab training with PVC git workspace and TensorBoard.
+#
+# Uses the public image ghcr.io/mujocolab/mjlab:latest (CUDA, uv, Python, EGL).
+# Training code is cloned onto the workspace PVC and synced with uv at Job start.
+#
+# Deploy:
+#   kubectl apply -k scripts/k8s/
+#
+# Re-run training after pushing code:
+#   kubectl -n mjlab delete job mjlab-train --ignore-not-found
+#   kubectl apply -k scripts/k8s/
+#
+# TensorBoard: https://mjlab.4ai.systems
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - pvc-workspace.yaml
+  - pvc-logs.yaml
+  - configmap.yaml
+  - tensorboard.yaml
+  - train-job.yaml
+
+configMapGenerator:
+  - name: mjlab-entrypoint
+    namespace: mjlab
+    files:
+      - entrypoint.sh
+    options:
+      disableNameSuffixHash: true
+
+# Uncomment after copying secret-git.yaml.example to secret-git.yaml:
+#  - secret-git.yaml
