@@ -1,5 +1,12 @@
 """NUbots Nugus velocity environment confiurations."""
 
+from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING, Literal
+
+import torch
+
 from mjlab.asset_zoo.robots import (
   NUGUS_ACTION_SCALE,
   NUGUS_MOTOR_JOINT_REGEX,
@@ -7,8 +14,10 @@ from mjlab.asset_zoo.robots import (
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
+from mjlab.envs.mdp import dr
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
+from mjlab.managers.event_manager import EventTermCfg, requires_model_fields
 from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import (
@@ -20,14 +29,200 @@ from mjlab.sensor import (
   TerrainHeightSensorCfg,
 )
 from mjlab.tasks.velocity import mdp
+from mjlab.tasks.velocity.config.nugus.rl_cfg import nubots_nugus_ppo_runner_cfg
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 
+if TYPE_CHECKING:
+  from mjlab.envs import ManagerBasedRlEnv
+
+_NUM_STEPS_PER_ENV = 24
+_DEFAULT_MAX_ITERATIONS = nubots_nugus_ppo_runner_cfg().max_iterations
+_DEFAULT_GAIT_PERIOD = 0.7
+_DEFAULT_JOULE_W = -3e-4
+_DEFAULT_PHASE_C_FRAC = 0.6
+_DEFAULT_EFFORT_LO = 0.7
+_DEFAULT_EFFORT_HI = 1.2
+_PHASE_C_JOINT_ACC_W = -1e-4
+_PHASE_C_TORQUE_RATE_W = -1e-3
+_PHASE_C_SOFT_LANDING_W = -0.01
+_PHASE_C_BASE_HEIGHT_W = 0.3
+
+
+def _env_float(name: str, default: float) -> float:
+  raw = os.environ.get(name)
+  return default if raw is None else float(raw)
+
+
+def _env_int(name: str, default: int) -> int:
+  raw = os.environ.get(name)
+  return default if raw is None else int(raw)
+
+
+def _phase_steps(max_iterations: int, phase_c_frac: float) -> tuple[int, int, int]:
+  """Return P1, P2, P3 curriculum thresholds in common_step_counter units."""
+  total = max_iterations * _NUM_STEPS_PER_ENV
+  p1 = int(0.25 * total)
+  p2 = int(phase_c_frac * total)
+  p3 = int(0.85 * total)
+  return p1, p2, p3
+
+
+@requires_model_fields("actuator_forcerange")
+def effort_limit_drift(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  drift_factor: float,
+  asset_cfg: SceneEntityCfg,
+) -> None:
+  """Gradually scale actuator effort limits down over an episode."""
+  from mjlab.entity import Entity
+
+  asset: Entity = env.scene[asset_cfg.name]
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
+  else:
+    env_ids = env_ids.to(env.device, dtype=torch.int)
+
+  joint_names = asset_cfg.joint_names
+  if joint_names is None:
+    raise ValueError("effort_limit_drift requires joint_names on asset_cfg")
+  actuator_ids, _ = asset.find_actuators(joint_names)
+  for actuator_index in actuator_ids:
+    actuator = asset.actuators[actuator_index]
+    ctrl_ids = actuator.global_ctrl_ids
+    env.sim.model.actuator_forcerange[env_ids[:, None], ctrl_ids, 0] *= drift_factor
+    env.sim.model.actuator_forcerange[env_ids[:, None], ctrl_ids, 1] *= drift_factor
+
+
+def _add_phase_c_curriculum(
+  cfg: ManagerBasedRlEnvCfg,
+  *,
+  p2: int,
+  p3: int,
+  joule_w: float,
+) -> None:
+  """Anneal smoothness + energy penalties in during Phase C."""
+  phase_c_stages = [
+    {"step": 0, "weight": 0.0},
+    {"step": p2, "weight": 0.0},
+    {"step": p3, "weight": None},  # placeholder replaced per term
+  ]
+  for reward_name, peak_weight in (
+    ("joule_heating", joule_w),
+    ("joint_acc_l2", _PHASE_C_JOINT_ACC_W),
+    ("torque_rate", _PHASE_C_TORQUE_RATE_W),
+    ("soft_landing", _PHASE_C_SOFT_LANDING_W),
+    ("base_height", _PHASE_C_BASE_HEIGHT_W),
+  ):
+    stages = [
+      {"step": s["step"], "weight": peak_weight if s["weight"] is None else s["weight"]}
+      for s in phase_c_stages
+    ]
+    cfg.curriculum[f"{reward_name}_rampup"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={"reward_name": reward_name, "stages": stages},
+    )
+
+
+def _add_gait_curriculum(
+  cfg: ManagerBasedRlEnvCfg,
+  *,
+  variant: Literal["clock_anneal", "self_paced", "clock_persist"],
+  p1: int,
+  p2: int,
+  p3: int,
+) -> None:
+  """Configure staged gait handoff curriculums for the selected variant."""
+  if variant == "clock_anneal":
+    cfg.curriculum["clock_anneal"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "foot_swing_height",
+        "stages": [
+          {"step": 0, "weight": 0.75},
+          {"step": p1, "weight": 0.4},
+          {"step": p2, "weight": 0.1},
+          {"step": p3, "weight": 0.0},
+        ],
+      },
+    )
+    cfg.curriculum["selfpaced_rampup"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "foot_swing_height_landing",
+        "stages": [
+          {"step": 0, "weight": 0.0},
+          {"step": p1, "weight": -0.5},
+          {"step": p2, "weight": -1.0},
+        ],
+      },
+    )
+    cfg.curriculum["air_time_rampup"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "air_time",
+        "stages": [
+          {"step": 0, "weight": 0.0},
+          {"step": p1, "weight": 0.04},
+          {"step": p2, "weight": 0.08},
+        ],
+      },
+    )
+  elif variant == "self_paced":
+    cfg.rewards["foot_swing_height"].weight = 0.0
+    cfg.curriculum["selfpaced_rampup"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "foot_swing_height_landing",
+        "stages": [
+          {"step": 0, "weight": 0.0},
+          {"step": p1, "weight": -0.5},
+          {"step": p2, "weight": -1.0},
+        ],
+      },
+    )
+    cfg.curriculum["air_time_rampup"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "air_time",
+        "stages": [
+          {"step": 0, "weight": 0.0},
+          {"step": p1, "weight": 0.04},
+          {"step": p2, "weight": 0.08},
+        ],
+      },
+    )
+  elif variant == "clock_persist":
+    cfg.rewards["foot_swing_height"].weight = 0.75
+    cfg.rewards["foot_swing_height_landing"].weight = 0.0
+    cfg.rewards["air_time"].weight = 0.08
+
 
 def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Create NUbots Nugus rough terrain velocity configuration."""
+  variant_raw = os.environ.get("MJLAB_VARIANT", "clock_anneal")
+  if variant_raw not in ("clock_anneal", "self_paced", "clock_persist"):
+    raise ValueError(
+      f"MJLAB_VARIANT must be clock_anneal, self_paced, or clock_persist; got {variant_raw!r}"
+    )
+  variant: Literal["clock_anneal", "self_paced", "clock_persist"] = variant_raw  # type: ignore[assignment]
+
+  gait_period = _env_float("GAIT_PERIOD", _DEFAULT_GAIT_PERIOD)
+  joule_w = _env_float("JOULE_W", _DEFAULT_JOULE_W)
+  if joule_w > 0:
+    joule_w = -joule_w
+  phase_c_frac = _env_float("PHASE_C_FRAC", _DEFAULT_PHASE_C_FRAC)
+  effort_lo = _env_float("EFFORT_LO", _DEFAULT_EFFORT_LO)
+  effort_hi = _env_float("EFFORT_HI", _DEFAULT_EFFORT_HI)
+  max_iterations = _env_int("MAX_ITERATIONS", _DEFAULT_MAX_ITERATIONS)
+  p1, p2, p3 = _phase_steps(max_iterations, phase_c_frac)
+
   cfg = make_velocity_env_cfg()
+
+  if "SEED" in os.environ:
+    cfg.seed = int(os.environ["SEED"])
 
   # Nugus policy should not observe base linear velocity.
   cfg.observations["actor"].terms.pop("base_lin_vel", None)
@@ -82,12 +277,19 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       if term is not None:
         term.params["asset_cfg"] = motor_cfg()
   cfg.events["reset_robot_joints"].params["asset_cfg"] = motor_cfg()
-  for reward_name in ("pose", "actuation_power"):
+  for reward_name in (
+    "pose",
+    "actuation_power",
+    "joule_heating",
+    "joint_acc_l2",
+    "torque_rate",
+  ):
     cfg.rewards[reward_name].params["asset_cfg"].joint_names = (
       NUGUS_MOTOR_JOINT_REGEX,
     )
   # joint_pos_limits has no asset_cfg param by default; add one scoped to motors.
   cfg.rewards["dof_pos_limits"].params["asset_cfg"] = motor_cfg()
+  cfg.rewards["base_height"].params["asset_cfg"].body_names = ("torso",)
 
   # Set raycast sensor frame to Nugus torso.
   for sensor in cfg.scene.sensors or ():
@@ -144,7 +346,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
-  joint_pos_action.scale = NUGUS_ACTION_SCALE  # Note: This is really small (0.05)-> seems to correspond to a less falling over early on in training.
+  joint_pos_action.scale = NUGUS_ACTION_SCALE  # ~0.245 rad (0.25 * e/s * 5).
   cfg.viewer.body_name = "torso"
 
   twist_cmd = cfg.commands["twist"]
@@ -153,6 +355,45 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
   cfg.events["base_com"].params["asset_cfg"].body_names = ("torso",)
+
+  # Per-servo strength / stiction DR — re-sample each episode.
+  cfg.events["pd_gains"].mode = "reset"
+  cfg.events["effort_limits"] = EventTermCfg(
+    mode="reset",
+    func=dr.effort_limits,
+    params={
+      "asset_cfg": motor_cfg(),
+      "operation": "scale",
+      "effort_limit_range": (effort_lo, effort_hi),
+    },
+  )
+  cfg.events["joint_friction"] = EventTermCfg(
+    mode="reset",
+    func=dr.joint_friction,
+    params={
+      "asset_cfg": motor_cfg(),
+      "operation": "scale",
+      "ranges": (0.8, 1.2),
+    },
+  )
+  cfg.events["joint_armature"] = EventTermCfg(
+    mode="reset",
+    func=dr.joint_armature,
+    params={
+      "asset_cfg": motor_cfg(),
+      "operation": "scale",
+      "ranges": (0.8, 1.2),
+    },
+  )
+  cfg.events["effort_drift"] = EventTermCfg(
+    mode="interval",
+    interval_range_s=(2.0, 4.0),
+    func=effort_limit_drift,
+    params={
+      "asset_cfg": motor_cfg(),
+      "drift_factor": 0.995,
+    },
+  )
 
   # Rationale for std values:
   # - Knees/hip_pitch get the loosest std to allow natural leg bending during stride.
@@ -233,11 +474,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # value commands a slower cadence, which is the main knob for "larger, slower
   # steps"; ``swing_ratio`` is the swing fraction of each cycle. The obs and
   # reward MUST share ``GAIT_PERIOD``.
-  GAIT_PERIOD = 0.7  # seconds per full gait cycle; raise for a slower gait.
   clock_obs = ObservationTermCfg(
     func=mdp.gait_clock,
     params={
-      "period": GAIT_PERIOD,
+      "period": gait_period,
       "command_name": "twist",
       "command_threshold": 0.05,
     },
@@ -250,10 +490,21 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   swing_height.params = {
     "height_sensor_name": "foot_height_scan",
     "target_height": 0.08,
-    "period": GAIT_PERIOD,
+    "period": gait_period,
     "swing_ratio": 0.45,
     "std": 0.05,
     "profile": "sin",
+    "command_name": "twist",
+    "command_threshold": 0.05,
+  }
+
+  # Self-paced sparse swing-height (peak-at-landing) handoff target.
+  landing_height = cfg.rewards["foot_swing_height_landing"]
+  landing_height.weight = 0.0
+  landing_height.params = {
+    "sensor_name": "feet_ground_contact",
+    "height_sensor_name": "foot_height_scan",
+    "target_height": 0.08,
     "command_name": "twist",
     "command_threshold": 0.05,
   }
@@ -274,13 +525,21 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["body_ang_vel"].weight = -0.05
   cfg.rewards["angular_momentum"].weight = -0.01
-  cfg.rewards["air_time"].weight = 0.08
+  cfg.rewards["air_time"].weight = 0.0
   cfg.rewards["actuation_power"].weight = 0.0  # Disable (debugging)
   cfg.rewards["cot_proxy"].weight = -0.00  # Disable (debugging)
   cfg.rewards["gait_phase_regularity"].weight = -0.1
   cfg.rewards["limb_symmetry"].weight = -0.0  # Disable (debugging)
   cfg.rewards["feet_distance"].weight = -0.1
   cfg.rewards["foot_flat"].weight = -0.5  # Encourage flat-footed, level swing.
+  cfg.rewards["joule_heating"].weight = 0.0
+  cfg.rewards["joint_acc_l2"].weight = 0.0
+  cfg.rewards["torque_rate"].weight = 0.0
+  cfg.rewards["soft_landing"].weight = 0.0
+  cfg.rewards["base_height"].weight = 0.0
+
+  _add_gait_curriculum(cfg, variant=variant, p1=p1, p2=p2, p3=p3)
+  _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
 
   # Apply play mode overrides.
   if play:

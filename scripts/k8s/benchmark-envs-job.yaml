@@ -1,0 +1,69 @@
+# Re-run env sweep (single GPU), then read results:
+#   kubectl -n mjlab delete job mjlab-benchmark-envs --ignore-not-found
+#   kubectl apply -f scripts/k8s/benchmark-envs-job.yaml
+#   kubectl -n mjlab wait --for=condition=complete job/mjlab-benchmark-envs --timeout=30m
+#   kubectl -n mjlab logs job/mjlab-benchmark-envs
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mjlab-benchmark-envs
+  namespace: mjlab
+  labels:
+    app.kubernetes.io/name: mjlab-benchmark-envs
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mjlab-benchmark-envs
+    spec:
+      restartPolicy: Never
+      runtimeClassName: nvidia
+      priorityClassName: training-medium
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: benchmark
+          image: ghcr.io/mujocolab/mjlab:latest
+          imagePullPolicy: Always
+          command:
+            - /scripts/benchmark-envs.sh
+          env:
+            - name: MUJOCO_GL
+              value: egl
+            - name: UV_LINK_MODE
+              value: copy
+            - name: TASK
+              value: Mjlab-Velocity-Flat-Nubots-Nugus
+            - name: NUM_ENVS_SWEEP
+              value: "4096 8192 12288 16384 20480"
+          envFrom:
+            - configMapRef:
+                name: mjlab-train-config
+          resources:
+            requests:
+              nvidia.com/gpu: "1"
+            limits:
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: scripts
+              mountPath: /scripts
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: mjlab-workspace
+        - name: scripts
+          configMap:
+            name: mjlab-benchmark-envs
+            defaultMode: 0755
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi

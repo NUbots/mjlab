@@ -1,14 +1,18 @@
-# AI-Cluster 4-GPU mjlab training with PVC git workspace and TensorBoard.
+# AI-Cluster mjlab training with Volcano queue, PVC git workspace, and TensorBoard.
 #
 # Uses the public image ghcr.io/mujocolab/mjlab:latest (CUDA, uv, Python, EGL).
 # Training code is cloned onto the workspace PVC and synced with uv at Job start.
 #
-# Deploy:
+# Deploy base stack (namespace, PVCs, queue, config, TensorBoard):
 #   kubectl apply -k scripts/k8s/
 #
-# Re-run training after pushing code:
-#   kubectl -n mjlab delete job mjlab-train --ignore-not-found
+# Single manual run (1 GPU):
+#   kubectl -n mjlab delete vcjob mjlab-train --ignore-not-found
 #   kubectl apply -k scripts/k8s/
+#
+# Grid-search matrix (12 cells, 1 GPU each, queued across 8 GPUs):
+#   ./scripts/k8s/gen-gridsearch.sh --dry-run
+#   ./scripts/k8s/gen-gridsearch.sh -o /tmp/mjlab-gridsearch && kubectl apply -f /tmp/mjlab-gridsearch/
 #
 # TensorBoard: https://mjlab.4ai.systems
 apiVersion: kustomize.config.k8s.io/v1beta1
@@ -19,6 +23,7 @@ resources:
   - pvc-workspace.yaml
   - pvc-logs.yaml
   - configmap.yaml
+  - volcano-queue.yaml
   - tensorboard.yaml
   - train-job.yaml
 
@@ -29,6 +34,16 @@ configMapGenerator:
       - entrypoint.sh
     options:
       disableNameSuffixHash: true
+  - name: mjlab-benchmark-envs
+    namespace: mjlab
+    files:
+      - benchmark-envs.sh
+    options:
+      disableNameSuffixHash: true
 
 # Uncomment after copying secret-git.yaml.example to secret-git.yaml:
 #  - secret-git.yaml
+#
+# W&B: create the secret with kubectl (do not commit keys):
+#   kubectl -n mjlab create secret generic mjlab-wandb \
+#     --from-literal=WANDB_API_KEY=your-key-here

@@ -645,10 +645,10 @@ def feet_lateral_distance_cost(
   isolating lateral spread from fore-aft offset during a stride.
 
 
-  The penalty shape is ``exp(sharpness * shortfall) - 1`` where 
-  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``. 
-  When nominal_distance == lateral_distance the cost is zero. For 
-  anything else, the cost grows exponentially with the difference. 
+  The penalty shape is ``exp(sharpness * shortfall) - 1`` where
+  ``shortfall = max(0, nominal_distance - lateral_distance)``. Feet
+  spread wider than nominal incur no cost, so natural foot crossing in
+  turns is not penalized.
   """
   asset: Entity = env.scene[asset_cfg.name]
   foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
@@ -670,7 +670,7 @@ def feet_lateral_distance_cost(
 
   pair_distance = torch.abs(delta_b[..., 1])  # body-Y component [B, P]
 
-  shortfall = torch.clamp(abs(nominal_distance - pair_distance), min=0.0)
+  shortfall = torch.clamp(nominal_distance - pair_distance, min=0.0)
   cost = torch.sum(torch.exp(sharpness * shortfall) - 1.0, dim=1)
 
   min_pair_distance = torch.amin(pair_distance, dim=1)
@@ -682,6 +682,63 @@ def feet_lateral_distance_cost(
     max_pair_distance
   )
   return cost
+
+
+def base_height_tracking(
+  env: ManagerBasedRlEnv,
+  target_height: float,
+  std: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Reward maintaining target torso height while locomoting.
+
+  Encourages an upright posture and discourages crouching that makes
+  shuffling easier. Only active when the velocity command exceeds
+  ``command_threshold``.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  height = asset.data.root_link_pos_w[:, 2]
+  reward = torch.exp(-torch.square(height - target_height) / std**2)
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      total_command = linear_norm + angular_norm
+      active = (total_command > command_threshold).float()
+      reward = reward * active
+  env.extras["log"]["Metrics/base_height_mean"] = torch.mean(height)
+  return reward
+
+
+class actuator_torque_rate_l2:
+  """Penalize rapid actuator torque changes (shuffle reversals)."""
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    asset: Entity = env.scene[cfg.params["asset_cfg"].name]
+    _, actuator_ids = asset.find_actuators(
+      cfg.params["asset_cfg"].joint_names,
+    )
+    self._actuator_ids = torch.tensor(actuator_ids, device=env.device, dtype=torch.long)
+    self._prev_tau = torch.zeros(
+      (env.num_envs, len(actuator_ids)), device=env.device, dtype=torch.float32
+    )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    tau = asset.data.actuator_force[:, self._actuator_ids]
+    cost = torch.sum(torch.square(tau - self._prev_tau), dim=1)
+    self._prev_tau = tau.clone()
+    return cost
+
+  def reset(self, env_ids: torch.Tensor) -> None:
+    self._prev_tau[env_ids] = 0.0
 
 
 def soft_landing(

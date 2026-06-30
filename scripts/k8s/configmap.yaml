@@ -2,6 +2,12 @@
 #   kubectl -n mjlab edit configmap mjlab-train-config
 #
 # TensorBoard UI: https://mjlab.4ai.systems (see tensorboard.yaml HTTPRoute)
+#
+# Iteration scaling (1-GPU Volcano jobs, 8192 envs/GPU):
+#   cold start (20k iters @ 2048 on 1 GPU) -> MAX_ITERATIONS = 10240000 / NUM_ENVS  (8192 => 1250)
+#   hot start  (5k iters @ 2048 on 1 GPU)  -> MAX_ITERATIONS = 2560000 / NUM_ENVS   (8192 => 312)
+#
+# Grid-search matrix overrides per-cell env vars are set by gen-gridsearch.sh.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,8 +18,20 @@ data:
   GIT_REF: add-phase-clock
   GIT_COMMIT: ""
   PYTHON_VERSION: "3.13"
-  TASK: Mjlab-Velocity-Flat-Unitree-G1
-  NUM_ENVS: "4096"
-  MAX_ITERATIONS: "1500"
-  GPU_IDS: all
+  TASK: Mjlab-Velocity-Flat-Nubots-Nugus
+  # Per-GPU env count. Benchmark sweet spot on RTX 4090 (2026-06-30):
+  # 8192 env_sps=139611 (peak), 12288=127990, 16384=112742, 20480=OOM.
+  NUM_ENVS: "8192"
+  # Cold start: 20k iters @ 2048 on 1 GPU => 10240000 / NUM_ENVS.
+  MAX_ITERATIONS: "1250"
+  GPU_IDS: "0"
+  LOGGER: wandb
+  EXPERIMENT_NAME: nugus_gridsearch
+  RUN_NAME: ""
+  WANDB_PROJECT: mjlab
+  WANDB_TAGS: nugus,k8s,gridsearch
+  # Hot start: set RESUME=true and WANDB_RUN_PATH=entity/project/runs/run_id
+  RESUME: "false"
+  WANDB_RUN_PATH: ""
+  WANDB_CHECKPOINT_NAME: ""
   TENSORBOARD_HOST: mjlab.4ai.systems

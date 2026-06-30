@@ -1,0 +1,14 @@
+# Volcano queue for mjlab training. Caps concurrent GPU use across both 4-GPU nodes.
+# Requires Volcano installed (scheduling.volcano.sh/v1beta1 Queue CRD).
+#
+# Apply with the rest of the stack:
+#   kubectl apply -k scripts/k8s/
+apiVersion: scheduling.volcano.sh/v1beta1
+kind: Queue
+metadata:
+  name: mjlab-train
+spec:
+  weight: 1
+  reclaimable: true
+  capability:
+    nvidia.com/gpu: "8"

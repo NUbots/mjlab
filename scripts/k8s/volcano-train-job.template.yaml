@@ -1,16 +1,15 @@
-# Single-GPU Volcano training job for AI-Cluster (manual runs).
-# Grid-search matrix: use gen-gridsearch.sh instead of applying this directly.
-#
-# Re-run after code changes:
-#   kubectl -n mjlab delete vcjob mjlab-train --ignore-not-found
-#   kubectl apply -k scripts/k8s/
+# Volcano Job template for mjlab grid-search cells. Do not apply directly.
+# Generate manifests with scripts/k8s/gen-gridsearch.sh (see --help).
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: mjlab-train
+  name: ${JOB_NAME}
   namespace: mjlab
   labels:
     app.kubernetes.io/name: mjlab-train
+    app.kubernetes.io/component: gridsearch
+    mjlab/gridsearch: "true"
+    mjlab/variant: ${MJLAB_VARIANT}
 spec:
   schedulerName: volcano
   queue: mjlab-train
@@ -25,6 +24,9 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: mjlab-train
+            app.kubernetes.io/component: gridsearch
+            mjlab/gridsearch: "true"
+            mjlab/variant: ${MJLAB_VARIANT}
         spec:
           restartPolicy: Never
           runtimeClassName: nvidia
@@ -44,6 +46,30 @@ spec:
                   value: egl
                 - name: UV_LINK_MODE
                   value: copy
+                - name: MJLAB_VARIANT
+                  value: "${MJLAB_VARIANT}"
+                - name: JOULE_W
+                  value: "${JOULE_W}"
+                - name: PHASE_C_FRAC
+                  value: "${PHASE_C_FRAC}"
+                - name: GAIT_PERIOD
+                  value: "${GAIT_PERIOD}"
+                - name: EFFORT_LO
+                  value: "${EFFORT_LO}"
+                - name: EFFORT_HI
+                  value: "${EFFORT_HI}"
+                - name: SEED
+                  value: "${SEED}"
+                - name: LOGGER
+                  value: "${LOGGER}"
+                - name: EXPERIMENT_NAME
+                  value: "${EXPERIMENT_NAME}"
+                - name: RUN_NAME
+                  value: "${RUN_NAME}"
+                - name: WANDB_PROJECT
+                  value: "${WANDB_PROJECT}"
+                - name: WANDB_TAGS
+                  value: "${WANDB_TAGS}"
                 - name: GPU_IDS
                   value: "0"
               envFrom:

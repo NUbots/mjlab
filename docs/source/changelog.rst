@@ -8,6 +8,9 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added Kubernetes manifest bundle under ``scripts/k8s/`` for 4-GPU single-node
+  training with a PVC-backed git workspace, the public GHCR runtime image,
+  TensorBoard, and HTTPRoute (AI-Cluster).
 - Added a ``feet_swing_height_clock`` velocity reward and a matching
   ``gait_clock`` observation. An independent, fixed-frequency gait clock (not
   controlled by the policy) drives a desired per-foot swing-height arc, densely
@@ -30,10 +33,51 @@ Added
   task observations, rewards, and reset events are scoped to motor joints
   only via ``NUGUS_MOTOR_JOINT_REGEX`` so the passive joints do not appear
   in the policy's view.
+- Added a ``staged_on_plateau`` curriculum term that advances reward
+  stages when a tracked metric (read from ``env.extras["log"]`` or a
+  reward term's episodic sum) stops improving, using an EMA with
+  configurable ``patience``, ``min_steps_per_stage``, and
+  ``improvement_threshold``. Complements the step-based
+  ``reward_curriculum`` for plateau-driven scheduling.
+- Added a staged gait curriculum for the NUbots Nugus velocity task that
+  uses the fixed-frequency gait clock as a Phase-A scaffold and anneals
+  the clock reward to zero while ramping up a self-paced
+  ``feet_swing_height`` landing reward (the ``gait_clock`` observation is
+  retained for the whole run, only the reward is annealed). The variant
+  and phase boundaries are selectable via environment variables
+  (``MJLAB_VARIANT`` of ``clock_anneal``/``self_paced``/``clock_persist``,
+  ``JOULE_W``, ``PHASE_C_FRAC``, ``GAIT_PERIOD``, ``EFFORT_LO``/``EFFORT_HI``,
+  ``SEED``) so a grid search can vary strategy without code edits.
+- Added velocity rewards ``actuator_torque_rate_l2`` (penalizes rapid
+  torque reversals ``sum (tau_t - tau_{t-1})^2``) and ``base_height``
+  tracking, plus a one-sided ``feet_lateral_distance_cost`` that only
+  penalizes feet that are too close together.
+- Added a Volcano-scheduled k8s grid-search harness under ``scripts/k8s/``
+  (a ``mjlab-train`` queue, a single-GPU Volcano Job template, and a
+  ``gen-gridsearch.sh`` generator) that fans a strategy × scalar-knob
+  matrix across multiple nodes, tagging each run and writing to a shared
+  ``experiment_name`` so one TensorBoard/W&B shows all runs.
 
 Changed
 ^^^^^^^
 
+- The NUbots Nugus velocity energy/smoothness penalties (``joule_heating``
+  via ``joint_torques_l2``, ``joint_acc_l2``, ``torque_rate``,
+  ``soft_landing``, ``base_height``) now start at zero and are annealed in
+  during the final curriculum phase. The existing mechanical-work energy
+  proxy (``clamp(tau*qd, min=0)``) is velocity-weighted and so under-counts
+  a low-speed shuffle; the velocity-independent Joule term (``~ tau^2``)
+  penalizes the high oscillating torques a shuffle actually produces.
+- Expanded per-servo domain randomization for NUbots Nugus: added
+  ``dr.effort_limits`` (per-servo torque strength), ``dr.joint_friction``,
+  and ``dr.joint_armature`` in ``reset`` mode, moved ``dr.pd_gains`` to
+  ``reset`` mode (re-sampled per episode), and added an interval-mode
+  effort-limit drift to model intra-episode strength loss (heating/sag).
+- Narrowed the early velocity command curriculum to a forward-biased range
+  with reduced lateral/yaw diversity, widening in later stages, to make a
+  clean forward walk easier to learn first.
+- Raised the velocity ``soft_landing`` default weight from ``-1e-5`` (which
+  was effectively inert) to a meaningful value.
 - Added ``power`` and ``only_below`` parameters to the ``feet_clearance``
   velocity reward. ``power=2`` uses a squared height error (stronger gradient
   far below target) and ``only_below=True`` penalizes only feet below the

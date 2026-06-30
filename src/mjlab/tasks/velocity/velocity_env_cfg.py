@@ -329,6 +329,32 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
     "action_acc_l2": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.1),
+    "joint_acc_l2": RewardTermCfg(
+      func=mdp.joint_acc_l2,
+      weight=0.0,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    "joule_heating": RewardTermCfg(
+      func=mdp.joint_torques_l2,
+      weight=0.0,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    "torque_rate": RewardTermCfg(
+      func=mdp.actuator_torque_rate_l2,
+      weight=0.0,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    "base_height": RewardTermCfg(
+      func=mdp.base_height_tracking,
+      weight=0.0,
+      params={
+        "target_height": 0.47,
+        "std": math.sqrt(0.05),
+        "asset_cfg": SceneEntityCfg("robot", body_names=()),
+        "command_name": "twist",
+        "command_threshold": 0.05,
+      },
+    ),
     "actuation_power": RewardTermCfg(
       func=mdp.electrical_power_cost,
       weight=0.0,  # Override per-robot.
@@ -395,6 +421,17 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_threshold": 0.05,
       },
     ),
+    "foot_swing_height_landing": RewardTermCfg(
+      func=mdp.feet_swing_height,
+      weight=0.0,
+      params={
+        "sensor_name": "feet_ground_contact",
+        "height_sensor_name": "foot_height_scan",
+        "target_height": 0.08,
+        "command_name": "twist",
+        "command_threshold": 0.05,
+      },
+    ),
     "foot_slip": RewardTermCfg(
       func=mdp.feet_slip,
       weight=-1.0,
@@ -427,7 +464,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "soft_landing": RewardTermCfg(
       func=mdp.soft_landing,
-      weight=-1e-5,
+      weight=-0.01,
       params={
         "sensor_name": "feet_ground_contact",
         "command_name": "twist",
@@ -469,20 +506,20 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "velocity_stages": [
           {
             "step": 0,
-            "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.1, 0.1),
+            "lin_vel_x": (0.0, 0.7),
+            "lin_vel_y": (-0.05, 0.05),
             "ang_vel_z": (-0.05, 0.05),
           },
           {
             "step": 9000 * 24,
-            "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.2, 0.2),
-            "ang_vel_z": (-0.1, 0.1),
+            "lin_vel_x": (0.0, 0.7),
+            "lin_vel_y": (-0.15, 0.15),
+            "ang_vel_z": (-0.15, 0.15),
           },
           {
             "step": 12000 * 24,
-            "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.1, 0.1),
+            "lin_vel_x": (-0.3, 0.8),
+            "lin_vel_y": (-0.3, 0.3),
             "ang_vel_z": (-0.5, 0.5),
           },
         ],
