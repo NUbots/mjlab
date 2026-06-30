@@ -179,6 +179,9 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       entity_name="robot",
       resampling_time_range=(3.0, 8.0),
       rel_standing_envs=0.1,
+      rel_stop_envs=0.0,
+      stop_ramp_time=0.0,
+      stop_settle_time=0.0,
       rel_heading_envs=0.3,
       rel_forward_envs=0.2,
       heading_command=True,
@@ -314,6 +317,26 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "std_running": {},  # Set per-robot.
         "walking_threshold": 0.05,
         "running_threshold": 1.5,
+      },
+    ),
+    "stand_still_pose": RewardTermCfg(
+      func=mdp.stand_still_pose_deviation,
+      weight=0.0,
+      params={
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+        "command_name": "twist",
+        "command_threshold": 0.02,
+        "grace_steps": 15,
+      },
+    ),
+    "stand_still_motion": RewardTermCfg(
+      func=mdp.stand_still_joint_velocity,
+      weight=0.0,
+      params={
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+        "command_name": "twist",
+        "command_threshold": 0.02,
+        "grace_steps": 15,
       },
     ),
     "body_ang_vel": RewardTermCfg(

@@ -948,3 +948,125 @@ class variable_posture:
     error_squared = torch.square(current_joint_pos - desired_joint_pos)
 
     return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
+
+
+def _is_commanded_to_stand(command: torch.Tensor, threshold: float) -> torch.Tensor:
+  """True when every velocity axis is below threshold (not merely their sum).
+
+  Using ``max(linear, angular)`` avoids treating slow strafing (non-zero lateral
+  command with zero yaw) as a stand-still command.
+  """
+  linear_norm = torch.norm(command[:, :2], dim=1)
+  angular_norm = torch.abs(command[:, 2])
+  return torch.max(linear_norm, angular_norm) < threshold
+
+
+def _apply_stand_still_gate(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  standing: torch.Tensor,
+) -> torch.Tensor:
+  """Drop standing envs that are in a deceleration ramp (not yet settled)."""
+  from mjlab.tasks.velocity.mdp.velocity_command import UniformVelocityCommand
+
+  term = env.command_manager.get_term(command_name)
+  if isinstance(term, UniformVelocityCommand):
+    return standing & ~term.is_stop_ramping
+  return standing
+
+
+class stand_still_pose_deviation:
+  """Penalize deviation from the default standing pose when commanded to stop.
+
+  Unlike :class:`variable_posture`, this uses an L1 sum so the gradient stays
+  strong far from the target pose. Active only when the velocity command is
+  near zero; a per-env grace counter defers the penalty until the command has
+  been below threshold for ``grace_steps`` steps so the robot can decelerate
+  first.
+  """
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    asset: Entity = env.scene[cfg.params["asset_cfg"].name]
+    default_joint_pos = asset.data.default_joint_pos
+    assert default_joint_pos is not None
+    self._default_joint_pos = default_joint_pos
+
+    joint_ids, _ = asset.find_joints(cfg.params["asset_cfg"].joint_names)
+    self._joint_ids = torch.tensor(joint_ids, device=env.device, dtype=torch.long)
+    self._grace_counter = torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    command_name: str,
+    command_threshold: float = 0.02,
+    grace_steps: int = 15,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    assert command is not None
+
+    standing = _apply_stand_still_gate(
+      env,
+      command_name,
+      _is_commanded_to_stand(command, command_threshold),
+    )
+
+    self._grace_counter = torch.where(
+      standing,
+      self._grace_counter + 1,
+      torch.zeros_like(self._grace_counter),
+    )
+
+    joint_pos = asset.data.joint_pos[:, self._joint_ids]
+    default_pos = self._default_joint_pos[:, self._joint_ids]
+    deviation = torch.sum(torch.abs(joint_pos - default_pos), dim=1)
+
+    active = standing & (self._grace_counter >= grace_steps)
+    return deviation * active.float()
+
+  def reset(self, env_ids: torch.Tensor) -> None:
+    self._grace_counter[env_ids] = 0
+
+
+class stand_still_joint_velocity:
+  """Penalize joint motion while the velocity command is near zero."""
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    asset: Entity = env.scene[cfg.params["asset_cfg"].name]
+    joint_ids, _ = asset.find_joints(cfg.params["asset_cfg"].joint_names)
+    self._joint_ids = torch.tensor(joint_ids, device=env.device, dtype=torch.long)
+    self._grace_counter = torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    command_name: str,
+    command_threshold: float = 0.02,
+    grace_steps: int = 15,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    assert command is not None
+
+    standing = _apply_stand_still_gate(
+      env,
+      command_name,
+      _is_commanded_to_stand(command, command_threshold),
+    )
+
+    self._grace_counter = torch.where(
+      standing,
+      self._grace_counter + 1,
+      torch.zeros_like(self._grace_counter),
+    )
+
+    joint_vel = asset.data.joint_vel[:, self._joint_ids]
+    motion = torch.sum(torch.square(joint_vel), dim=1)
+    active = standing & (self._grace_counter >= grace_steps)
+    return motion * active.float()
+
+  def reset(self, env_ids: torch.Tensor) -> None:
+    self._grace_counter[env_ids] = 0

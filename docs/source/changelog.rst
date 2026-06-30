@@ -57,9 +57,19 @@ Added
   ``gen-gridsearch.sh`` generator) that fans a strategy × scalar-knob
   matrix across multiple nodes, tagging each run and writing to a shared
   ``experiment_name`` so one TensorBoard/W&B shows all runs.
+- Added stand-still shaping for velocity tasks: an L1 pose-deviation penalty
+  with a settle grace, a joint-velocity penalty while standing, and an
+  optional decelerate-and-settle command tail on walking segments. Enabled
+  for NUbots Nugus with ``STAND_W`` as a grid-search knob alongside
+  ``JOULE_W`` and ``PHASE_C_FRAC``.
 
 Changed
 ^^^^^^^
+
+- Stand-still velocity rewards now gate on ``max(linear, angular) < threshold``
+  (not the sum of norms) and are suppressed during stop-tail deceleration ramps,
+  so lateral strafing and walk-to-stop transitions are not treated as standing.
+  Default ``STAND_W`` and motion penalty weights are reduced.
 
 - The NUbots Nugus velocity energy/smoothness penalties (``joule_heating``
   via ``joint_torques_l2``, ``joint_acc_l2``, ``torque_rate``,

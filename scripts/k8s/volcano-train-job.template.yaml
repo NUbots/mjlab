@@ -50,6 +50,8 @@ spec:
                   value: "${MJLAB_VARIANT}"
                 - name: JOULE_W
                   value: "${JOULE_W}"
+                - name: STAND_W
+                  value: "${STAND_W}"
                 - name: PHASE_C_FRAC
                   value: "${PHASE_C_FRAC}"
                 - name: GAIT_PERIOD

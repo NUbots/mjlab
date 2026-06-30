@@ -86,6 +86,7 @@ GPU_IDS="${GPU_IDS:-0}"
 # Factory reads these from the environment (not CLI flags).
 export MJLAB_VARIANT="${MJLAB_VARIANT:-}"
 export JOULE_W="${JOULE_W:-}"
+export STAND_W="${STAND_W:-}"
 export PHASE_C_FRAC="${PHASE_C_FRAC:-}"
 export GAIT_PERIOD="${GAIT_PERIOD:-0.7}"
 export EFFORT_LO="${EFFORT_LO:-}"

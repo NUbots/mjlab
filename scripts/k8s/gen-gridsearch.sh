@@ -69,11 +69,11 @@ if [[ ! -f "$TEMPLATE" ]]; then
   exit 1
 fi
 
-# --- Matrix axes (Section 4d) ---
+# --- Matrix axes ---
 # NOTE: JOULE_W is applied directly as the Phase-C tau^2 reward weight by the
 # factory (it negates positive values). Magnitudes are O(1e-4); do NOT use 1e4.
 VARIANTS=(clock_anneal self_paced clock_persist)
-JOULE_W_VALUES=(1e-4 3e-4)
+STAND_W_VALUES=(0.1 0.3)
 PHASE_C_FRACS=(0.5 0.7)
 SEEDS=(1)
 
@@ -84,9 +84,10 @@ SEEDS=(1)
 # W&B tag, and it scopes the shared experiment_name so each batch groups under
 # its own TensorBoard tree. Override with BATCH=<id> (use a short, DNS-safe
 # token such as v3 or a date like 20260630).
-BATCH="${BATCH:-v2}"
+BATCH="${BATCH:-v3}"
 
 # Fixed across the grid
+JOULE_W="${JOULE_W:-3e-4}"
 GAIT_PERIOD="${GAIT_PERIOD:-0.7}"
 EFFORT_LO="${EFFORT_LO:-0.7}"
 EFFORT_HI="${EFFORT_HI:-1.2}"
@@ -112,17 +113,18 @@ k8s_slug() {
 MANIFESTS=()
 
 for variant in "${VARIANTS[@]}"; do
-  for joule_w in "${JOULE_W_VALUES[@]}"; do
+  for stand_w in "${STAND_W_VALUES[@]}"; do
     for phase_c_frac in "${PHASE_C_FRACS[@]}"; do
       for seed in "${SEEDS[@]}"; do
-        joule_label="$(joule_tag "$joule_w")"
-        run_name="${variant}__joule-${joule_label}__pc-${phase_c_frac}__s${seed}__${BATCH}"
-        job_name="mjlab-gs-$(k8s_slug "${BATCH}-${variant}-joule-${joule_label}-pc-${phase_c_frac}-s${seed}")"
-        wandb_tags="${variant},joule-${joule_label},pc-${phase_c_frac},seed-${seed},gridsearch,batch-${BATCH}"
+        joule_label="$(joule_tag "$JOULE_W")"
+        run_name="${variant}__stand-${stand_w}__pc-${phase_c_frac}__joule-${joule_label}__s${seed}__${BATCH}"
+        job_name="mjlab-gs-$(k8s_slug "${BATCH}-${variant}-stand-${stand_w}-pc-${phase_c_frac}-joule-${joule_label}-s${seed}")"
+        wandb_tags="${variant},stand-${stand_w},pc-${phase_c_frac},joule-${joule_label},seed-${seed},gridsearch,batch-${BATCH}"
 
         export JOB_NAME="$job_name"
         export MJLAB_VARIANT="$variant"
-        export JOULE_W="$joule_w"
+        export STAND_W="$stand_w"
+        export JOULE_W="$JOULE_W"
         export PHASE_C_FRAC="$phase_c_frac"
         export GAIT_PERIOD="$GAIT_PERIOD"
         export EFFORT_LO="$EFFORT_LO"
@@ -152,7 +154,7 @@ for variant in "${VARIANTS[@]}"; do
   done
 done
 
-expected=$(( ${#VARIANTS[@]} * ${#JOULE_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]} ))
+expected=$(( ${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]} ))
 if [[ -n "$OUTPUT_DIR" ]] || $APPLY; then
   if [[ ${#MANIFESTS[@]} -ne $expected ]]; then
     echo "Expected ${expected} manifests, got ${#MANIFESTS[@]}" >&2

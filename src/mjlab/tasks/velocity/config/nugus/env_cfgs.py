@@ -42,6 +42,7 @@ _DEFAULT_MAX_ITERATIONS = nubots_nugus_ppo_runner_cfg().max_iterations
 _DEFAULT_GAIT_PERIOD = 0.7
 _DEFAULT_JOULE_W = -3e-4
 _DEFAULT_PHASE_C_FRAC = 0.6
+_DEFAULT_STAND_W = -0.15
 _DEFAULT_EFFORT_LO = 0.7
 _DEFAULT_EFFORT_HI = 1.2
 _PHASE_C_JOINT_ACC_W = -1e-4
@@ -242,6 +243,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   if joule_w > 0:
     joule_w = -joule_w
   phase_c_frac = _env_float("PHASE_C_FRAC", _DEFAULT_PHASE_C_FRAC)
+  stand_w = _env_float("STAND_W", _DEFAULT_STAND_W)
+  if stand_w > 0:
+    stand_w = -stand_w
   effort_lo = _env_float("EFFORT_LO", _DEFAULT_EFFORT_LO)
   effort_hi = _env_float("EFFORT_HI", _DEFAULT_EFFORT_HI)
   max_iterations = _env_int("MAX_ITERATIONS", _DEFAULT_MAX_ITERATIONS)
@@ -311,6 +315,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "joule_heating",
     "joint_acc_l2",
     "torque_rate",
+    "stand_still_pose",
+    "stand_still_motion",
   ):
     cfg.rewards[reward_name].params["asset_cfg"].joint_names = (
       NUGUS_MOTOR_JOINT_REGEX,
@@ -380,6 +386,12 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   twist_cmd = cfg.commands["twist"]
   assert isinstance(twist_cmd, UniformVelocityCommandCfg)
   twist_cmd.viz.z_offset = 1.15
+  twist_cmd.rel_stop_envs = 0.5
+  twist_cmd.stop_ramp_time = 0.75
+  twist_cmd.stop_settle_time = 0.75
+
+  cfg.rewards["stand_still_pose"].weight = stand_w
+  cfg.rewards["stand_still_motion"].weight = -0.003
 
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
   cfg.events["base_com"].params["asset_cfg"].body_names = ("torso",)

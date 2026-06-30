@@ -54,6 +54,10 @@ class UniformVelocityCommand(CommandTerm):
     self.is_standing_env = torch.zeros_like(self.is_heading_env)
     self.is_world_env = torch.zeros_like(self.is_heading_env)
     self.is_forward_env = torch.zeros_like(self.is_heading_env)
+    # Walking segments that end with a decelerate-and-settle tail.
+    self.has_stop_tail = torch.zeros_like(self.is_heading_env)
+    # True while a stop-tail segment is decelerating (not yet at zero command).
+    self.is_stop_ramping = torch.zeros_like(self.is_heading_env)
 
     # Initialize tracking metrics
     self.metrics["error_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
@@ -114,6 +118,12 @@ class UniformVelocityCommand(CommandTerm):
     # Randomly select environments to stand still
     self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
 
+    # Walking segments may end with a decelerate-and-settle tail.
+    self.has_stop_tail[env_ids] = False
+    if self.cfg.rel_stop_envs > 0.0:
+      stop_draw = r.uniform_(0.0, 1.0) <= self.cfg.rel_stop_envs
+      self.has_stop_tail[env_ids] = (~self.is_standing_env[env_ids]) & stop_draw
+
     # Randomly assign world-frame envs.
     self.is_world_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_world_envs
     # Copy sampled velocities as world-frame reference for world envs.
@@ -169,6 +179,26 @@ class UniformVelocityCommand(CommandTerm):
       vy_w = self.vel_command_w[w_ids, 1]
       self.vel_command_b[w_ids, 0] = cos_h * vx_w + sin_h * vy_w
       self.vel_command_b[w_ids, 1] = -sin_h * vx_w + cos_h * vy_w
+
+    # Decelerate-and-settle tail on selected walking segments.
+    self.is_stop_ramping[:] = False
+    if self.cfg.stop_settle_time > 0.0 or self.cfg.stop_ramp_time > 0.0:
+      stop_ids = self.has_stop_tail.nonzero(as_tuple=False).flatten()
+      if len(stop_ids) > 0:
+        time_left = self.time_left[stop_ids]
+        settle_t = self.cfg.stop_settle_time
+        ramp_t = self.cfg.stop_ramp_time
+        scale = torch.ones_like(time_left)
+        in_settle = time_left <= settle_t
+        scale[in_settle] = 0.0
+        in_ramp = torch.zeros_like(in_settle)
+        if ramp_t > 0.0:
+          in_ramp = (~in_settle) & (time_left <= settle_t + ramp_t)
+          scale[in_ramp] = (time_left[in_ramp] - settle_t) / ramp_t
+        self.is_stop_ramping[stop_ids] = in_ramp
+        scale = scale.unsqueeze(-1)
+        self.vel_command_b[stop_ids] *= scale
+        self.vel_command_w[stop_ids] *= scale
 
     # Zero out commands for standing environments
     standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
@@ -322,6 +352,12 @@ class UniformVelocityCommandCfg(CommandTermCfg):
   heading_command: bool = False
   heading_control_stiffness: float = 1.0
   rel_standing_envs: float = 0.0
+  rel_stop_envs: float = 0.0
+  """Fraction of non-standing segments that end with a decelerate-and-settle tail."""
+  stop_ramp_time: float = 0.0
+  """Seconds before segment end to linearly ramp command magnitude to zero."""
+  stop_settle_time: float = 0.0
+  """Seconds at segment end with command forced to zero."""
   rel_heading_envs: float = 1.0
   rel_world_envs: float = 0.0
   """Fraction of environments that use world-frame velocity commands.
