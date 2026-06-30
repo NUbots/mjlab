@@ -77,13 +77,11 @@ spec:
                   value: "all"
                 # Pin commit + force fresh, isolated runs regardless of the shared
                 # mjlab-train-config configmap (which is rewritten by other tooling).
-                # NOTE: ec02edd fixes the Phase-C reward curriculum so the
-                # energy/smoothness penalties ramp from p2 (PHASE_C_FRAC) to p3
-                # instead of jumping to full weight only at 0.85*max_iterations,
-                # making PHASE_C_FRAC meaningful. It is the branch HEAD that includes
-                # the earlier 2b02fd6 effort_limit_drift fix and trains cleanly.
+                # NOTE: b0c0fa7 adds stand-still shaping with per-axis gating so
+                # lateral strafing is not treated as standing, plus the v3 grid
+                # STAND_W sweep ({0.1, 0.3}) with JOULE_W fixed at 3e-4.
                 - name: GIT_COMMIT
-                  value: "ec02edd5ff57de11fb72b76e70aeca391eed598e"
+                  value: "b0c0fa7f1be01dd223eca6c1cc832f230c3c80ec"
                 - name: RESUME
                   value: "false"
                 - name: WANDB_RUN_PATH
