@@ -114,6 +114,15 @@ Changed
 Fixed
 ^^^^^
 
+- Fixed the NUbots Nugus Phase-C energy/smoothness reward curriculum
+  (``joule_heating``, ``joint_acc_l2``, ``torque_rate``, ``soft_landing``,
+  ``base_height``). The schedule previously held a weight of zero until
+  ``0.85 * max_iterations`` and then jumped straight to full weight, so the
+  terms were only active for the last ~15% of training and ``PHASE_C_FRAC``
+  had no effect on them. It now ramps from a small fraction of the peak weight
+  at ``p2`` (``PHASE_C_FRAC * max_iterations``) up to the full weight at ``p3``
+  (``0.85 * max_iterations``) via several intermediate stages, so the onset is
+  tied to ``PHASE_C_FRAC`` and the terms shape the gait over the whole window.
 - Fixed ``out_of_terrain_bounds`` using stale terrain dimensions. It read
   ``TerrainGeneratorCfg.num_cols`` directly, which is ignored in curriculum
   mode (the generator uses ``len(sub_terrains)`` columns instead), and it

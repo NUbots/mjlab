@@ -104,6 +104,32 @@ def effort_limit_drift(
     env.sim.model.actuator_forcerange[env_ids[:, None], ctrl_ids, 1] *= drift_factor
 
 
+def _phase_c_ramp_stages(
+  p2: int, p3: int, peak: float, n_steps: int = 4
+) -> list[dict[str, float]]:
+  """Build a staged step-function ramp for one Phase-C reward term.
+
+  The reward curriculum (``mdp.reward_curriculum``) is a step function -- it
+  applies the last stage whose ``step`` has been reached, with no interpolation.
+  To approximate a gradual ramp we emit ``n_steps`` intermediate stages that
+  step the weight up from ``peak / n_steps`` at ``p2`` to the full ``peak`` at
+  ``p3``, holding ``peak`` thereafter. The weight is zero before ``p2`` so the
+  term's onset is tied to ``PHASE_C_FRAC`` (which sets ``p2``).
+
+  The term's sign is preserved automatically: each stage weight is a positive
+  fraction of ``peak`` (negative for penalties, positive for ``base_height``).
+  Stage steps are integers and clamped to be nondecreasing so they satisfy the
+  ``_validate_stages`` ordering check.
+  """
+  stages: list[dict[str, float]] = [{"step": 0, "weight": 0.0}]
+  for i in range(n_steps):
+    frac = (i + 1) / n_steps
+    step = p2 if n_steps == 1 else int(round(p2 + (p3 - p2) * i / (n_steps - 1)))
+    step = max(step, int(stages[-1]["step"]))
+    stages.append({"step": step, "weight": peak * frac})
+  return stages
+
+
 def _add_phase_c_curriculum(
   cfg: ManagerBasedRlEnvCfg,
   *,
@@ -112,11 +138,6 @@ def _add_phase_c_curriculum(
   joule_w: float,
 ) -> None:
   """Anneal smoothness + energy penalties in during Phase C."""
-  phase_c_stages = [
-    {"step": 0, "weight": 0.0},
-    {"step": p2, "weight": 0.0},
-    {"step": p3, "weight": None},  # placeholder replaced per term
-  ]
   for reward_name, peak_weight in (
     ("joule_heating", joule_w),
     ("joint_acc_l2", _PHASE_C_JOINT_ACC_W),
@@ -124,13 +145,12 @@ def _add_phase_c_curriculum(
     ("soft_landing", _PHASE_C_SOFT_LANDING_W),
     ("base_height", _PHASE_C_BASE_HEIGHT_W),
   ):
-    stages = [
-      {"step": s["step"], "weight": peak_weight if s["weight"] is None else s["weight"]}
-      for s in phase_c_stages
-    ]
     cfg.curriculum[f"{reward_name}_rampup"] = CurriculumTermCfg(
       func=mdp.reward_curriculum,
-      params={"reward_name": reward_name, "stages": stages},
+      params={
+        "reward_name": reward_name,
+        "stages": _phase_c_ramp_stages(p2, p3, peak_weight),
+      },
     )
 
 
