@@ -110,6 +110,40 @@ k8s_slug() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | tr '_.' '--' | tr -cd 'a-z0-9-' | sed 's/--*/-/g'
 }
 
+# Short slugs for JOB_NAME only (Volcano pod names = job + "-train-0" must be <= 63).
+variant_job_slug() {
+  case "$1" in
+    clock_anneal) echo "ca" ;;
+    self_paced) echo "sp" ;;
+    clock_persist) echo "cp" ;;
+    *) k8s_slug "$1" ;;
+  esac
+}
+
+stand_job_slug() {
+  case "$1" in
+    0.1) echo "sw01" ;;
+    0.3) echo "sw03" ;;
+    *) k8s_slug "sw-${1}" ;;
+  esac
+}
+
+phase_c_job_slug() {
+  case "$1" in
+    0.5) echo "p05" ;;
+    0.7) echo "p07" ;;
+    *) k8s_slug "pc-${1}" ;;
+  esac
+}
+
+joule_job_slug() {
+  case "$1" in
+    3e-4) echo "j3e4" ;;
+    1e-4) echo "j1e4" ;;
+    *) k8s_slug "j-${1}" ;;
+  esac
+}
+
 MANIFESTS=()
 
 for variant in "${VARIANTS[@]}"; do
@@ -118,7 +152,13 @@ for variant in "${VARIANTS[@]}"; do
       for seed in "${SEEDS[@]}"; do
         joule_label="$(joule_tag "$JOULE_W")"
         run_name="${variant}__stand-${stand_w}__pc-${phase_c_frac}__joule-${joule_label}__s${seed}__${BATCH}"
-        job_name="mjlab-gs-$(k8s_slug "${BATCH}-${variant}-stand-${stand_w}-pc-${phase_c_frac}-joule-${joule_label}-s${seed}")"
+        job_slug="$(k8s_slug "${BATCH}-$(variant_job_slug "$variant")-$(stand_job_slug "$stand_w")-$(phase_c_job_slug "$phase_c_frac")-$(joule_job_slug "$JOULE_W")-s${seed}")"
+        job_name="mj-gs-${job_slug}"
+        pod_name="${job_name}-train-0"
+        if ((${#pod_name} > 63)); then
+          echo "Pod name too long (${#pod_name}): ${pod_name}" >&2
+          exit 1
+        fi
         wandb_tags="${variant},stand-${stand_w},pc-${phase_c_frac},joule-${joule_label},seed-${seed},gridsearch,batch-${BATCH}"
 
         export JOB_NAME="$job_name"
