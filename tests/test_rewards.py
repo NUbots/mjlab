@@ -18,6 +18,7 @@ from mjlab.sim.sim import Simulation, SimulationCfg
 from mjlab.tasks.velocity.mdp.rewards import (
   cost_of_transport_proxy,
   feet_flat_orientation,
+  feet_lateral_distance_cost,
   gait_phase_regularity_cost,
 )
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
@@ -339,6 +340,66 @@ def test_gait_phase_regularity_cost_respects_command_threshold():
 
   assert cost[0] > 0.0
   assert cost[1] == pytest.approx(0.0)
+
+
+def _make_lateral_foot_env(lateral_distances: torch.Tensor) -> Mock:
+  """Build a mock env with two feet at the given body-Y separations."""
+  num_envs = lateral_distances.shape[0]
+  env = Mock()
+  env.num_envs = num_envs
+  env.device = "cpu"
+  env.extras = {"log": {}}
+
+  half_sep = lateral_distances / 2.0
+  foot_pos_w = torch.zeros(num_envs, 2, 3)
+  foot_pos_w[:, 0, 1] = half_sep
+  foot_pos_w[:, 1, 1] = -half_sep
+
+  asset = Mock()
+  asset.data = SimpleNamespace(
+    site_pos_w=foot_pos_w,
+    root_link_quat_w=quat_from_euler_xyz(
+      torch.zeros(num_envs),
+      torch.zeros(num_envs),
+      torch.zeros(num_envs),
+    ),
+  )
+  env.scene = {"robot": asset}
+  return env
+
+
+def test_feet_lateral_distance_cost_at_nominal_is_zero():
+  nominal = 0.25
+  env = _make_lateral_foot_env(torch.tensor([nominal]))
+  asset_cfg = SceneEntityCfg(name="robot", site_ids=[0, 1])
+
+  cost = feet_lateral_distance_cost(
+    env,
+    nominal_distance=nominal,
+    sharpness=8.0,
+    asset_cfg=asset_cfg,
+  )
+
+  assert cost[0] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_feet_lateral_distance_cost_penalizes_too_close_and_too_wide():
+  nominal = 0.25
+  sharpness = 8.0
+  delta = 0.05
+  env = _make_lateral_foot_env(torch.tensor([nominal - delta, nominal + delta]))
+  asset_cfg = SceneEntityCfg(name="robot", site_ids=[0, 1])
+
+  cost = feet_lateral_distance_cost(
+    env,
+    nominal_distance=nominal,
+    sharpness=sharpness,
+    asset_cfg=asset_cfg,
+  )
+
+  expected = math.exp(sharpness * delta) - 1.0
+  assert cost[0] == pytest.approx(expected, rel=1e-5)
+  assert cost[1] == pytest.approx(expected, rel=1e-5)
 
 
 def _make_flat_foot_env(quats, found, command):

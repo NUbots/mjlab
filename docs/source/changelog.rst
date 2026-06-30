@@ -50,8 +50,8 @@ Added
   ``SEED``) so a grid search can vary strategy without code edits.
 - Added velocity rewards ``actuator_torque_rate_l2`` (penalizes rapid
   torque reversals ``sum (tau_t - tau_{t-1})^2``) and ``base_height``
-  tracking, plus a one-sided ``feet_lateral_distance_cost`` that only
-  penalizes feet that are too close together.
+  tracking, plus a ``feet_lateral_distance_cost`` that penalizes lateral
+  foot separation deviating from nominal (both too close and too far).
 - Added a Volcano-scheduled k8s grid-search harness under ``scripts/k8s/``
   (a ``mjlab-train`` queue, a single-GPU Volcano Job template, and a
   ``gen-gridsearch.sh`` generator) that fans a strategy × scalar-knob
@@ -66,6 +66,9 @@ Added
 Changed
 ^^^^^^^
 
+- ``feet_lateral_distance_cost`` is now two-sided: it penalizes lateral foot
+  separation above nominal as well as below, discouraging over-wide steps
+  during strafing that the previous one-sided form did not constrain.
 - Stand-still velocity rewards now gate on ``max(linear, angular) < threshold``
   (not the sum of norms) and are suppressed during stop-tail deceleration ramps,
   so lateral strafing and walk-to-stop transitions are not treated as standing.

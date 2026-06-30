@@ -638,17 +638,17 @@ def feet_lateral_distance_cost(
   sharpness: float,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Penalize feet whose lateral body-frame separation falls below nominal.
+  """Penalize lateral body-frame foot separation that deviates from nominal.
 
   The foot-to-foot vector is expressed in the robot's body frame so that yaw
   rotation does not affect the measurement. Only the body-Y component is used,
   isolating lateral spread from fore-aft offset during a stride.
 
-
-  The penalty shape is ``exp(sharpness * shortfall) - 1`` where
-  ``shortfall = max(0, nominal_distance - lateral_distance)``. Feet
-  spread wider than nominal incur no cost, so natural foot crossing in
-  turns is not penalized.
+  The penalty shape is ``exp(sharpness * deviation) - 1`` where
+  ``deviation = |lateral_distance - nominal_distance|``. Both feet that are
+  too close *and* too far apart are penalized, which discourages the
+  over-wide lateral reach seen during strafing while still allowing nominal
+  stance width.
   """
   asset: Entity = env.scene[asset_cfg.name]
   foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
@@ -670,8 +670,8 @@ def feet_lateral_distance_cost(
 
   pair_distance = torch.abs(delta_b[..., 1])  # body-Y component [B, P]
 
-  shortfall = torch.clamp(nominal_distance - pair_distance, min=0.0)
-  cost = torch.sum(torch.exp(sharpness * shortfall) - 1.0, dim=1)
+  deviation = torch.abs(pair_distance - nominal_distance)
+  cost = torch.sum(torch.exp(sharpness * deviation) - 1.0, dim=1)
 
   min_pair_distance = torch.amin(pair_distance, dim=1)
   max_pair_distance = torch.amax(pair_distance, dim=1)
