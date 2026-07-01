@@ -50,6 +50,7 @@ _DEFAULT_RESAMPLE_MIN = 3.0
 _DEFAULT_PHASE_DELTA_STRONG_W = -5.0
 _DEFAULT_PHASE_DELTA_STRONG_ITERS = 100
 _DEFAULT_UPRIGHT_W = 1.0
+_DEFAULT_PROGRESS_BACKSLIDE_W = -0.5
 # Per-servo torque constants (Nm/A) for the actuator-current observation.
 # XH540-W270 (legs) and MX106 (hip yaw) are ~2.0 Nm/A; the smaller MX64 arm/head
 # servos are approximated lower. Matched by regex against actuator names.
@@ -515,7 +516,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "PHASE_DELTA_STRONG_ITERS", _DEFAULT_PHASE_DELTA_STRONG_ITERS
   )
   upright_w = _env_float("UPRIGHT_W", _DEFAULT_UPRIGHT_W)
-  progress_backslide_w = _env_float("PROGRESS_BACKSLIDE_W", 0.0)
+  progress_backslide_w = _env_float(
+    "PROGRESS_BACKSLIDE_W", _DEFAULT_PROGRESS_BACKSLIDE_W
+  )
   critic_height_scan = _env_bool("CRITIC_HEIGHT_SCAN", default=False)
   training_regime = _env_str("TRAINING_REGIME", "base")
   resume_mode = _env_bool("RESUME", default=False)

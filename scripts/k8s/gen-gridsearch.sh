@@ -115,6 +115,7 @@ WANDB_RUN_NAME="${WANDB_RUN_NAME:-}"
 PHASE_DELTA_STRONG_ITERS="${PHASE_DELTA_STRONG_ITERS:-}"
 PHASE_DELTA_STRONG_W="${PHASE_DELTA_STRONG_W:-}"
 UPRIGHT_W="${UPRIGHT_W:-}"
+PROGRESS_BACKSLIDE_W="${PROGRESS_BACKSLIDE_W:-}"
 TRAINING_REGIME="${TRAINING_REGIME:-}"
 CRITIC_HEIGHT_SCAN="${CRITIC_HEIGHT_SCAN:-}"
 TASK="${TASK:-Mjlab-Velocity-Flat-Nubots-Nugus}"
@@ -203,7 +204,7 @@ emit_manifest() {
 export GAIT_PERIOD EFFORT_LO EFFORT_HI LOGGER EXPERIMENT_NAME WANDB_PROJECT
 export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME RESAMPLE_MIN
 export WANDB_RUN_PATH WANDB_RUN_NAME
-export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W UPRIGHT_W
+export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W UPRIGHT_W PROGRESS_BACKSLIDE_W
 export TRAINING_REGIME CRITIC_HEIGHT_SCAN TASK
 
 gen_default_matrix() {
@@ -359,6 +360,7 @@ gen_v9_grid() {
   export PHASE_DELTA_STRONG_ITERS="1000"
   export PHASE_DELTA_STRONG_W="-5.0"
   export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
   local joule_label variant cur
   joule_label="$(joule_tag "$JOULE_W")"
   export MJLAB_VARIANT="clock_learned"
@@ -414,6 +416,7 @@ gen_v10_grid() {
   export PHASE_DELTA_STRONG_ITERS="1000"
   export PHASE_DELTA_STRONG_W="-5.0"
   export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
   export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
   local joule_label
   joule_label="$(joule_tag "$JOULE_W")"
@@ -455,6 +458,7 @@ gen_v10b_rough_cont() {
   export PHASE_DELTA_STRONG_ITERS="1000"
   export PHASE_DELTA_STRONG_W="-5.0"
   export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
   export TASK="Mjlab-Velocity-Rough-Nubots-Nugus"
   export TRAINING_REGIME="hard_continue"
   export CRITIC_HEIGHT_SCAN="true"

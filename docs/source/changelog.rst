@@ -8,6 +8,11 @@ Upcoming version (not yet released)
 Fixed
 ^^^^^
 
+- ``command_progress_backslide`` was always zero in grid-search runs because
+  ``PROGRESS_BACKSLIDE_W`` defaulted to ``0.0`` (disabled) and was not wired
+  through the Volcano Job template or ``gen-gridsearch.sh``. Nugus now defaults
+  to ``-0.5`` and v9/v10 manifests export the knob explicitly.
+
 - ``clock_learned`` Nugus grid-search runs with short ``PHASE_ITERATIONS`` and a long ``PHASE_DELTA_STRONG_ITERS`` window no longer fail at env init with out-of-order curriculum stages.
 
 - NUbots Nugus factory env knobs (``_env_float`` / ``_env_int`` / ``_env_bool``)

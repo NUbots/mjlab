@@ -76,6 +76,8 @@ spec:
                   value: "${PHASE_DELTA_STRONG_W}"
                 - name: UPRIGHT_W
                   value: "${UPRIGHT_W}"
+                - name: PROGRESS_BACKSLIDE_W
+                  value: "${PROGRESS_BACKSLIDE_W}"
                 - name: TRAINING_REGIME
                   value: "${TRAINING_REGIME}"
                 - name: CRITIC_HEIGHT_SCAN

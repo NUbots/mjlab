@@ -37,8 +37,22 @@ def _clear_nugus_env(monkeypatch: pytest.MonkeyPatch) -> None:
     "PHASE_ITERATIONS",
     "MAX_ITERATIONS",
     "UPRIGHT_W",
+    "PROGRESS_BACKSLIDE_W",
   ):
     monkeypatch.delenv(key, raising=False)
+
+
+def test_progress_backslide_default_weight_enabled() -> None:
+  cfg = nubots_nugus_flat_env_cfg()
+  assert cfg.rewards["command_progress_backslide"].weight == -0.5
+
+
+def test_progress_backslide_weight_env_override(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  monkeypatch.setenv("PROGRESS_BACKSLIDE_W", "-1.25")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert cfg.rewards["command_progress_backslide"].weight == -1.25
 
 
 def test_critic_height_scan_off_flat_critic_lacks_height_scan() -> None:
