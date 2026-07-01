@@ -329,6 +329,77 @@ def test_runner_save_load_curriculum_snapshot(device, monkeypatch):
     env.close()
 
 
+def test_runner_load_resets_env_after_curriculum_sync(device, monkeypatch):
+  """load() must re-reset the env after restoring counter and curriculum."""
+  final_step = 1000
+  velocity_stages = [
+    {
+      "step": 0,
+      "lin_vel_x": (-0.1, 0.1),
+      "lin_vel_y": (-0.05, 0.05),
+      "ang_vel_z": (-0.1, 0.1),
+    },
+    {
+      "step": final_step,
+      "lin_vel_x": (-0.5, 0.5),
+      "lin_vel_y": (-0.3, 0.3),
+      "ang_vel_z": (-0.5, 0.5),
+    },
+  ]
+  reward_stages = [
+    {"step": 0, "weight": 1.0},
+    {"step": final_step, "weight": 5.0},
+  ]
+
+  env = _make_curriculum_runner_env(
+    device,
+    velocity_stages=velocity_stages,
+    reward_stages=reward_stages,
+    initial_weight=1.0,
+  )
+  try:
+    wrapped_env = RslRlVecEnvWrapper(env)
+    agent_cfg = RslRlOnPolicyRunnerCfg(
+      num_steps_per_env=4, max_iterations=10, save_interval=5
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      runner = MjlabOnPolicyRunner(
+        wrapped_env, asdict(agent_cfg), log_dir=tmpdir, device=device
+      )
+      monkeypatch.setattr(runner.logger, "save_model", lambda *args, **kwargs: None)
+      runner.logger.logger_type = "tensorboard"
+
+      wrapped_env.unwrapped.common_step_counter = final_step
+      wrapped_env.unwrapped.curriculum_manager.compute()
+      checkpoint_path = str(Path(tmpdir) / "curriculum_checkpoint.pt")
+      runner.save(checkpoint_path)
+
+      reset_calls = 0
+      original_reset = wrapped_env.reset
+
+      def counting_reset(*args, **kwargs):
+        nonlocal reset_calls
+        reset_calls += 1
+        return original_reset(*args, **kwargs)
+
+      monkeypatch.setattr(wrapped_env, "reset", counting_reset)
+
+      wrapped_env.unwrapped.common_step_counter = 0
+      wrapped_env.unwrapped.curriculum_manager.compute()
+      runner.load(checkpoint_path)
+
+      assert reset_calls == 1
+      twist = wrapped_env.unwrapped.command_manager.get_term("twist")
+      reward_cfg = wrapped_env.unwrapped.reward_manager.get_term_cfg(
+        "curriculum_reward"
+      )
+      assert twist.cfg.ranges.lin_vel_x == (-0.5, 0.5)
+      assert reward_cfg.weight == pytest.approx(5.0)
+  finally:
+    env.close()
+
+
 def test_runner_handles_old_checkpoints_without_env_state(env, device):
   """Old checkpoints without env_state should load without crashing."""
 

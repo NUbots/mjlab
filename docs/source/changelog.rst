@@ -16,10 +16,10 @@ Fixed
   entrypoint likewise skips exporting empty variant/reward knobs.
 
 - Checkpoint resume now re-runs ``curriculum_manager.compute()`` after restoring
-  ``common_step_counter``, so command ranges and curriculum-driven reward weights
-  match the resumed training step instead of staying at the wrapper's step-0
-  values. Checkpoints also store a ``curriculum_snapshot`` for load-time
-  validation logging.
+  ``common_step_counter``, re-resets the environment so managers and commands
+  initialize under the restored curriculum, and skips ``init_at_random_ep_len``
+  so the first post-resume rollout does not randomize episode lengths. Checkpoints
+  also store a ``curriculum_snapshot`` for load-time validation logging.
 
 - ``TRAINING_REGIME=hard_continue`` stage 0 at the continuation base now matches
   the v9 terminal command ranges (±0.5, ±0.3, ±0.5) before ramping harder.

@@ -197,4 +197,11 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
       self._log_curriculum_snapshot_comparison(
         saved_snapshot, loaded_snapshot, checkpoint_path=path
       )
+      # Re-reset so managers, commands, and events initialize under the
+      # restored counter. The wrapper's constructor already reset at step 0,
+      # which leaves stale state when resuming mid-curriculum (e.g.
+      # hard_continue with stage thresholds above zero).
+      if int(os.environ.get("LOCAL_RANK", "0")) == 0:
+        print("[resume] Re-resetting env after curriculum sync")
+      self.env.reset()
     return infos

@@ -171,7 +171,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     runner.load(str(resume_path))
 
   runner.learn(
-    num_learning_iterations=cfg.agent.max_iterations, init_at_random_ep_len=True
+    num_learning_iterations=cfg.agent.max_iterations,
+    init_at_random_ep_len=not cfg.agent.resume,
   )
 
   env.close()
