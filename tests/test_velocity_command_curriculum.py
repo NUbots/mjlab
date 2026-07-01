@@ -67,6 +67,29 @@ def test_commands_vel_applies_wide_ranges_after_final_stage():
   assert term.cfg.ranges.ang_vel_z == (-0.5, 0.5)
 
 
+def test_full_yaw_reached_at_early_stage():
+  # The models must be able to rotate: the full +/-0.5 yaw range has to be
+  # unlocked at a stage that is comfortably reached within the run, and no later
+  # than the stage where the lateral range reaches its full +/-0.3.
+  stages = _stages()
+  run_steps = _RUN_ITERATIONS * _NUM_STEPS_PER_ENV
+
+  yaw_full_step = next(s["step"] for s in stages if s["ang_vel_z"] == (-0.5, 0.5))
+  liny_full_step = next(s["step"] for s in stages if s["lin_vel_y"] == (-0.3, 0.3))
+
+  # Reached well within the run (first quarter), not at an unreachable tail.
+  assert yaw_full_step < 0.25 * run_steps
+  # Yaw opens up no later than the lateral range.
+  assert yaw_full_step <= liny_full_step
+
+  # And applying the curriculum at that step yields the full yaw range.
+  env, term = _make_env(step_counter=yaw_full_step)
+  commands_vel(
+    env, env_ids=torch.tensor([0]), command_name="twist", velocity_stages=stages
+  )
+  assert term.cfg.ranges.ang_vel_z == (-0.5, 0.5)
+
+
 def test_commands_vel_narrow_before_first_boundary():
   stages = _stages()
   env, term = _make_env(step_counter=0)

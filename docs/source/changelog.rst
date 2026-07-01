@@ -89,7 +89,9 @@ Changed
   backward/strafe/yaw command ranges are reached early within a training run
   (around iterations 250 and 562) instead of the previous 9000/12000-iteration
   thresholds that were never reached, which had left strafe and yaw commands
-  stuck at their narrow initial ranges.
+  stuck at their narrow initial ranges. Yaw (``ang_vel_z``) is ramped up faster
+  than the lateral range, reaching its full +/-0.5 by the first stage
+  (~iteration 250) so the policy has time to learn to rotate.
 - ``feet_lateral_distance_cost`` is now two-sided: it penalizes lateral foot
   separation above nominal as well as below, discouraging over-wide steps
   during strafing that the previous one-sided form did not constrain.

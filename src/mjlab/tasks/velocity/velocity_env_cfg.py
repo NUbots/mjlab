@@ -530,21 +530,24 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         # advancing by num_steps_per_env=24 each iteration). They are scaled so
         # the wide strafe/backward/yaw stage is reached early in a ~1250-iter run
         # (stage1 ~iter 250, stage2 ~iter 562) rather than the previous
-        # 9000/12000-iter thresholds which were never reached. The final stage
-        # keeps the restored symmetric ranges (lin_x +/-0.5, lin_y +/-0.3,
-        # ang_z +/-0.5).
+        # 9000/12000-iter thresholds which were never reached. Yaw is ramped up
+        # faster than the lateral (strafe) range: ``ang_vel_z`` reaches its full
+        # +/-0.5 by stage1 (~iter 250) so the policy has plenty of time to learn
+        # to rotate, instead of only unlocking full yaw at the later stage. The
+        # final stage keeps the restored symmetric ranges (lin_x +/-0.5,
+        # lin_y +/-0.3, ang_z +/-0.5).
         "velocity_stages": [
           {
             "step": 0,
             "lin_vel_x": (-0.5, 0.5),
             "lin_vel_y": (-0.1, 0.1),
-            "ang_vel_z": (-0.05, 0.05),
+            "ang_vel_z": (-0.2, 0.2),
           },
           {
             "step": int(0.2 * 1250 * 24),  # ~iter 250
             "lin_vel_x": (-0.5, 0.5),
             "lin_vel_y": (-0.2, 0.2),
-            "ang_vel_z": (-0.1, 0.1),
+            "ang_vel_z": (-0.5, 0.5),
           },
           {
             "step": int(0.45 * 1250 * 24),  # ~iter 562
