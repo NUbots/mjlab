@@ -205,3 +205,25 @@ def test_nugus_upright_weight_env_knob(monkeypatch):
 
   cfg = nubots_nugus_rough_env_cfg()
   assert cfg.rewards["upright"].weight == 0.5
+
+
+def test_nugus_empty_env_vars_use_defaults(monkeypatch):
+  """Blank K8s env entries must not override factory defaults."""
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_learned")
+  for name in (
+    "PHASE_DELTA_STRONG_W",
+    "PHASE_DELTA_STRONG_ITERS",
+    "UPRIGHT_W",
+    "JOULE_W",
+    "MAX_ITERATIONS",
+    "PHASE_ITERATIONS",
+    "SILENCE_CLOCK",
+    "CURRENT_OBS",
+  ):
+    monkeypatch.setenv(name, "")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  assert cfg.rewards["phase_delta_nominal"].weight == -5.0
+  assert cfg.rewards["upright"].weight == 1.0

@@ -5,6 +5,14 @@ Changelog
 Upcoming version (not yet released)
 -----------------------------------
 
+Fixed
+^^^^^
+
+- NUbots Nugus factory env knobs (``_env_float`` / ``_env_int`` / ``_env_bool``)
+  now treat an empty string as unset so Volcano Job cells with blank optional
+  env vars fall back to defaults instead of failing at import time. The k8s
+  entrypoint likewise skips exporting empty variant/reward knobs.
+
 Added
 ^^^^^
 

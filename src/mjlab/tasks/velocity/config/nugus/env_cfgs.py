@@ -66,17 +66,17 @@ _PHASE_C_BASE_HEIGHT_W = 0.3
 
 def _env_float(name: str, default: float) -> float:
   raw = os.environ.get(name)
-  return default if raw is None else float(raw)
+  return default if raw in (None, "") else float(raw)
 
 
 def _env_int(name: str, default: int) -> int:
   raw = os.environ.get(name)
-  return default if raw is None else int(raw)
+  return default if raw in (None, "") else int(raw)
 
 
 def _env_bool(name: str, default: bool) -> bool:
   raw = os.environ.get(name)
-  if raw is None:
+  if raw in (None, ""):
     return default
   return raw.strip().lower() in ("1", "true", "yes", "on")
 

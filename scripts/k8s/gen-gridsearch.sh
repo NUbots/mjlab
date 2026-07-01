@@ -353,6 +353,7 @@ gen_v9_grid() {
   export PHASE_ITERATIONS="2000"
   export WANDB_RUN_PATH=""
   export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
   export UPRIGHT_W="0.5"
   local joule_label variant cur
   joule_label="$(joule_tag "$JOULE_W")"

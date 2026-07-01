@@ -83,18 +83,17 @@ EXPERIMENT_NAME="${EXPERIMENT_NAME:-nugus_gridsearch}"
 RUN_NAME="${RUN_NAME:-${WANDB_RUN_NAME:-}}"
 GPU_IDS="${GPU_IDS:-0}"
 
-# Factory reads these from the environment (not CLI flags).
-export MJLAB_VARIANT="${MJLAB_VARIANT:-}"
-export JOULE_W="${JOULE_W:-}"
-export STAND_W="${STAND_W:-}"
-export PHASE_C_FRAC="${PHASE_C_FRAC:-}"
-export GAIT_PERIOD="${GAIT_PERIOD:-0.7}"
-export EFFORT_LO="${EFFORT_LO:-}"
-export EFFORT_HI="${EFFORT_HI:-}"
-export RESAMPLE_MIN="${RESAMPLE_MIN:-}"
-export SEED="${SEED:-}"
-# Phase boundaries decouple from training length; clock-silence and current-obs
-# variant knobs. Only export when set so the factory falls back to its defaults.
+# Factory reads these from the environment (not CLI flags). Only export when set
+# so empty K8s env entries do not override factory defaults.
+[[ -n "${MJLAB_VARIANT:-}" ]] && export MJLAB_VARIANT
+[[ -n "${JOULE_W:-}" ]] && export JOULE_W
+[[ -n "${STAND_W:-}" ]] && export STAND_W
+[[ -n "${PHASE_C_FRAC:-}" ]] && export PHASE_C_FRAC
+[[ -n "${GAIT_PERIOD:-}" ]] && export GAIT_PERIOD
+[[ -n "${EFFORT_LO:-}" ]] && export EFFORT_LO
+[[ -n "${EFFORT_HI:-}" ]] && export EFFORT_HI
+[[ -n "${RESAMPLE_MIN:-}" ]] && export RESAMPLE_MIN
+[[ -n "${SEED:-}" ]] && export SEED
 [[ -n "${PHASE_ITERATIONS:-}" ]] && export PHASE_ITERATIONS
 [[ -n "${SILENCE_CLOCK:-}" ]] && export SILENCE_CLOCK
 [[ -n "${CURRENT_OBS:-}" ]] && export CURRENT_OBS
