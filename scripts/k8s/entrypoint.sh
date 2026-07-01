@@ -98,6 +98,9 @@ export SEED="${SEED:-}"
 [[ -n "${PHASE_ITERATIONS:-}" ]] && export PHASE_ITERATIONS
 [[ -n "${SILENCE_CLOCK:-}" ]] && export SILENCE_CLOCK
 [[ -n "${CURRENT_OBS:-}" ]] && export CURRENT_OBS
+[[ -n "${PHASE_DELTA_STRONG_ITERS:-}" ]] && export PHASE_DELTA_STRONG_ITERS
+[[ -n "${PHASE_DELTA_STRONG_W:-}" ]] && export PHASE_DELTA_STRONG_W
+[[ -n "${UPRIGHT_W:-}" ]] && export UPRIGHT_W
 
 TRAIN_ARGS=(
   "${TASK}"

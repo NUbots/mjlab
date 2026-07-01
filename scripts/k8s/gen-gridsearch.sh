@@ -112,6 +112,9 @@ RESUME="${RESUME:-false}"
 RESAMPLE_MIN="${RESAMPLE_MIN:-3.0}"
 WANDB_RUN_PATH="${WANDB_RUN_PATH:-}"
 WANDB_RUN_NAME="${WANDB_RUN_NAME:-}"
+PHASE_DELTA_STRONG_ITERS="${PHASE_DELTA_STRONG_ITERS:-}"
+PHASE_DELTA_STRONG_W="${PHASE_DELTA_STRONG_W:-}"
+UPRIGHT_W="${UPRIGHT_W:-}"
 
 # JOULE_W tag helper: keep scientific notation when already formatted.
 joule_tag() {
@@ -197,6 +200,7 @@ emit_manifest() {
 export GAIT_PERIOD EFFORT_LO EFFORT_HI LOGGER EXPERIMENT_NAME WANDB_PROJECT
 export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME RESAMPLE_MIN
 export WANDB_RUN_PATH WANDB_RUN_NAME
+export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W UPRIGHT_W
 
 gen_default_matrix() {
   for variant in "${VARIANTS[@]}"; do
@@ -336,6 +340,36 @@ gen_v7_grid() {
 }
 
 
+# BATCH=v9: extend strong phase_delta_nominal stage to 1000 iters, halve upright
+# weight, and compare clock_learned (CURRENT_OBS 0/1) vs clock_anneal baseline.
+gen_v9_grid() {
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export WANDB_RUN_PATH=""
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export UPRIGHT_W="0.5"
+  local joule_label variant cur
+  joule_label="$(joule_tag "$JOULE_W")"
+  export MJLAB_VARIANT="clock_learned"
+  for cur in 0 1; do
+    export CURRENT_OBS="$cur"
+    export RUN_NAME="clock_learned__stand-0.15__pc-0.5__cur${cur}__s1__${BATCH}"
+    export WANDB_TAGS="clock_learned,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},current-${cur},upright-0.5,strong-1000"
+    emit_manifest "mj-gs-${BATCH}-cl-cur${cur}"
+  done
+  export MJLAB_VARIANT="clock_anneal"
+  export CURRENT_OBS="0"
+  export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__s1__${BATCH}"
+  export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},upright-0.5"
+  emit_manifest "mj-gs-${BATCH}-ca"
+}
+
 # BATCH=v8: clock_learned CURRENT_OBS 0 vs 1 at pinned 2229f92 (strong early
 # phase_delta_nominal penalty). pc-0.5, STAND_W 0.15, seed 1, 2000 iters.
 gen_v8_grid() {
@@ -366,6 +400,7 @@ case "$BATCH" in
   v6) gen_v6_rapidcmd; expected=2 ;;
   v7) gen_v7_grid; expected=2 ;;
   v8) gen_v8_grid; expected=2 ;;
+  v9) gen_v9_grid; expected=3 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))

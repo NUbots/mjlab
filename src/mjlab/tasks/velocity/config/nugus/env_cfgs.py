@@ -48,6 +48,7 @@ _DEFAULT_EFFORT_HI = 1.2
 _DEFAULT_RESAMPLE_MIN = 3.0
 _DEFAULT_PHASE_DELTA_STRONG_W = -5.0
 _DEFAULT_PHASE_DELTA_STRONG_ITERS = 100
+_DEFAULT_UPRIGHT_W = 1.0
 # Per-servo torque constants (Nm/A) for the actuator-current observation.
 # XH540-W270 (legs) and MX106 (hip yaw) are ~2.0 Nm/A; the smaller MX64 arm/head
 # servos are approximated lower. Matched by regex against actuator names.
@@ -309,6 +310,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   phase_delta_strong_iters = _env_int(
     "PHASE_DELTA_STRONG_ITERS", _DEFAULT_PHASE_DELTA_STRONG_ITERS
   )
+  upright_w = _env_float("UPRIGHT_W", _DEFAULT_UPRIGHT_W)
   p1, p2, p3 = _phase_steps(phase_iterations, phase_c_frac)
 
   cfg = make_velocity_env_cfg()
@@ -548,6 +550,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     r".*head_pitch.*": 0.15,
   }
 
+  cfg.rewards["upright"].weight = upright_w
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("torso",)
   cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("torso",)
   # Cover the full leg (roll/yaw included, not just sagittal pitch) so the term

@@ -196,3 +196,12 @@ def test_clock_learned_phase_delta_strong_env_knobs(monkeypatch):
   stages = cfg.curriculum["phase_delta_nominal_anneal"].params["stages"]
   assert stages[0] == {"step": 0, "weight": -8.0}
   assert stages[1] == {"step": 1200, "weight": -0.5}
+
+
+def test_nugus_upright_weight_env_knob(monkeypatch):
+  monkeypatch.setenv("UPRIGHT_W", "0.5")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  assert cfg.rewards["upright"].weight == 0.5

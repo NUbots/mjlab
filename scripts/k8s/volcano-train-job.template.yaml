@@ -70,6 +70,12 @@ spec:
                   value: "${SILENCE_CLOCK}"
                 - name: CURRENT_OBS
                   value: "${CURRENT_OBS}"
+                - name: PHASE_DELTA_STRONG_ITERS
+                  value: "${PHASE_DELTA_STRONG_ITERS}"
+                - name: PHASE_DELTA_STRONG_W
+                  value: "${PHASE_DELTA_STRONG_W}"
+                - name: UPRIGHT_W
+                  value: "${UPRIGHT_W}"
                 - name: RESAMPLE_MIN
                   value: "${RESAMPLE_MIN}"
                 - name: GAIT_PERIOD
