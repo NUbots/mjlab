@@ -182,10 +182,10 @@ def _add_gait_curriculum(
 ) -> None:
   """Configure staged gait handoff curriculums for the selected variant."""
   if variant == "clock_learned":
-    cfg.curriculum["phase_sync_anneal"] = CurriculumTermCfg(
+    cfg.curriculum["phase_delta_nominal_anneal"] = CurriculumTermCfg(
       func=mdp.reward_curriculum,
       params={
-        "reward_name": "phase_sync",
+        "reward_name": "phase_delta_nominal",
         "stages": [
           {"step": 0, "weight": -0.5},
           {"step": p1, "weight": -0.2},
@@ -642,8 +642,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   }
   if variant == "clock_learned":
     swing_height.params["phase_source"] = "policy"
-    cfg.rewards["phase_sync"].weight = -0.5
-    cfg.rewards["phase_sync"].params["period"] = gait_period
+    cfg.rewards["phase_delta_nominal"].weight = -0.5
 
   # Self-paced sparse swing-height (peak-at-landing) handoff target.
   landing_height = cfg.rewards["foot_swing_height_landing"]

@@ -450,27 +450,23 @@ def feet_swing_height_clock(
   return reward
 
 
-def phase_sync_cost(
+def phase_delta_nominal_cost(
   env: ManagerBasedRlEnv,
-  period: float,
   action_term_name: str = "phase_delta",
   command_name: str | None = "twist",
   command_threshold: float = 0.05,
 ) -> torch.Tensor:
-  """Penalize circular distance between policy phase and a training-only reference.
+  """Penalize deviation of the phase step from the nominal cadence.
 
-  The reference phase advances with episode time (``episode_time / period``) and
-  is not available at deploy time. The policy-owned phase comes from
-  :class:`mjlab.envs.mdp.actions.PhaseDeltaAction`. Cost is
-  ``1 - cos(2*pi*(policy_phase - reference_phase))``, zero when aligned and
-  two when opposite. Gated off when standing.
+  :class:`mjlab.envs.mdp.actions.PhaseDeltaAction` scales each policy action by
+  ``step_dt / period``. Cost is ``(raw_action - 1.0)^2``, zero when the policy
+  steps at the nominal rate and growing as the step size drifts. Gated off when
+  standing. No global episode-time reference is used.
   """
   from mjlab.envs.mdp.actions.phase_delta import get_phase_delta_action
 
-  reference_phase = _gait_base_phase(env, period, "time", action_term_name)
-  policy_phase = get_phase_delta_action(env, action_term_name).policy_phase
-  phase_diff = policy_phase - reference_phase
-  cost = 1.0 - torch.cos(2.0 * math.pi * phase_diff)
+  raw = get_phase_delta_action(env, action_term_name).raw_action.squeeze(-1)
+  cost = torch.square(raw - 1.0)
 
   if command_name is not None:
     command = env.command_manager.get_command(command_name)
@@ -481,10 +477,12 @@ def phase_sync_cost(
       active = (total_command > command_threshold).float()
       cost = cost * active
       if active.any():
-        env.extras["log"]["Metrics/phase_sync_error_mean"] = cost[active > 0].mean()
+        env.extras["log"]["Metrics/phase_delta_nominal_error_mean"] = cost[
+          active > 0
+        ].mean()
       return cost
 
-  env.extras["log"]["Metrics/phase_sync_error_mean"] = cost.mean()
+  env.extras["log"]["Metrics/phase_delta_nominal_error_mean"] = cost.mean()
   return cost
 
 

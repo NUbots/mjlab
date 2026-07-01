@@ -455,11 +455,10 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_threshold": 0.05,
       },
     ),
-    "phase_sync": RewardTermCfg(
-      func=mdp.phase_sync_cost,
+    "phase_delta_nominal": RewardTermCfg(
+      func=mdp.phase_delta_nominal_cost,
       weight=0.0,
       params={
-        "period": 0.7,
         "action_term_name": "phase_delta",
         "command_name": "twist",
         "command_threshold": 0.05,

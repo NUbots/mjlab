@@ -1,4 +1,4 @@
-"""Tests for policy-owned gait phase (PhaseDeltaAction, sync cost, wiring)."""
+"""Tests for policy-owned gait phase (PhaseDeltaAction, nominal cost, wiring)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,10 @@ import torch
 from mjlab.envs.mdp.actions.phase_delta import PhaseDeltaAction, PhaseDeltaActionCfg
 from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
 from mjlab.tasks.velocity.mdp.observations import gait_clock
-from mjlab.tasks.velocity.mdp.rewards import feet_swing_height_clock, phase_sync_cost
+from mjlab.tasks.velocity.mdp.rewards import (
+  feet_swing_height_clock,
+  phase_delta_nominal_cost,
+)
 
 
 def _make_phase_env(
@@ -96,14 +99,14 @@ def test_phase_delta_metrics_nominal_ratio():
   assert math.isclose(period_eff.item(), 0.7, rel_tol=1e-5)
 
 
-def test_phase_sync_cost_aligned_and_opposite():
-  env = _make_phase_env(num_envs=2, episode_steps=[0, 0])
+def test_phase_delta_nominal_cost_at_and_off_nominal():
+  env = _make_phase_env(num_envs=2)
   action = _make_phase_action(env, period=0.7)
-  action._policy_phase[:] = torch.tensor([0.0, 0.5])
-  cost = phase_sync_cost(env, period=0.7)
+  action.process_actions(torch.tensor([[1.0], [2.0]]))
+  cost = phase_delta_nominal_cost(env)
   assert math.isclose(cost[0].item(), 0.0, abs_tol=1e-6)
-  assert math.isclose(cost[1].item(), 2.0, abs_tol=1e-6)
-  assert "Metrics/phase_sync_error_mean" in env.extras["log"]
+  assert math.isclose(cost[1].item(), 1.0, abs_tol=1e-6)
+  assert "Metrics/phase_delta_nominal_error_mean" in env.extras["log"]
 
 
 def test_gait_clock_uses_policy_phase():
