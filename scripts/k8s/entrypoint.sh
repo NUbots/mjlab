@@ -133,7 +133,7 @@ if [[ -n "${WANDB_TAGS:-}" ]]; then
   TRAIN_ARGS+=(--agent.wandb-tags "${_tags_literal}")
 fi
 if [[ "${RESUME:-false}" == "true" ]]; then
-  TRAIN_ARGS+=(--agent.resume)
+  TRAIN_ARGS+=(--agent.resume True)
 fi
 if [[ -n "${WANDB_RUN_PATH:-}" ]]; then
   TRAIN_ARGS+=(--wandb-run-path "${WANDB_RUN_PATH}")
