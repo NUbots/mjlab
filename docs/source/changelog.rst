@@ -17,6 +17,17 @@ Added
   a Gaussian noise/bias models measurement error. Exposed for NUbots Nugus via
   the ``CURRENT_OBS`` env knob (registered on actor and critic). Enabling it
   changes the actor input dimension, so those runs train from scratch.
+- Added a ``PhaseDeltaAction`` term that lets the policy accumulate its own
+  gait phase via per-step deltas (``scale = step_dt / GAIT_PERIOD``), with a
+  standing gate that zeros phase when the twist command is below threshold.
+  Phase-time metrics (``phase_delta_mean``, ``phase_period_effective_mean``,
+  ``phase_delta_nominal_ratio_mean``, etc.) are logged each step for walking
+  envs. Deploy uses local phase state only — no global episode-time clock.
+- Added a ``clock_learned`` NUbots Nugus variant (``MJLAB_VARIANT``) that wires
+  ``gait_clock`` and ``feet_swing_height_clock`` to policy-owned phase from step
+  zero, keeps ``foot_swing_height`` weight fixed at 0.75, and anneals only a
+  training-only ``phase_sync`` penalty (vs episode-time reference phase) through
+  p1/p2/p3. No ``silence_stages`` or clock-reward weight anneal.
 - Added a ``silence_stages`` option to the ``gait_clock`` observation that fades
   the clock output to zero on a staged schedule read from
   ``common_step_counter``. Exposed for NUbots Nugus via the ``SILENCE_CLOCK``

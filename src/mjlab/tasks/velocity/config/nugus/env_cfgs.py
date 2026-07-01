@@ -15,7 +15,7 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp import dr
-from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.envs.mdp.actions import JointPositionActionCfg, PhaseDeltaActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg, requires_model_fields
 from mjlab.managers.observation_manager import ObservationTermCfg
@@ -175,13 +175,26 @@ def _add_phase_c_curriculum(
 def _add_gait_curriculum(
   cfg: ManagerBasedRlEnvCfg,
   *,
-  variant: Literal["clock_anneal", "self_paced", "clock_persist"],
+  variant: Literal["clock_anneal", "self_paced", "clock_persist", "clock_learned"],
   p1: int,
   p2: int,
   p3: int,
 ) -> None:
   """Configure staged gait handoff curriculums for the selected variant."""
-  if variant == "clock_anneal":
+  if variant == "clock_learned":
+    cfg.curriculum["phase_sync_anneal"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "phase_sync",
+        "stages": [
+          {"step": 0, "weight": -0.5},
+          {"step": p1, "weight": -0.2},
+          {"step": p2, "weight": -0.05},
+          {"step": p3, "weight": 0.0},
+        ],
+      },
+    )
+  elif variant == "clock_anneal":
     cfg.curriculum["clock_anneal"] = CurriculumTermCfg(
       func=mdp.reward_curriculum,
       params={
@@ -249,11 +262,19 @@ def _add_gait_curriculum(
 def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Create NUbots Nugus rough terrain velocity configuration."""
   variant_raw = os.environ.get("MJLAB_VARIANT", "clock_anneal")
-  if variant_raw not in ("clock_anneal", "self_paced", "clock_persist"):
+  if variant_raw not in (
+    "clock_anneal",
+    "self_paced",
+    "clock_persist",
+    "clock_learned",
+  ):
     raise ValueError(
-      f"MJLAB_VARIANT must be clock_anneal, self_paced, or clock_persist; got {variant_raw!r}"
+      "MJLAB_VARIANT must be clock_anneal, self_paced, clock_persist, or "
+      f"clock_learned; got {variant_raw!r}"
     )
-  variant: Literal["clock_anneal", "self_paced", "clock_persist"] = variant_raw  # type: ignore[assignment]
+  variant: Literal["clock_anneal", "self_paced", "clock_persist", "clock_learned"] = (
+    variant_raw  # type: ignore[assignment]
+  )
 
   gait_period = _env_float("GAIT_PERIOD", _DEFAULT_GAIT_PERIOD)
   joule_w = _env_float("JOULE_W", _DEFAULT_JOULE_W)
@@ -408,6 +429,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
   joint_pos_action.scale = NUGUS_ACTION_SCALE  # ~0.245 rad (0.25 * e/s * 5).
+
+  if variant == "clock_learned":
+    cfg.actions["phase_delta"] = PhaseDeltaActionCfg(
+      entity_name="robot",
+      period=gait_period,
+      command_name="twist",
+      command_threshold=0.05,
+    )
+
   cfg.viewer.body_name = "torso"
 
   twist_cmd = cfg.commands["twist"]
@@ -550,6 +580,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "command_name": "twist",
     "command_threshold": 0.05,
   }
+  if variant == "clock_learned":
+    clock_params["phase_source"] = "policy"
   # Clock-silencing variant: fade the gait-clock OBSERVATION out to zero on the
   # same staged schedule as the clock REWARD anneal (foot_swing_height: 0.75 ->
   # 0.4 -> 0.1 -> 0.0 over 0/p1/p2/p3). The scale mirrors that weight normalized
@@ -608,6 +640,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "command_name": "twist",
     "command_threshold": 0.05,
   }
+  if variant == "clock_learned":
+    swing_height.params["phase_source"] = "policy"
+    cfg.rewards["phase_sync"].weight = -0.5
+    cfg.rewards["phase_sync"].params["period"] = gait_period
 
   # Self-paced sparse swing-height (peak-at-landing) handoff target.
   landing_height = cfg.rewards["foot_swing_height_landing"]

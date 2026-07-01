@@ -12,6 +12,7 @@ from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import BuiltinSensor, ContactSensor
 from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
+from mjlab.tasks.velocity.mdp.observations import _gait_base_phase
 from mjlab.tasks.velocity.mdp.terrain_utils import terrain_normal_from_sensors
 from mjlab.utils.lab_api.math import quat_apply, quat_apply_inverse
 from mjlab.utils.lab_api.string import (
@@ -379,6 +380,8 @@ def feet_swing_height_clock(
   profile: Literal["sin", "bump"] = "sin",
   command_name: str | None = None,
   command_threshold: float = 0.05,
+  phase_source: Literal["time", "policy"] = "time",
+  action_term_name: str = "phase_delta",
 ) -> torch.Tensor:
   """Dense swing-height tracking against an *independent* gait clock.
 
@@ -418,8 +421,7 @@ def feet_swing_height_clock(
     f"foot_offsets has {len(foot_offsets)} entries but sensor reports {num_feet} feet."
   )
 
-  t = env.episode_length_buf.float() * env.step_dt  # [B]
-  base_phase = torch.remainder(t / period, 1.0)  # [B]
+  base_phase = _gait_base_phase(env, period, phase_source, action_term_name)  # [B]
   offsets = torch.tensor(foot_offsets, device=env.device, dtype=foot_heights.dtype)
   foot_phase = torch.remainder(base_phase[:, None] + offsets[None, :], 1.0)  # [B, F]
 
@@ -446,6 +448,44 @@ def feet_swing_height_clock(
   mean_swing_error = torch.sum(torch.abs(error) * swing_mask) / num_swing
   env.extras["log"]["Metrics/swing_clock_error_mean"] = mean_swing_error
   return reward
+
+
+def phase_sync_cost(
+  env: ManagerBasedRlEnv,
+  period: float,
+  action_term_name: str = "phase_delta",
+  command_name: str | None = "twist",
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Penalize circular distance between policy phase and a training-only reference.
+
+  The reference phase advances with episode time (``episode_time / period``) and
+  is not available at deploy time. The policy-owned phase comes from
+  :class:`mjlab.envs.mdp.actions.PhaseDeltaAction`. Cost is
+  ``1 - cos(2*pi*(policy_phase - reference_phase))``, zero when aligned and
+  two when opposite. Gated off when standing.
+  """
+  from mjlab.envs.mdp.actions.phase_delta import get_phase_delta_action
+
+  reference_phase = _gait_base_phase(env, period, "time", action_term_name)
+  policy_phase = get_phase_delta_action(env, action_term_name).policy_phase
+  phase_diff = policy_phase - reference_phase
+  cost = 1.0 - torch.cos(2.0 * math.pi * phase_diff)
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      total_command = linear_norm + angular_norm
+      active = (total_command > command_threshold).float()
+      cost = cost * active
+      if active.any():
+        env.extras["log"]["Metrics/phase_sync_error_mean"] = cost[active > 0].mean()
+      return cost
+
+  env.extras["log"]["Metrics/phase_sync_error_mean"] = cost.mean()
+  return cost
 
 
 def feet_slip(

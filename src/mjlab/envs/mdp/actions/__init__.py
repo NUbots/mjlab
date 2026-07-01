@@ -34,3 +34,10 @@ from mjlab.envs.mdp.actions.differential_ik import (
 from mjlab.envs.mdp.actions.differential_ik import (
   DifferentialIKActionCfg as DifferentialIKActionCfg,
 )
+from mjlab.envs.mdp.actions.phase_delta import PhaseDeltaAction as PhaseDeltaAction
+from mjlab.envs.mdp.actions.phase_delta import (
+  PhaseDeltaActionCfg as PhaseDeltaActionCfg,
+)
+from mjlab.envs.mdp.actions.phase_delta import (
+  get_phase_delta_action as get_phase_delta_action,
+)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from weakref import WeakKeyDictionary
 
 import torch
@@ -21,12 +21,31 @@ if TYPE_CHECKING:
 _CURRENT_KT_CACHE: WeakKeyDictionary = WeakKeyDictionary()
 
 
+def _gait_base_phase(
+  env: ManagerBasedRlEnv,
+  period: float,
+  phase_source: Literal["time", "policy"],
+  action_term_name: str,
+) -> torch.Tensor:
+  """Normalized gait phase in ``[0, 1)`` from episode time or policy state."""
+  if phase_source == "time":
+    t = env.episode_length_buf.float() * env.step_dt
+    return torch.remainder(t / period, 1.0)
+  if phase_source == "policy":
+    from mjlab.envs.mdp.actions.phase_delta import get_phase_delta_action
+
+    return get_phase_delta_action(env, action_term_name).policy_phase
+  raise ValueError(f"Unknown phase_source {phase_source!r}; use 'time' or 'policy'.")
+
+
 def gait_clock(
   env: ManagerBasedRlEnv,
   period: float,
   command_name: str | None = None,
   command_threshold: float = 0.05,
   silence_stages: list[dict[str, float]] | None = None,
+  phase_source: Literal["time", "policy"] = "time",
+  action_term_name: str = "phase_delta",
 ) -> torch.Tensor:
   """Independent gait-clock phase as ``[sin(2*pi*phase), cos(2*pi*phase)]``.
 
@@ -60,8 +79,8 @@ def gait_clock(
   Returns:
     Tensor of shape [B, 2].
   """
-  t = env.episode_length_buf.float() * env.step_dt  # [B]
-  angle = 2.0 * math.pi * torch.remainder(t / period, 1.0)  # [B]
+  phase = _gait_base_phase(env, period, phase_source, action_term_name)  # [B]
+  angle = 2.0 * math.pi * phase  # [B]
   clock = torch.stack([torch.sin(angle), torch.cos(angle)], dim=-1)  # [B, 2]
   if command_name is not None:
     command = env.command_manager.get_command(command_name)

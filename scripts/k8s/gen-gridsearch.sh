@@ -132,6 +132,7 @@ k8s_slug() {
 variant_job_slug() {
   case "$1" in
     clock_anneal) echo "ca" ;;
+    clock_learned) echo "cl" ;;
     self_paced) echo "sp" ;;
     clock_persist) echo "cp" ;;
     *) k8s_slug "$1" ;;
@@ -307,10 +308,37 @@ gen_v6_rapidcmd() {
   done
 }
 
+# BATCH=v7: clock_learned vs clock_anneal (no silence) — decoupled learned phase
+# vs coupled clock anneal. pc-0.5, STAND_W 0.15, seed 1, 2000 iters.
+gen_v7_grid() {
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export WANDB_RUN_PATH=""
+  local joule_label variant
+  joule_label="$(joule_tag "$JOULE_W")"
+  for variant in clock_learned clock_anneal; do
+    export MJLAB_VARIANT="$variant"
+    export RUN_NAME="${variant}__stand-0.15__pc-0.5__s1__${BATCH}"
+    export WANDB_TAGS="${variant},stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH}"
+    case "$variant" in
+      clock_learned) emit_manifest "mj-gs-${BATCH}-cl" ;;
+      clock_anneal) emit_manifest "mj-gs-${BATCH}-ca" ;;
+    esac
+  done
+}
+
 case "$BATCH" in
   v4) gen_v4_continuation; expected=2 ;;
   v5) gen_v5_grid; expected=4 ;;
   v6) gen_v6_rapidcmd; expected=2 ;;
+  v7) gen_v7_grid; expected=2 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))
