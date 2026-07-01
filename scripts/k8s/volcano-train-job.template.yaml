@@ -93,13 +93,14 @@ spec:
                   value: "all"
                 # Pin commit + force fresh, isolated runs regardless of the shared
                 # mjlab-train-config configmap (which is rewritten by other tooling).
-                # NOTE: 21c3ecc adds the actuator_current (CURRENT_OBS) and
+                # NOTE: c04e4ec adds the actuator_current (CURRENT_OBS) and
                 # clock-silence (SILENCE_CLOCK) clock_anneal variants, decouples the
                 # curriculum phase timing via PHASE_ITERATIONS, and rescales the
                 # command_vel curriculum so the wide backward/strafe/yaw ranges are
-                # reached early in a run.
+                # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
+                # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "21c3ecc8ff7a56dc4093d2c2808615230d60c8e8"
+                  value: "c04e4ecae99a5e250c5d56319a939adf079cf571"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
