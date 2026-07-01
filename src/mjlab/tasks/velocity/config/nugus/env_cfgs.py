@@ -45,6 +45,7 @@ _DEFAULT_PHASE_C_FRAC = 0.6
 _DEFAULT_STAND_W = -0.15
 _DEFAULT_EFFORT_LO = 0.7
 _DEFAULT_EFFORT_HI = 1.2
+_DEFAULT_RESAMPLE_MIN = 3.0
 # Per-servo torque constants (Nm/A) for the actuator-current observation.
 # XH540-W270 (legs) and MX106 (hip yaw) are ~2.0 Nm/A; the smaller MX64 arm/head
 # servos are approximated lower. Matched by regex against actuator names.
@@ -264,6 +265,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     stand_w = -stand_w
   effort_lo = _env_float("EFFORT_LO", _DEFAULT_EFFORT_LO)
   effort_hi = _env_float("EFFORT_HI", _DEFAULT_EFFORT_HI)
+  resample_min = _env_float("RESAMPLE_MIN", _DEFAULT_RESAMPLE_MIN)
   silence_clock = _env_bool("SILENCE_CLOCK", False)
   current_obs = _env_bool("CURRENT_OBS", False)
   max_iterations = _env_int("MAX_ITERATIONS", _DEFAULT_MAX_ITERATIONS)
@@ -414,6 +416,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   twist_cmd.rel_stop_envs = 0.5
   twist_cmd.stop_ramp_time = 0.75
   twist_cmd.stop_settle_time = 0.75
+  twist_cmd.resampling_time_range = (
+    resample_min,
+    twist_cmd.resampling_time_range[1],
+  )
 
   cfg.rewards["stand_still_pose"].weight = stand_w
   cfg.rewards["stand_still_motion"].weight = -0.003

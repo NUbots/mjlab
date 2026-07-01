@@ -27,6 +27,11 @@ Added
   (``MAX_ITERATIONS``, which now only drives ``--agent.max-iterations``). This
   lets a run extend or resume past its original length with the phase timing
   frozen at fixed absolute step counts.
+- Added a ``RESAMPLE_MIN`` env knob for the NUbots Nugus velocity task that
+  sets the lower bound of the uniform velocity-command resampling interval
+  (the upper bound stays 8.0s). Setting it to ``0.0`` exposes the policy to
+  rapid command changes and heading jumps while the 1.5s stop-settle tail
+  (``stop_ramp_time`` + ``stop_settle_time``) is unchanged.
 - Added Kubernetes manifest bundle under ``scripts/k8s/`` for 4-GPU single-node
   training with a PVC-backed git workspace, the public GHCR runtime image,
   TensorBoard, and HTTPRoute (AI-Cluster).

@@ -109,6 +109,7 @@ PHASE_ITERATIONS="${PHASE_ITERATIONS:-1250}"
 SILENCE_CLOCK="${SILENCE_CLOCK:-0}"
 CURRENT_OBS="${CURRENT_OBS:-0}"
 RESUME="${RESUME:-false}"
+RESAMPLE_MIN="${RESAMPLE_MIN:-3.0}"
 WANDB_RUN_PATH="${WANDB_RUN_PATH:-}"
 WANDB_RUN_NAME="${WANDB_RUN_NAME:-}"
 
@@ -192,7 +193,7 @@ emit_manifest() {
 # Export the knobs that are constant across a batch once. Per-cell values are
 # exported inside each generator below just before emit_manifest.
 export GAIT_PERIOD EFFORT_LO EFFORT_HI LOGGER EXPERIMENT_NAME WANDB_PROJECT
-export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME
+export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME RESAMPLE_MIN
 export WANDB_RUN_PATH WANDB_RUN_NAME
 
 gen_default_matrix() {
@@ -277,9 +278,39 @@ gen_v5_grid() {
   done
 }
 
+# BATCH=v6: A/B on command resampling minimum (baseline 3.0s vs rapid 0.0s) for
+# clock_anneal pc-0.5, STAND_W 0.15, seed 1, 2000 iters with phases frozen at
+# 1250.
+gen_v6_rapidcmd() {
+  export MJLAB_VARIANT="clock_anneal"
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="1250"
+  export WANDB_RUN_PATH=""
+  local joule_label
+  joule_label="$(joule_tag "$JOULE_W")"
+  local rmin
+  for rmin in 3.0 0.0; do
+    export RESAMPLE_MIN="$rmin"
+    export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__rmin${rmin}__s1__${BATCH}"
+    export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},rmin-${rmin}"
+    case "$rmin" in
+      3.0) emit_manifest "mj-gs-${BATCH}-ca-rmin30" ;;
+      0.0) emit_manifest "mj-gs-${BATCH}-ca-rmin00" ;;
+    esac
+  done
+}
+
 case "$BATCH" in
   v4) gen_v4_continuation; expected=2 ;;
   v5) gen_v5_grid; expected=4 ;;
+  v6) gen_v6_rapidcmd; expected=2 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))

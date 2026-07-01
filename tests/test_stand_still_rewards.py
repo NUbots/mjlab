@@ -182,3 +182,91 @@ def test_velocity_command_stop_tail_ramps_then_zeros():
   term._update_command()
   assert term.is_stop_ramping[0].item() is False
   assert term.vel_command_b[0, 0].item() == pytest.approx(0.0, abs=1e-5)
+
+
+def test_velocity_command_short_segment_stop_tail_fully_zeroed_in_settle():
+  """Sub-1.5s segments with a stop tail spend the whole tail in settle (zeroed)."""
+  cfg = UniformVelocityCommandCfg(
+    entity_name="robot",
+    resampling_time_range=(0.0, 8.0),
+    rel_stop_envs=1.0,
+    stop_ramp_time=0.75,
+    stop_settle_time=0.75,
+    ranges=UniformVelocityCommandCfg.Ranges(
+      lin_vel_x=(-1.0, 1.0),
+      lin_vel_y=(-1.0, 1.0),
+      ang_vel_z=(-0.5, 0.5),
+    ),
+  )
+  env = MagicMock()
+  env.device = torch.device("cpu")
+  env.num_envs = 1
+  env.step_dt = 0.1
+  robot = MagicMock()
+  robot.data = SimpleNamespace(
+    root_link_pos_w=torch.zeros(1, 3),
+    root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+    root_link_lin_vel_b=torch.zeros(1, 3),
+    root_link_ang_vel_b=torch.zeros(1, 3),
+    heading_w=torch.zeros(1),
+  )
+  env.scene.__getitem__ = MagicMock(return_value=robot)
+
+  term = UniformVelocityCommand(cfg, env)
+  term.vel_command_b[0] = torch.tensor([1.0, 0.0, 0.0])
+  term.vel_command_w[0] = term.vel_command_b[0].clone()
+  term.time_left[0] = 0.5
+  term.has_stop_tail[0] = True
+  term.is_standing_env[0] = False
+
+  term._update_command()
+  assert term.is_stop_ramping[0].item() is False
+  assert term.vel_command_b[0].abs().max().item() == pytest.approx(0.0, abs=1e-5)
+
+
+def test_velocity_command_short_segment_without_stop_tail_holds_command():
+  cfg = UniformVelocityCommandCfg(
+    entity_name="robot",
+    resampling_time_range=(0.0, 8.0),
+    rel_stop_envs=0.0,
+    ranges=UniformVelocityCommandCfg.Ranges(
+      lin_vel_x=(-1.0, 1.0),
+      lin_vel_y=(-1.0, 1.0),
+      ang_vel_z=(-0.5, 0.5),
+    ),
+  )
+  env = MagicMock()
+  env.device = torch.device("cpu")
+  env.num_envs = 1
+  env.step_dt = 0.1
+  robot = MagicMock()
+  robot.data = SimpleNamespace(
+    root_link_pos_w=torch.zeros(1, 3),
+    root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+    root_link_lin_vel_b=torch.zeros(1, 3),
+    root_link_ang_vel_b=torch.zeros(1, 3),
+    heading_w=torch.zeros(1),
+  )
+  env.scene.__getitem__ = MagicMock(return_value=robot)
+
+  term = UniformVelocityCommand(cfg, env)
+  term.vel_command_b[0] = torch.tensor([0.8, -0.2, 0.1])
+  term.vel_command_w[0] = term.vel_command_b[0].clone()
+  term.time_left[0] = 0.3
+  term.has_stop_tail[0] = False
+  term.is_standing_env[0] = False
+
+  term._update_command()
+  assert term.vel_command_b[0].tolist() == pytest.approx([0.8, -0.2, 0.1], abs=1e-5)
+
+
+def test_resample_min_config_wiring(monkeypatch):
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_anneal")
+  monkeypatch.setenv("RESAMPLE_MIN", "0.0")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  twist = cfg.commands["twist"]
+  assert isinstance(twist, UniformVelocityCommandCfg)
+  assert twist.resampling_time_range == (0.0, 8.0)

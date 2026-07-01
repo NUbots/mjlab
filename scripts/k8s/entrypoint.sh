@@ -91,6 +91,7 @@ export PHASE_C_FRAC="${PHASE_C_FRAC:-}"
 export GAIT_PERIOD="${GAIT_PERIOD:-0.7}"
 export EFFORT_LO="${EFFORT_LO:-}"
 export EFFORT_HI="${EFFORT_HI:-}"
+export RESAMPLE_MIN="${RESAMPLE_MIN:-}"
 export SEED="${SEED:-}"
 # Phase boundaries decouple from training length; clock-silence and current-obs
 # variant knobs. Only export when set so the factory falls back to its defaults.

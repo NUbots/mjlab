@@ -70,6 +70,8 @@ spec:
                   value: "${SILENCE_CLOCK}"
                 - name: CURRENT_OBS
                   value: "${CURRENT_OBS}"
+                - name: RESAMPLE_MIN
+                  value: "${RESAMPLE_MIN}"
                 - name: GAIT_PERIOD
                   value: "${GAIT_PERIOD}"
                 - name: EFFORT_LO
