@@ -115,6 +115,9 @@ WANDB_RUN_NAME="${WANDB_RUN_NAME:-}"
 PHASE_DELTA_STRONG_ITERS="${PHASE_DELTA_STRONG_ITERS:-}"
 PHASE_DELTA_STRONG_W="${PHASE_DELTA_STRONG_W:-}"
 UPRIGHT_W="${UPRIGHT_W:-}"
+TRAINING_REGIME="${TRAINING_REGIME:-}"
+CRITIC_HEIGHT_SCAN="${CRITIC_HEIGHT_SCAN:-}"
+TASK="${TASK:-Mjlab-Velocity-Flat-Nubots-Nugus}"
 
 # JOULE_W tag helper: keep scientific notation when already formatted.
 joule_tag() {
@@ -201,6 +204,7 @@ export GAIT_PERIOD EFFORT_LO EFFORT_HI LOGGER EXPERIMENT_NAME WANDB_PROJECT
 export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME RESAMPLE_MIN
 export WANDB_RUN_PATH WANDB_RUN_NAME
 export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W UPRIGHT_W
+export TRAINING_REGIME CRITIC_HEIGHT_SCAN TASK
 
 gen_default_matrix() {
   for variant in "${VARIANTS[@]}"; do
@@ -395,6 +399,79 @@ gen_v8_grid() {
   done
 }
 
+# BATCH=v10: two parallel jobs — (A) flat hard continuation from v9 cur0 with
+# legacy critic, and (B) flat v9-equivalent retrain with critic height_scan.
+# Override V10_WANDB_RUN_PATH with the v9 cur0 W&B run before --apply.
+gen_v10_grid() {
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  local joule_label
+  joule_label="$(joule_tag "$JOULE_W")"
+  local v9_path="${V10_WANDB_RUN_PATH:-}"
+  if [[ -z "$v9_path" ]]; then
+    echo "Missing V10_WANDB_RUN_PATH for stage A; refusing to launch v10." >&2
+    exit 1
+  fi
+  export MJLAB_VARIANT="clock_learned"
+  export TRAINING_REGIME="hard_continue"
+  export CRITIC_HEIGHT_SCAN="false"
+  export RESUME="true"
+  export WANDB_RUN_PATH="$v9_path"
+  export RUN_NAME="clock_learned__stand-0.15__pc-0.5__cur0__hard-cont__v10"
+  export WANDB_TAGS="clock_learned,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},hard-continue,continuation"
+  emit_manifest "mj-gs-v10-cl-cur0-cont"
+  export TRAINING_REGIME="base"
+  export CRITIC_HEIGHT_SCAN="true"
+  export RESUME="false"
+  export WANDB_RUN_PATH=""
+  export RUN_NAME="clock_learned__stand-0.15__pc-0.5__cur0__hs-critic__v10"
+  export WANDB_TAGS="clock_learned,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan,flat-retrain"
+  emit_manifest "mj-gs-v10-cl-cur0-hs"
+}
+
+# BATCH=v10b: rough hard continuation from stage B (not queued in v10 launch).
+# Run manually after stage B completes:
+#   V10B_WANDB_RUN_PATH=<wandb/path/from/stage-B> BATCH=v10b ./scripts/k8s/gen-gridsearch.sh --apply
+gen_v10b_rough_cont() {
+  export MJLAB_VARIANT="clock_learned"
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export TASK="Mjlab-Velocity-Rough-Nubots-Nugus"
+  export TRAINING_REGIME="hard_continue"
+  export CRITIC_HEIGHT_SCAN="true"
+  export RESUME="true"
+  local b_path="${V10B_WANDB_RUN_PATH:-}"
+  if [[ -z "$b_path" ]]; then
+    echo "Missing V10B_WANDB_RUN_PATH for stage C; refusing to launch v10b." >&2
+    exit 1
+  fi
+  export WANDB_RUN_PATH="$b_path"
+  local joule_label
+  joule_label="$(joule_tag "$JOULE_W")"
+  export RUN_NAME="clock_learned__stand-0.15__pc-0.5__cur0__hs-critic__hard-cont-rough__v10b"
+  export WANDB_TAGS="clock_learned,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan,hard-continue,rough-continuation"
+  emit_manifest "mj-gs-v10b-cl-cur0-rough-cont"
+}
+
 case "$BATCH" in
   v4) gen_v4_continuation; expected=2 ;;
   v5) gen_v5_grid; expected=4 ;;
@@ -402,6 +479,8 @@ case "$BATCH" in
   v7) gen_v7_grid; expected=2 ;;
   v8) gen_v8_grid; expected=2 ;;
   v9) gen_v9_grid; expected=3 ;;
+  v10) gen_v10_grid; expected=2 ;;
+  v10b) gen_v10b_rough_cont; expected=1 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))

@@ -22,6 +22,11 @@ class VelocityStage(TypedDict):
   ang_vel_z: tuple[float, float] | None
 
 
+class PushRobotStage(TypedDict, total=False):
+  step: int
+  params: dict[str, dict[str, tuple[float, float]]]
+
+
 def terrain_levels_vel(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
@@ -105,4 +110,25 @@ def commands_vel(
     "lin_vel_y_max": torch.tensor(cfg.ranges.lin_vel_y[1]),
     "ang_vel_z_min": torch.tensor(cfg.ranges.ang_vel_z[0]),
     "ang_vel_z_max": torch.tensor(cfg.ranges.ang_vel_z[1]),
+  }
+
+
+def push_robot_curriculum(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  event_name: str,
+  push_stages: list[PushRobotStage],
+) -> dict[str, torch.Tensor]:
+  """Stage ``push_robot`` event velocity ranges from ``common_step_counter``."""
+  del env_ids
+  term_cfg = env.event_manager.get_term_cfg(event_name)
+  for stage in push_stages:
+    if env.common_step_counter >= stage["step"]:
+      if "params" in stage:
+        term_cfg.params.update(stage["params"])
+  velocity_range = term_cfg.params["velocity_range"]
+  return {
+    f"push_{axis}_{bound}": torch.tensor(velocity_range[axis][i])
+    for axis in velocity_range
+    for i, bound in enumerate(("min", "max"))
   }

@@ -1,0 +1,139 @@
+"""Tests for v10 Nugus pipeline knobs: CRITIC_HEIGHT_SCAN and hard_continue."""
+
+from __future__ import annotations
+
+import os
+from typing import cast
+from unittest.mock import MagicMock
+
+import pytest
+import torch
+
+from mjlab.tasks.velocity.config.nugus.env_cfgs import (
+  nubots_nugus_flat_env_cfg,
+  nubots_nugus_rough_env_cfg,
+)
+from mjlab.tasks.velocity.mdp.curriculums import PushRobotStage, push_robot_curriculum
+
+_NUM_STEPS_PER_ENV = 24
+_PHASE_ITERATIONS = 2000
+_CONT_BASE = _PHASE_ITERATIONS * _NUM_STEPS_PER_ENV
+
+
+@pytest.fixture(autouse=True)
+def _clear_nugus_env(monkeypatch: pytest.MonkeyPatch) -> None:
+  for key in (
+    "CRITIC_HEIGHT_SCAN",
+    "TRAINING_REGIME",
+    "RESUME",
+    "CONT_BASE_STEP",
+    "PHASE_ITERATIONS",
+    "MAX_ITERATIONS",
+    "UPRIGHT_W",
+  ):
+    monkeypatch.delenv(key, raising=False)
+
+
+def test_critic_height_scan_off_flat_critic_lacks_height_scan() -> None:
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "height_scan" not in cfg.observations["actor"].terms
+  assert "height_scan" not in cfg.observations["critic"].terms
+  sensor_names = {sensor.name for sensor in cfg.scene.sensors or ()}
+  assert "terrain_scan" not in sensor_names
+
+
+def test_critic_height_scan_on_retains_height_scan_and_terrain_scan() -> None:
+  os.environ["CRITIC_HEIGHT_SCAN"] = "true"
+  flat_cfg = nubots_nugus_flat_env_cfg()
+  rough_cfg = nubots_nugus_rough_env_cfg()
+  for cfg in (flat_cfg, rough_cfg):
+    assert "height_scan" not in cfg.observations["actor"].terms
+    assert "height_scan" in cfg.observations["critic"].terms
+  flat_sensor_names = {sensor.name for sensor in flat_cfg.scene.sensors or ()}
+  assert "terrain_scan" in flat_sensor_names
+
+
+def test_hard_continue_stages_anchor_at_resume_base(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "hard_continue")
+  monkeypatch.setenv("RESUME", "true")
+  monkeypatch.setenv("PHASE_ITERATIONS", str(_PHASE_ITERATIONS))
+  cfg = nubots_nugus_flat_env_cfg()
+  velocity_stages = cfg.curriculum["command_vel"].params["velocity_stages"]
+  push_stages = cfg.curriculum["push_robot_ramp"].params["push_stages"]
+  assert velocity_stages[0]["step"] == _CONT_BASE
+  assert velocity_stages[-1]["step"] == _CONT_BASE + 1000 * _NUM_STEPS_PER_ENV
+  assert push_stages[0]["step"] == _CONT_BASE
+  assert push_stages[-1]["step"] == _CONT_BASE + 1000 * _NUM_STEPS_PER_ENV
+  assert velocity_stages[-1]["lin_vel_x"] == (-0.75, 0.75)
+  upright_stages = cfg.curriculum["upright_ramp"].params["stages"]
+  assert upright_stages[0]["step"] == _CONT_BASE
+  assert upright_stages[-1]["weight"] == 0.25
+  assert upright_stages[-1]["params"]["std"] == 0.35
+
+
+def test_hard_continue_cont_base_override(monkeypatch: pytest.MonkeyPatch) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "hard_continue")
+  monkeypatch.setenv("CONT_BASE_STEP", "12345")
+  cfg = nubots_nugus_flat_env_cfg()
+  velocity_stages = cfg.curriculum["command_vel"].params["velocity_stages"]
+  assert velocity_stages[0]["step"] == 12345
+
+
+def test_hard_continue_absent_in_base_regime(monkeypatch: pytest.MonkeyPatch) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "base")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "push_robot_ramp" not in cfg.curriculum
+
+
+def test_push_robot_curriculum_applies_staged_velocity_range() -> None:
+  push_stages = [
+    {
+      "step": 0,
+      "params": {
+        "velocity_range": {
+          "x": (-0.2, 0.4),
+          "y": (-0.2, 0.2),
+          "z": (-0.0, 0.0),
+          "roll": (-0.05, 0.05),
+          "pitch": (-0.05, 0.05),
+          "yaw": (-0.0, 0.0),
+        },
+      },
+    },
+    {
+      "step": 6000,
+      "params": {
+        "velocity_range": {
+          "x": (-0.4, 0.8),
+          "y": (-0.4, 0.4),
+          "z": (-0.0, 0.0),
+          "roll": (-0.1, 0.1),
+          "pitch": (-0.1, 0.1),
+          "yaw": (-0.0, 0.0),
+        },
+      },
+    },
+  ]
+  term_cfg = MagicMock()
+  term_cfg.params = {
+    "velocity_range": {
+      "x": (0.0, 0.0),
+      "y": (0.0, 0.0),
+      "z": (0.0, 0.0),
+      "roll": (0.0, 0.0),
+      "pitch": (0.0, 0.0),
+      "yaw": (0.0, 0.0),
+    },
+  }
+  env = MagicMock()
+  env.common_step_counter = 6000
+  env.event_manager.get_term_cfg = MagicMock(return_value=term_cfg)
+  push_robot_curriculum(
+    env,
+    env_ids=torch.tensor([0]),
+    event_name="push_robot",
+    push_stages=cast(list[PushRobotStage], push_stages),
+  )
+  assert term_cfg.params["velocity_range"]["x"] == (-0.4, 0.8)

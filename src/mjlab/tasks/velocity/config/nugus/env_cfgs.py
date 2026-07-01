@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from typing import TYPE_CHECKING, Literal
 
@@ -79,6 +80,11 @@ def _env_bool(name: str, default: bool) -> bool:
   if raw in (None, ""):
     return default
   return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_str(name: str, default: str) -> str:
+  raw = os.environ.get(name)
+  return default if raw in (None, "") else raw.strip()
 
 
 def _phase_steps(max_iterations: int, phase_c_frac: float) -> tuple[int, int, int]:
@@ -170,6 +176,181 @@ def _coalesce_reward_curriculum_stages(
       continue
     coalesced.append({"step": step, **payload})
   return coalesced
+
+
+_HARD_CONTINUE_ITER_OFFSETS = (0, 250, 500, 1000)
+_PUSH_VELOCITY_RANGE_BASE: dict[str, tuple[float, float]] = {
+  "x": (-0.2, 0.4),
+  "y": (-0.2, 0.2),
+  "z": (-0.0, 0.0),
+  "roll": (-0.05, 0.05),
+  "pitch": (-0.05, 0.05),
+  "yaw": (-0.0, 0.0),
+}
+_PUSH_HARD_CONTINUE_SCALES = (1.0, 1.25, 1.5, 2.0)
+
+
+def _hard_continue_steps(cont_base: int) -> list[int]:
+  return [
+    cont_base + offset * _NUM_STEPS_PER_ENV for offset in _HARD_CONTINUE_ITER_OFFSETS
+  ]
+
+
+def _scale_push_velocity_range(
+  scale: float,
+) -> dict[str, tuple[float, float]]:
+  return {
+    axis: (lo * scale, hi * scale)
+    for axis, (lo, hi) in _PUSH_VELOCITY_RANGE_BASE.items()
+  }
+
+
+def _hard_continue_velocity_stages(cont_base: int) -> list[dict[str, object]]:
+  ranges = (
+    {
+      "lin_vel_x": (-0.55, 0.55),
+      "lin_vel_y": (-0.35, 0.35),
+      "ang_vel_z": (-0.55, 0.55),
+    },
+    {
+      "lin_vel_x": (-0.62, 0.62),
+      "lin_vel_y": (-0.38, 0.38),
+      "ang_vel_z": (-0.65, 0.65),
+    },
+    {
+      "lin_vel_x": (-0.68, 0.68),
+      "lin_vel_y": (-0.42, 0.42),
+      "ang_vel_z": (-0.72, 0.72),
+    },
+    {
+      "lin_vel_x": (-0.75, 0.75),
+      "lin_vel_y": (-0.45, 0.45),
+      "ang_vel_z": (-0.80, 0.80),
+    },
+  )
+  return [
+    {"step": step, **velocity_range}
+    for step, velocity_range in zip(
+      _hard_continue_steps(cont_base), ranges, strict=True
+    )
+  ]
+
+
+def _hard_continue_push_stages(cont_base: int) -> list[dict[str, object]]:
+  return [
+    {
+      "step": step,
+      "params": {
+        "velocity_range": _scale_push_velocity_range(scale),
+      },
+    }
+    for step, scale in zip(
+      _hard_continue_steps(cont_base),
+      _PUSH_HARD_CONTINUE_SCALES,
+      strict=True,
+    )
+  ]
+
+
+def _pose_std_walking_with_hip_roll(
+  std_walking: dict[str, float], hip_roll_std: float
+) -> dict[str, float]:
+  updated = dict(std_walking)
+  updated[r".*hip_roll.*"] = hip_roll_std
+  return updated
+
+
+def _hard_continue_upright_stages(
+  cont_base: int, upright_w_start: float
+) -> list[dict[str, float | dict[str, float]]]:
+  steps = _hard_continue_steps(cont_base)
+  upright_weights = (upright_w_start, 0.42, 0.33, 0.25)
+  upright_stds = (math.sqrt(0.2), 0.25, 0.30, 0.35)
+  return [
+    {"step": step, "weight": weight, "params": {"std": std}}
+    for step, weight, std in zip(steps, upright_weights, upright_stds, strict=True)
+  ]
+
+
+def _hard_continue_weight_stages(
+  cont_base: int,
+  start_weight: float,
+  end_weight: float,
+) -> list[dict[str, float]]:
+  steps = _hard_continue_steps(cont_base)
+  weights = (
+    start_weight,
+    start_weight + 0.25 * (end_weight - start_weight),
+    start_weight + 0.5 * (end_weight - start_weight),
+    end_weight,
+  )
+  return [
+    {"step": step, "weight": weight}
+    for step, weight in zip(steps, weights, strict=True)
+  ]
+
+
+def _add_hard_continue_curriculum(
+  cfg: ManagerBasedRlEnvCfg,
+  *,
+  cont_base: int,
+  upright_w_start: float,
+  std_walking: dict[str, float],
+) -> None:
+  """Ramp command velocity, push disturbances, and balance penalties after resume."""
+  cfg.curriculum["command_vel"] = CurriculumTermCfg(
+    func=mdp.commands_vel,
+    params={
+      "command_name": "twist",
+      "velocity_stages": _hard_continue_velocity_stages(cont_base),
+    },
+  )
+  cfg.curriculum["push_robot_ramp"] = CurriculumTermCfg(
+    func=mdp.push_robot_curriculum,
+    params={
+      "event_name": "push_robot",
+      "push_stages": _hard_continue_push_stages(cont_base),
+    },
+  )
+  cfg.curriculum["upright_ramp"] = CurriculumTermCfg(
+    func=mdp.reward_curriculum,
+    params={
+      "reward_name": "upright",
+      "stages": _hard_continue_upright_stages(cont_base, upright_w_start),
+    },
+  )
+  hip_roll_stds = (0.10, 0.11, 0.12, 0.14)
+  cfg.curriculum["pose_hip_roll_ramp"] = CurriculumTermCfg(
+    func=mdp.reward_curriculum,
+    params={
+      "reward_name": "pose",
+      "stages": [
+        {
+          "step": step,
+          "params": {
+            "std_walking": _pose_std_walking_with_hip_roll(std_walking, hip_roll_std),
+          },
+        }
+        for step, hip_roll_std in zip(
+          _hard_continue_steps(cont_base), hip_roll_stds, strict=True
+        )
+      ],
+    },
+  )
+  cfg.curriculum["body_ang_vel_ramp"] = CurriculumTermCfg(
+    func=mdp.reward_curriculum,
+    params={
+      "reward_name": "body_ang_vel",
+      "stages": _hard_continue_weight_stages(cont_base, -0.05, -0.02),
+    },
+  )
+  cfg.curriculum["angular_momentum_ramp"] = CurriculumTermCfg(
+    func=mdp.reward_curriculum,
+    params={
+      "reward_name": "angular_momentum",
+      "stages": _hard_continue_weight_stages(cont_base, -0.01, -0.005),
+    },
+  )
 
 
 def _add_phase_c_curriculum(
@@ -334,6 +515,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "PHASE_DELTA_STRONG_ITERS", _DEFAULT_PHASE_DELTA_STRONG_ITERS
   )
   upright_w = _env_float("UPRIGHT_W", _DEFAULT_UPRIGHT_W)
+  critic_height_scan = _env_bool("CRITIC_HEIGHT_SCAN", default=False)
+  training_regime = _env_str("TRAINING_REGIME", "base")
+  resume_mode = _env_bool("RESUME", default=False)
   p1, p2, p3 = _phase_steps(phase_iterations, phase_c_frac)
 
   cfg = make_velocity_env_cfg()
@@ -344,11 +528,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # Nugus policy should not observe base linear velocity.
   cfg.observations["actor"].terms.pop("base_lin_vel", None)
 
-  # Remove height_scan observation since terrain_scan sensor isn't configured (TODO)
-  if "height_scan" in cfg.observations["actor"].terms:
-    cfg.observations["actor"].terms.pop("height_scan")
-  if "height_scan" in cfg.observations["critic"].terms:
-    cfg.observations["critic"].terms.pop("height_scan")
+  # Actor never observes privileged terrain height; critic may when enabled.
+  cfg.observations["actor"].terms.pop("height_scan", None)
+  if not critic_height_scan:
+    cfg.observations["critic"].terms.pop("height_scan", None)
 
   # Override observation sensor noise parameters with more realistic values based on real sensor measurements.
   cfg.observations["actor"].terms["base_ang_vel"].noise = Gnoise(
@@ -733,6 +916,25 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
 
+  if training_regime == "hard_continue":
+    cont_base_raw = os.environ.get("CONT_BASE_STEP")
+    if cont_base_raw not in (None, ""):
+      cont_base = int(cont_base_raw)
+    else:
+      cont_base = phase_iterations * _NUM_STEPS_PER_ENV if resume_mode else 0
+    std_walking = cfg.rewards["pose"].params["std_walking"]
+    assert isinstance(std_walking, dict)
+    _add_hard_continue_curriculum(
+      cfg,
+      cont_base=cont_base,
+      upright_w_start=upright_w,
+      std_walking=std_walking,
+    )
+  elif training_regime != "base":
+    raise ValueError(
+      f"TRAINING_REGIME must be 'base' or 'hard_continue'; got {training_regime!r}"
+    )
+
   # Apply play mode overrides.
   if play:
     # Effectively infinite episode length.
@@ -758,6 +960,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
 def nubots_nugus_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Create NUbots Nugus flat terrain velocity configuration."""
+  critic_height_scan = _env_bool("CRITIC_HEIGHT_SCAN", default=False)
   cfg = nubots_nugus_rough_env_cfg(play=play)
 
   cfg.sim.njmax = 300
@@ -770,10 +973,11 @@ def nubots_nugus_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.scene.terrain.terrain_type = "plane"
   cfg.scene.terrain.terrain_generator = None
 
-  # Remove raycast sensor and height scan (no terrain to scan).
-  cfg.scene.sensors = tuple(
-    s for s in (cfg.scene.sensors or ()) if s.name != "terrain_scan"
-  )
+  # Flat without critic height scan drops terrain raycast (legacy v9 layout).
+  if not critic_height_scan:
+    cfg.scene.sensors = tuple(
+      s for s in (cfg.scene.sensors or ()) if s.name != "terrain_scan"
+    )
 
   # Disable terrain curriculum.
   assert "terrain_levels" in cfg.curriculum

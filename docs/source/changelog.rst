@@ -18,6 +18,16 @@ Fixed
 Added
 ^^^^^
 
+- Added ``CRITIC_HEIGHT_SCAN`` and ``TRAINING_REGIME=hard_continue`` env knobs
+  for the NUbots Nugus velocity factory. When ``CRITIC_HEIGHT_SCAN`` is enabled
+  the critic keeps ``height_scan`` (actor never does) and flat envs retain the
+  ``terrain_scan`` sensor so critic input dims match rough training. The
+  ``hard_continue`` regime ramps command velocity, push disturbances, and balance
+  penalties from a continuation base anchored at ``PHASE_ITERATIONS × 24`` on
+  resume. Kubernetes grid generators ``BATCH=v10`` (two parallel jobs: flat hard
+  continuation + flat height-scan retrain) and ``BATCH=v10b`` (rough continuation
+  from stage B, documented for manual launch after B completes) wire the new knobs.
+
 - Added an optional ``actuator_current`` velocity observation that estimates
   per-servo electrical current as ``tau / Kt`` (Amps), with an optional
   quantization to a sensor resolution (e.g. the Dynamixel XH540-W270
