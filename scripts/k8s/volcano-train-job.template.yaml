@@ -93,11 +93,13 @@ spec:
                   value: "all"
                 # Pin commit + force fresh, isolated runs regardless of the shared
                 # mjlab-train-config configmap (which is rewritten by other tooling).
-                # NOTE: a7a43f7 restores symmetric backward/forward and lateral
-                # velocity command ranges from stage 0 (replacing forward-only
-                # early curriculum) while keeping v3 stand-still shaping.
+                # NOTE: 21c3ecc adds the actuator_current (CURRENT_OBS) and
+                # clock-silence (SILENCE_CLOCK) clock_anneal variants, decouples the
+                # curriculum phase timing via PHASE_ITERATIONS, and rescales the
+                # command_vel curriculum so the wide backward/strafe/yaw ranges are
+                # reached early in a run.
                 - name: GIT_COMMIT
-                  value: "a7a43f78db3a0cb7cd796c18ba87f813c83fe4f5"
+                  value: "21c3ecc8ff7a56dc4093d2c2808615230d60c8e8"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
