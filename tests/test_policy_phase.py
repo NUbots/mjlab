@@ -158,3 +158,41 @@ def test_swing_height_clock_uses_policy_phase_not_time():
   # Episode time would give phase 100*0.1/0.8 = 12.5 mod 1 = 0.5; policy phase
   # 0.0 vs 0.25 should produce different rewards despite high episode step.
   assert not math.isclose(reward_at_policy.item(), reward_shifted.item(), abs_tol=1e-6)
+
+
+_NUM_STEPS_PER_ENV = 24
+
+
+def test_clock_learned_phase_delta_nominal_curriculum(monkeypatch):
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_learned")
+  monkeypatch.setenv("MAX_ITERATIONS", "20000")
+  monkeypatch.setenv("PHASE_ITERATIONS", "20000")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  assert cfg.rewards["phase_delta_nominal"].weight == -5.0
+
+  stages = cfg.curriculum["phase_delta_nominal_anneal"].params["stages"]
+  assert stages == [
+    {"step": 0, "weight": -5.0},
+    {"step": 2400, "weight": -0.5},
+    {"step": 120000, "weight": -0.2},
+    {"step": 288000, "weight": -0.05},
+    {"step": 408000, "weight": 0.0},
+  ]
+
+
+def test_clock_learned_phase_delta_strong_env_knobs(monkeypatch):
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_learned")
+  monkeypatch.setenv("PHASE_DELTA_STRONG_W", "-8.0")
+  monkeypatch.setenv("PHASE_DELTA_STRONG_ITERS", "50")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  assert cfg.rewards["phase_delta_nominal"].weight == -8.0
+
+  stages = cfg.curriculum["phase_delta_nominal_anneal"].params["stages"]
+  assert stages[0] == {"step": 0, "weight": -8.0}
+  assert stages[1] == {"step": 1200, "weight": -0.5}

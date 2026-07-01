@@ -102,6 +102,10 @@ Added
 Changed
 ^^^^^^^
 
+- ``clock_learned`` now starts with a strong ``phase_delta_nominal`` penalty
+  (default weight ``-5.0`` for the first 100 PPO iterations) before transitioning
+  to the existing p1/p2/p3 anneal schedule. Tunable via ``PHASE_DELTA_STRONG_W``
+  and ``PHASE_DELTA_STRONG_ITERS``.
 - Rescaled the velocity ``command_vel`` curriculum stage thresholds so the wide
   backward/strafe/yaw command ranges are reached early within a training run
   (around iterations 250 and 562) instead of the previous 9000/12000-iteration

@@ -46,6 +46,8 @@ _DEFAULT_STAND_W = -0.15
 _DEFAULT_EFFORT_LO = 0.7
 _DEFAULT_EFFORT_HI = 1.2
 _DEFAULT_RESAMPLE_MIN = 3.0
+_DEFAULT_PHASE_DELTA_STRONG_W = -5.0
+_DEFAULT_PHASE_DELTA_STRONG_ITERS = 100
 # Per-servo torque constants (Nm/A) for the actuator-current observation.
 # XH540-W270 (legs) and MX106 (hip yaw) are ~2.0 Nm/A; the smaller MX64 arm/head
 # servos are approximated lower. Matched by regex against actuator names.
@@ -179,15 +181,19 @@ def _add_gait_curriculum(
   p1: int,
   p2: int,
   p3: int,
+  phase_delta_strong_w: float = _DEFAULT_PHASE_DELTA_STRONG_W,
+  phase_delta_strong_iters: int = _DEFAULT_PHASE_DELTA_STRONG_ITERS,
 ) -> None:
   """Configure staged gait handoff curriculums for the selected variant."""
   if variant == "clock_learned":
+    strong_end = int(phase_delta_strong_iters * _NUM_STEPS_PER_ENV)
     cfg.curriculum["phase_delta_nominal_anneal"] = CurriculumTermCfg(
       func=mdp.reward_curriculum,
       params={
         "reward_name": "phase_delta_nominal",
         "stages": [
-          {"step": 0, "weight": -0.5},
+          {"step": 0, "weight": phase_delta_strong_w},
+          {"step": strong_end, "weight": -0.5},
           {"step": p1, "weight": -0.2},
           {"step": p2, "weight": -0.05},
           {"step": p3, "weight": 0.0},
@@ -297,6 +303,12 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # lets a run extend (or resume) past its original length with the phase
   # boundaries frozen at fixed absolute step counts.
   phase_iterations = _env_int("PHASE_ITERATIONS", max_iterations)
+  phase_delta_strong_w = _env_float(
+    "PHASE_DELTA_STRONG_W", _DEFAULT_PHASE_DELTA_STRONG_W
+  )
+  phase_delta_strong_iters = _env_int(
+    "PHASE_DELTA_STRONG_ITERS", _DEFAULT_PHASE_DELTA_STRONG_ITERS
+  )
   p1, p2, p3 = _phase_steps(phase_iterations, phase_c_frac)
 
   cfg = make_velocity_env_cfg()
@@ -642,7 +654,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   }
   if variant == "clock_learned":
     swing_height.params["phase_source"] = "policy"
-    cfg.rewards["phase_delta_nominal"].weight = -0.5
+    cfg.rewards["phase_delta_nominal"].weight = phase_delta_strong_w
 
   # Self-paced sparse swing-height (peak-at-landing) handoff target.
   landing_height = cfg.rewards["foot_swing_height_landing"]
@@ -684,7 +696,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["soft_landing"].weight = 0.0
   cfg.rewards["base_height"].weight = 0.0
 
-  _add_gait_curriculum(cfg, variant=variant, p1=p1, p2=p2, p3=p3)
+  _add_gait_curriculum(
+    cfg,
+    variant=variant,
+    p1=p1,
+    p2=p2,
+    p3=p3,
+    phase_delta_strong_w=phase_delta_strong_w,
+    phase_delta_strong_iters=phase_delta_strong_iters,
+  )
   _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
 
   # Apply play mode overrides.
