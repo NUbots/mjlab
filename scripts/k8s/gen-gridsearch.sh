@@ -185,8 +185,9 @@ emit_manifest() {
     envsubst <"$TEMPLATE"
   else
     local tmp
-    tmp="$(mktemp "${TMPDIR:-/tmp}/mjlab-gs-XXXXXX.yaml")"
-    envsubst <"$TEMPLATE" >"$tmp"
+    tmp="$(mktemp "${TMPDIR:-/tmp}/mjlab-gs-XXXXXX")"
+    envsubst <"$TEMPLATE" >"${tmp}.yaml"
+    tmp="${tmp}.yaml"
     MANIFESTS+=("$tmp")
   fi
 }
@@ -358,6 +359,8 @@ if $APPLY; then
     echo "Nothing to apply (use -o DIR or omit --apply for dry-run)" >&2
     exit 1
   fi
-  kubectl apply -f "$(dirname "${MANIFESTS[0]}")"
+  for manifest in "${MANIFESTS[@]}"; do
+    kubectl apply -f "$manifest"
+  done
   echo "[INFO] Applied ${#MANIFESTS[@]} grid-search jobs to namespace mjlab" >&2
 fi
