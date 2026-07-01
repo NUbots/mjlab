@@ -8,6 +8,11 @@ Upcoming version (not yet released)
 Fixed
 ^^^^^
 
+- K8s ``entrypoint.sh`` failed to check out a pinned ``GIT_COMMIT`` that was not
+  the shallow-clone branch tip because ``git fetch origin <sha>`` treats the
+  argument as a ref name. Fetch with ``--depth=1`` (and deepen/unshallow as a
+  fallback) so non-HEAD pins work; use a full 40-character SHA.
+
 - ``command_progress_backslide`` was always zero in grid-search runs because
   ``PROGRESS_BACKSLIDE_W`` defaulted to ``0.0`` (disabled) and was not wired
   through the Volcano Job template or ``gen-gridsearch.sh``. Nugus now defaults

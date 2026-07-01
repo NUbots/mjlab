@@ -4,11 +4,50 @@
 # Uses ghcr.io/mujocolab/mjlab:latest for CUDA, uv, Python, and system libs.
 # Source comes from the git checkout on the workspace PVC; deps sync into the
 # image venv at /app/.venv (workspace .venv causes SIGBUS on CUDA init).
+#
+# When GIT_COMMIT is set, use a full 40-character SHA. Shallow clones only
+# contain branch tips; pinned commits are fetched by object id (--depth=1).
 set -euo pipefail
 
 REPO_DIR=/workspace/mjlab
 VENV=/app/.venv
 PYTHON_VERSION="${PYTHON_VERSION:-3.13}"
+
+at_pinned_commit() {
+  local current
+  current="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
+  [[ "$current" == "${GIT_COMMIT}" ]] || [[ "$current" == "${GIT_COMMIT}"* ]]
+}
+
+fetch_pinned_commit() {
+  if git -C "$REPO_DIR" cat-file -e "${GIT_COMMIT}^{commit}" 2>/dev/null; then
+    return 0
+  fi
+  echo "[INFO] Fetching pinned commit ${GIT_COMMIT}..."
+  if git -C "$REPO_DIR" fetch --depth=1 origin "${GIT_COMMIT}"; then
+    return 0
+  fi
+  echo "[WARN] Fetch by commit SHA failed; deepening ${GIT_REF}..."
+  git -C "$REPO_DIR" fetch origin "${GIT_REF}" --deepen=500 \
+    || git -C "$REPO_DIR" fetch --unshallow origin
+  git -C "$REPO_DIR" fetch --depth=1 origin "${GIT_COMMIT}"
+}
+
+checkout_pinned_commit() {
+  if at_pinned_commit; then
+    echo "[INFO] Already at commit ${GIT_COMMIT} ($(git -C "$REPO_DIR" rev-parse HEAD)); skipping checkout."
+    return 0
+  fi
+  if [[ -n "${GIT_COMMIT:-}" && ${#GIT_COMMIT} -lt 40 ]]; then
+    echo "[WARN] GIT_COMMIT should be a full 40-character SHA (got ${#GIT_COMMIT} chars)."
+  fi
+  local lockfile="$REPO_DIR/.git/mjlab-checkout.lock"
+  (
+    flock -w 600 9 || exit 1
+    fetch_pinned_commit
+    git -C "$REPO_DIR" checkout "${GIT_COMMIT}"
+  ) 9>"$lockfile"
+}
 
 if [[ -d "$REPO_DIR/.git" ]] && ! git -C "$REPO_DIR" status >/dev/null 2>&1; then
   echo "[WARN] Corrupt git checkout; removing ${REPO_DIR}..."
@@ -21,26 +60,16 @@ if [[ ! -d "$REPO_DIR/.git" ]]; then
   # A fresh clone lands on branch HEAD; if a commit is pinned, check it out so
   # ephemeral (emptyDir) workspaces are still reproducible at GIT_COMMIT.
   if [[ -n "${GIT_COMMIT:-}" ]]; then
-    current="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
-    if [[ "$current" != "$GIT_COMMIT" && "$current" != "${GIT_COMMIT}"* ]]; then
+    if at_pinned_commit; then
+      echo "[INFO] Clone already at pinned commit ${GIT_COMMIT}."
+    else
       echo "[INFO] Checking out pinned commit ${GIT_COMMIT} after clone..."
-      git -C "$REPO_DIR" fetch origin "${GIT_COMMIT}"
+      fetch_pinned_commit
       git -C "$REPO_DIR" checkout "${GIT_COMMIT}"
     fi
   fi
 elif [[ -n "${GIT_COMMIT:-}" ]]; then
-  current="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
-  if [[ "$current" == "$GIT_COMMIT" ]] || [[ "$current" == "${GIT_COMMIT}"* ]]; then
-    echo "[INFO] Already at commit ${GIT_COMMIT} (${current}); skipping checkout."
-  else
-    echo "[INFO] Checking out commit ${GIT_COMMIT}..."
-    lockfile="$REPO_DIR/.git/mjlab-checkout.lock"
-    (
-      flock -w 600 9 || exit 1
-      git -C "$REPO_DIR" fetch origin "${GIT_COMMIT}"
-      git -C "$REPO_DIR" checkout "${GIT_COMMIT}"
-    ) 9>"$lockfile"
-  fi
+  checkout_pinned_commit
 else
   echo "[INFO] Updating branch ${GIT_REF}..."
   git -C "$REPO_DIR" fetch origin "${GIT_REF}"

@@ -16,6 +16,7 @@ metadata:
 data:
   GIT_REPO: https://github.com/NUbots/mjlab.git
   GIT_REF: add-phase-clock
+  # GIT_COMMIT: full 40-char SHA when pinning; entrypoint fetches by object id.
   GIT_COMMIT: "ebce8ca8372453d9aba2498ae441a0db88c3d777"
   PYTHON_VERSION: "3.13"
   TASK: Mjlab-Velocity-Flat-Nubots-Nugus

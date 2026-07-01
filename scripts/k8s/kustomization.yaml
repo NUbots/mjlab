@@ -2,6 +2,7 @@
 #
 # Uses the public image ghcr.io/mujocolab/mjlab:latest (CUDA, uv, Python, EGL).
 # Training code is cloned onto the workspace PVC and synced with uv at Job start.
+# entrypoint.sh (ConfigMap below) honors GIT_COMMIT pins via shallow fetch by SHA.
 #
 # Deploy base stack (namespace, PVCs, queue, config, TensorBoard):
 #   kubectl apply -k scripts/k8s/
