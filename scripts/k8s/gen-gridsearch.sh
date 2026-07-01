@@ -335,11 +335,37 @@ gen_v7_grid() {
   done
 }
 
+
+# BATCH=v8: clock_learned CURRENT_OBS 0 vs 1 at pinned 2229f92 (strong early
+# phase_delta_nominal penalty). pc-0.5, STAND_W 0.15, seed 1, 2000 iters.
+gen_v8_grid() {
+  export MJLAB_VARIANT="clock_learned"
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export WANDB_RUN_PATH=""
+  local joule_label
+  joule_label="$(joule_tag "$JOULE_W")"
+  local cur
+  for cur in 0 1; do
+    export CURRENT_OBS="$cur"
+    export RUN_NAME="clock_learned__stand-0.15__pc-0.5__cur${cur}__s1__${BATCH}"
+    export WANDB_TAGS="clock_learned,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},current-${cur}"
+    emit_manifest "mj-gs-${BATCH}-cl-cur${cur}"
+  done
+}
+
 case "$BATCH" in
   v4) gen_v4_continuation; expected=2 ;;
   v5) gen_v5_grid; expected=4 ;;
   v6) gen_v6_rapidcmd; expected=2 ;;
   v7) gen_v7_grid; expected=2 ;;
+  v8) gen_v8_grid; expected=2 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))
