@@ -74,13 +74,55 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
     filename = f"{export_dir.name}.onnx"
     return export_dir, filename, export_dir / filename
 
+  def _capture_curriculum_snapshot(self) -> dict:
+    """Capture curriculum-derived MDP state for resume validation."""
+    from mjlab.tasks.velocity.mdp.velocity_command import UniformVelocityCommand
+
+    env = self.env.unwrapped
+    snapshot: dict = {"common_step_counter": env.common_step_counter}
+    twist = env.command_manager.get_term("twist")
+    if isinstance(twist, UniformVelocityCommand):
+      ranges = twist.cfg.ranges
+      snapshot["command_ranges"] = {
+        "lin_vel_x": ranges.lin_vel_x,
+        "lin_vel_y": ranges.lin_vel_y,
+        "ang_vel_z": ranges.ang_vel_z,
+      }
+    reward_weights: dict[str, float] = {}
+    for name in ("phase_delta_nominal", "upright", "track_linear_velocity"):
+      if name in env.reward_manager.active_terms:
+        reward_weights[name] = env.reward_manager.get_term_cfg(name).weight
+    if reward_weights:
+      snapshot["reward_weights"] = reward_weights
+    return snapshot
+
+  @staticmethod
+  def _log_curriculum_snapshot_comparison(
+    saved: dict | None, loaded: dict, *, checkpoint_path: str
+  ) -> None:
+    if int(os.environ.get("LOCAL_RANK", "0")) != 0:
+      return
+    print(f"[resume] Curriculum snapshot from checkpoint {checkpoint_path}:")
+    if saved is None:
+      print("  (no curriculum_snapshot in checkpoint — pre-fix or legacy save)")
+      print(f"  restored common_step_counter={loaded['common_step_counter']}")
+      return
+    for key in ("common_step_counter", "command_ranges", "reward_weights"):
+      if saved.get(key) != loaded.get(key):
+        print(f"  MISMATCH {key}: saved={saved.get(key)!r} loaded={loaded.get(key)!r}")
+      else:
+        print(f"  OK {key}={saved.get(key)!r}")
+
   def save(self, path: str, infos=None) -> None:
     """Save checkpoint.
 
     Extends the base implementation to persist the environment's
     common_step_counter and to respect the ``upload_model`` config flag.
     """
-    env_state = {"common_step_counter": self.env.unwrapped.common_step_counter}
+    env_state = {
+      "common_step_counter": self.env.unwrapped.common_step_counter,
+      "curriculum_snapshot": self._capture_curriculum_snapshot(),
+    }
     infos = {**(infos or {}), "env_state": env_state}
     # Inline base OnPolicyRunner.save() to conditionally gate W&B upload.
     saved_dict = self.alg.save()
@@ -147,5 +189,12 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
 
     infos = loaded_dict["infos"]
     if infos and "env_state" in infos:
-      self.env.unwrapped.common_step_counter = infos["env_state"]["common_step_counter"]
+      env_state = infos["env_state"]
+      self.env.unwrapped.common_step_counter = env_state["common_step_counter"]
+      self.env.unwrapped.curriculum_manager.compute()
+      saved_snapshot = env_state.get("curriculum_snapshot")
+      loaded_snapshot = self._capture_curriculum_snapshot()
+      self._log_curriculum_snapshot_comparison(
+        saved_snapshot, loaded_snapshot, checkpoint_path=path
+      )
     return infos

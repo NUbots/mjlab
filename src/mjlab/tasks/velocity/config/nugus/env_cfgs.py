@@ -208,9 +208,9 @@ def _scale_push_velocity_range(
 def _hard_continue_velocity_stages(cont_base: int) -> list[dict[str, object]]:
   ranges = (
     {
-      "lin_vel_x": (-0.55, 0.55),
-      "lin_vel_y": (-0.35, 0.35),
-      "ang_vel_z": (-0.55, 0.55),
+      "lin_vel_x": (-0.5, 0.5),
+      "lin_vel_y": (-0.3, 0.3),
+      "ang_vel_z": (-0.5, 0.5),
     },
     {
       "lin_vel_x": (-0.62, 0.62),
@@ -515,6 +515,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "PHASE_DELTA_STRONG_ITERS", _DEFAULT_PHASE_DELTA_STRONG_ITERS
   )
   upright_w = _env_float("UPRIGHT_W", _DEFAULT_UPRIGHT_W)
+  progress_backslide_w = _env_float("PROGRESS_BACKSLIDE_W", 0.0)
   critic_height_scan = _env_bool("CRITIC_HEIGHT_SCAN", default=False)
   training_regime = _env_str("TRAINING_REGIME", "base")
   resume_mode = _env_bool("RESUME", default=False)
@@ -757,6 +758,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   }
 
   cfg.rewards["upright"].weight = upright_w
+  cfg.rewards["command_progress_backslide"].weight = progress_backslide_w
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("torso",)
   cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("torso",)
   # Cover the full leg (roll/yaw included, not just sagittal pitch) so the term

@@ -298,6 +298,19 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=2.0,
       params={"command_name": "twist", "std": math.sqrt(0.5)},
     ),
+    "command_progress_backslide": RewardTermCfg(
+      func=mdp.command_progress_backslide,
+      weight=0.0,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "command_name": "twist",
+        "command_threshold": 0.05,
+        "deadband": 0.03,
+        "min_progress": 0.05,
+        "stall_steps": 0,
+        "stall_penalty": 1.0,
+      },
+    ),
     "upright": RewardTermCfg(
       func=mdp.upright,
       weight=1.0,

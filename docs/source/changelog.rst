@@ -15,8 +15,21 @@ Fixed
   env vars fall back to defaults instead of failing at import time. The k8s
   entrypoint likewise skips exporting empty variant/reward knobs.
 
+- Checkpoint resume now re-runs ``curriculum_manager.compute()`` after restoring
+  ``common_step_counter``, so command ranges and curriculum-driven reward weights
+  match the resumed training step instead of staying at the wrapper's step-0
+  values. Checkpoints also store a ``curriculum_snapshot`` for load-time
+  validation logging.
+
+- ``TRAINING_REGIME=hard_continue`` stage 0 at the continuation base now matches
+  the v9 terminal command ranges (±0.5, ±0.3, ±0.5) before ramping harder.
+
 Added
 ^^^^^
+
+- Added ``command_progress_backslide`` velocity reward with hysteresis-based peak
+  tracking, optional one-shot stall latch (gated off for zero/near-zero commands),
+  and Nugus env knob ``PROGRESS_BACKSLIDE_W``.
 
 - Added ``CRITIC_HEIGHT_SCAN`` and ``TRAINING_REGIME=hard_continue`` env knobs
   for the NUbots Nugus velocity factory. When ``CRITIC_HEIGHT_SCAN`` is enabled

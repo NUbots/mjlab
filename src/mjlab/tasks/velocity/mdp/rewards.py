@@ -988,6 +988,106 @@ class variable_posture:
     return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
 
 
+class command_progress_backslide:
+  """Penalize backward sliding from peak progress along the commanded direction.
+
+  Tracks scalar progress ``s = dot(pos_xy - origin_xy, u_hat)`` with a running
+  peak ``s_max`` (hysteresis anchor). Only active when command magnitude exceeds
+  ``command_threshold`` — zero/near-zero commands never incur backslide or stall
+  penalties. Resets on episode reset and command resample.
+  """
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    self._asset_cfg: SceneEntityCfg = cfg.params.get("asset_cfg", _DEFAULT_ASSET_CFG)
+    n = env.num_envs
+    dev = env.device
+    self._origin_xy = torch.zeros(n, 2, device=dev)
+    self._s_max = torch.zeros(n, device=dev)
+    self._prev_command_counter = torch.zeros(n, device=dev, dtype=torch.long)
+    self._stall_steps = torch.zeros(n, device=dev, dtype=torch.long)
+    self._stall_latched = torch.zeros(n, device=dev, dtype=torch.bool)
+    self._segment_active = torch.zeros(n, device=dev, dtype=torch.bool)
+
+  def _begin_segment(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    pos_xy: torch.Tensor,
+  ) -> None:
+    self._origin_xy[env_ids] = pos_xy[env_ids]
+    self._s_max[env_ids] = 0.0
+    self._stall_steps[env_ids] = 0
+    self._stall_latched[env_ids] = False
+    self._segment_active[env_ids] = True
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    command_name: str,
+    command_threshold: float = 0.05,
+    deadband: float = 0.03,
+    min_progress: float = 0.05,
+    stall_steps: int = 0,
+    stall_penalty: float = 1.0,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    assert command is not None
+
+    cmd_term = env.command_manager.get_term(command_name)
+    if hasattr(cmd_term, "command_counter"):
+      cmd_counter = cmd_term.command_counter
+      resampled = cmd_counter > self._prev_command_counter
+      self._prev_command_counter = cmd_counter.clone()
+    else:
+      resampled = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    pos_xy = asset.data.root_link_pos_w[:, :2]
+    new_segment = resampled | ~self._segment_active
+    if new_segment.any():
+      self._begin_segment(env, new_segment.nonzero(as_tuple=False).flatten(), pos_xy)
+
+    linear_norm = torch.norm(command[:, :2], dim=1)
+    angular_norm = torch.abs(command[:, 2])
+    total_command = linear_norm + angular_norm
+    active = total_command > command_threshold
+
+    u_hat = command[:, :2] / torch.clamp(linear_norm.unsqueeze(1), min=1e-6)
+    s = torch.sum((pos_xy - self._origin_xy) * u_hat, dim=1)
+    self._s_max = torch.where(active, torch.maximum(self._s_max, s), self._s_max)
+
+    backslide = torch.square(torch.clamp(self._s_max - s - deadband, min=0.0))
+    cost = backslide * active.float()
+
+    if stall_steps > 0:
+      stalled = active & (self._s_max < min_progress)
+      self._stall_steps = torch.where(
+        stalled,
+        self._stall_steps + 1,
+        torch.zeros_like(self._stall_steps),
+      )
+      trigger = active & (self._stall_steps >= stall_steps) & ~self._stall_latched
+      cost = cost + trigger.float() * stall_penalty
+      self._stall_latched = self._stall_latched | trigger
+      made_progress = active & (self._s_max >= min_progress)
+      self._stall_latched = torch.where(
+        made_progress, torch.zeros_like(self._stall_latched), self._stall_latched
+      )
+      self._stall_steps = torch.where(
+        made_progress, torch.zeros_like(self._stall_steps), self._stall_steps
+      )
+
+    return cost
+
+  def reset(self, env_ids: torch.Tensor) -> None:
+    self._s_max[env_ids] = 0.0
+    self._stall_steps[env_ids] = 0
+    self._stall_latched[env_ids] = False
+    self._segment_active[env_ids] = False
+    self._prev_command_counter[env_ids] = 0
+
+
 def _is_commanded_to_stand(command: torch.Tensor, threshold: float) -> torch.Tensor:
   """True when every velocity axis is below threshold (not merely their sum).
 

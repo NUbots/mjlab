@@ -17,13 +17,18 @@ import mjlab.scripts.train as train_mod
 from mjlab.actuator import XmlActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg, mdp
+from mjlab.envs.mdp.curriculums import reward_curriculum
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from mjlab.rl.runner import MjlabOnPolicyRunner
 from mjlab.rl.spatial_softmax import SpatialSoftmaxCNNModel
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.tracking.rl.runner import _OnnxMotionModel
+from mjlab.tasks.velocity import mdp as velocity_mdp
+from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.terrains import TerrainEntityCfg
 from mjlab.utils.os import dump_yaml
 
@@ -97,6 +102,98 @@ def env(device):
   env.close()
 
 
+def _make_curriculum_runner_env(
+  device,
+  *,
+  velocity_stages,
+  reward_stages,
+  initial_weight: float,
+):
+  robot_xml = """
+  <mujoco>
+    <worldbody>
+      <body name="base" pos="0 0 1">
+        <freejoint name="free_joint"/>
+        <geom name="base_geom" type="box" size="0.2 0.2 0.1" mass="1.0"/>
+        <body name="link1" pos="0 0 0">
+          <joint name="joint1" type="hinge" axis="0 0 1" range="-1.57 1.57"/>
+          <geom name="link1_geom" type="box" size="0.1 0.1 0.1" mass="0.1"/>
+        </body>
+      </body>
+    </worldbody>
+    <actuator>
+      <motor name="actuator1" joint="joint1" gear="1.0"/>
+    </actuator>
+  </mujoco>
+  """
+  robot_cfg = EntityCfg(
+    spec_fn=lambda: mujoco.MjSpec.from_string(robot_xml),
+    articulation=EntityArticulationInfoCfg(
+      actuators=(XmlActuatorCfg(target_names_expr=(".*",)),)
+    ),
+  )
+  env_cfg = ManagerBasedRlEnvCfg(
+    scene=SceneCfg(
+      terrain=TerrainEntityCfg(terrain_type="plane"),
+      num_envs=2,
+      extent=1.0,
+      entities={"robot": robot_cfg},
+    ),
+    observations={
+      "actor": ObservationGroupCfg(
+        terms={
+          "joint_pos": ObservationTermCfg(
+            func=lambda env: env.scene["robot"].data.joint_pos
+          ),
+        },
+      ),
+      "critic": ObservationGroupCfg(
+        terms={
+          "joint_pos": ObservationTermCfg(
+            func=lambda env: env.scene["robot"].data.joint_pos
+          ),
+        },
+      ),
+    },
+    actions={
+      "joint_pos": mdp.JointPositionActionCfg(
+        entity_name="robot", actuator_names=(".*",), scale=1.0
+      )
+    },
+    commands={
+      "twist": UniformVelocityCommandCfg(
+        entity_name="robot",
+        resampling_time_range=(4.0, 4.0),
+        ranges=UniformVelocityCommandCfg.Ranges(
+          lin_vel_x=(-0.1, 0.1),
+          lin_vel_y=(-0.05, 0.05),
+          ang_vel_z=(-0.1, 0.1),
+        ),
+      ),
+    },
+    rewards={
+      "curriculum_reward": RewardTermCfg(
+        func=lambda e: torch.ones(e.num_envs, device=e.device),
+        weight=initial_weight,
+      ),
+    },
+    curriculum={
+      "command_vel": CurriculumTermCfg(
+        func=velocity_mdp.commands_vel,
+        params={"command_name": "twist", "velocity_stages": velocity_stages},
+      ),
+      "reward_ramp": CurriculumTermCfg(
+        func=reward_curriculum,
+        params={"reward_name": "curriculum_reward", "stages": reward_stages},
+      ),
+    },
+    sim=SimulationCfg(mujoco=MujocoCfg(timestep=0.01, iterations=1)),
+    decimation=1,
+    episode_length_s=1.0,
+  )
+  return ManagerBasedRlEnv(cfg=env_cfg, device=device)
+
+
 def test_runner_persists_common_step_counter(env, device, monkeypatch):
   """MjlabOnPolicyRunner should save and restore common_step_counter."""
   wrapped_env = RslRlVecEnvWrapper(env)
@@ -119,6 +216,117 @@ def test_runner_persists_common_step_counter(env, device, monkeypatch):
     runner.load(checkpoint_path)
 
     assert wrapped_env.unwrapped.common_step_counter == 12345
+
+
+def test_runner_load_syncs_curriculum_after_counter_restore(device, monkeypatch):
+  """load() must re-run curriculum_manager.compute() after restoring counter."""
+  final_step = 1000
+  initial_weight = 1.0
+  final_weight = 5.0
+  velocity_stages = [
+    {
+      "step": 0,
+      "lin_vel_x": (-0.1, 0.1),
+      "lin_vel_y": (-0.05, 0.05),
+      "ang_vel_z": (-0.1, 0.1),
+    },
+    {
+      "step": final_step,
+      "lin_vel_x": (-0.5, 0.5),
+      "lin_vel_y": (-0.3, 0.3),
+      "ang_vel_z": (-0.5, 0.5),
+    },
+  ]
+  reward_stages = [
+    {"step": 0, "weight": initial_weight},
+    {"step": final_step, "weight": final_weight},
+  ]
+
+  env = _make_curriculum_runner_env(
+    device,
+    velocity_stages=velocity_stages,
+    reward_stages=reward_stages,
+    initial_weight=initial_weight,
+  )
+  try:
+    wrapped_env = RslRlVecEnvWrapper(env)
+    agent_cfg = RslRlOnPolicyRunnerCfg(
+      num_steps_per_env=4, max_iterations=10, save_interval=5
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      runner = MjlabOnPolicyRunner(
+        wrapped_env, asdict(agent_cfg), log_dir=tmpdir, device=device
+      )
+      monkeypatch.setattr(runner.logger, "save_model", lambda *args, **kwargs: None)
+      runner.logger.logger_type = "tensorboard"
+
+      wrapped_env.unwrapped.common_step_counter = final_step
+      wrapped_env.unwrapped.curriculum_manager.compute()
+      twist = wrapped_env.unwrapped.command_manager.get_term("twist")
+      reward_cfg = wrapped_env.unwrapped.reward_manager.get_term_cfg(
+        "curriculum_reward"
+      )
+      assert twist.cfg.ranges.lin_vel_x == (-0.5, 0.5)
+      assert twist.cfg.ranges.lin_vel_y == (-0.3, 0.3)
+      assert reward_cfg.weight == pytest.approx(final_weight)
+
+      checkpoint_path = str(Path(tmpdir) / "curriculum_checkpoint.pt")
+      runner.save(checkpoint_path)
+
+      wrapped_env.unwrapped.common_step_counter = 0
+      wrapped_env.unwrapped.curriculum_manager.compute()
+      assert twist.cfg.ranges.lin_vel_x == (-0.1, 0.1)
+      assert reward_cfg.weight == pytest.approx(initial_weight)
+
+      runner.load(checkpoint_path)
+
+      assert wrapped_env.unwrapped.common_step_counter == final_step
+      assert twist.cfg.ranges.lin_vel_x == (-0.5, 0.5)
+      assert twist.cfg.ranges.lin_vel_y == (-0.3, 0.3)
+      assert twist.cfg.ranges.ang_vel_z == (-0.5, 0.5)
+      assert reward_cfg.weight == pytest.approx(final_weight)
+  finally:
+    env.close()
+
+
+def test_runner_save_load_curriculum_snapshot(device, monkeypatch):
+  """Checkpoints should persist curriculum_snapshot for resume validation."""
+  velocity_stages = [{"step": 0, "lin_vel_x": (-0.2, 0.2)}]
+  reward_stages = [{"step": 0, "weight": 1.0}]
+  env = _make_curriculum_runner_env(
+    device,
+    velocity_stages=velocity_stages,
+    reward_stages=reward_stages,
+    initial_weight=1.0,
+  )
+  try:
+    wrapped_env = RslRlVecEnvWrapper(env)
+    agent_cfg = RslRlOnPolicyRunnerCfg(
+      num_steps_per_env=4, max_iterations=10, save_interval=5
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      runner = MjlabOnPolicyRunner(
+        wrapped_env, asdict(agent_cfg), log_dir=tmpdir, device=device
+      )
+      monkeypatch.setattr(runner.logger, "save_model", lambda *args, **kwargs: None)
+      runner.logger.logger_type = "tensorboard"
+
+      wrapped_env.unwrapped.common_step_counter = 42
+      checkpoint_path = str(Path(tmpdir) / "snapshot_checkpoint.pt")
+      runner.save(checkpoint_path)
+
+      saved = torch.load(checkpoint_path, weights_only=False)
+      snapshot = saved["infos"]["env_state"]["curriculum_snapshot"]
+      assert snapshot["common_step_counter"] == 42
+      assert snapshot["command_ranges"]["lin_vel_x"] == (-0.2, 0.2)
+
+      wrapped_env.unwrapped.common_step_counter = 0
+      runner.load(checkpoint_path)
+      assert wrapped_env.unwrapped.common_step_counter == 42
+  finally:
+    env.close()
 
 
 def test_runner_handles_old_checkpoints_without_env_state(env, device):

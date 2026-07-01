@@ -10,10 +10,17 @@ import pytest
 import torch
 
 from mjlab.tasks.velocity.config.nugus.env_cfgs import (
+  _hard_continue_velocity_stages,
   nubots_nugus_flat_env_cfg,
   nubots_nugus_rough_env_cfg,
 )
-from mjlab.tasks.velocity.mdp.curriculums import PushRobotStage, push_robot_curriculum
+from mjlab.tasks.velocity.mdp.curriculums import (
+  PushRobotStage,
+  VelocityStage,
+  commands_vel,
+  push_robot_curriculum,
+)
+from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 _NUM_STEPS_PER_ENV = 24
 _PHASE_ITERATIONS = 2000
@@ -67,6 +74,9 @@ def test_hard_continue_stages_anchor_at_resume_base(
   assert push_stages[0]["step"] == _CONT_BASE
   assert push_stages[-1]["step"] == _CONT_BASE + 1000 * _NUM_STEPS_PER_ENV
   assert velocity_stages[-1]["lin_vel_x"] == (-0.75, 0.75)
+  assert velocity_stages[0]["lin_vel_x"] == (-0.5, 0.5)
+  assert velocity_stages[0]["lin_vel_y"] == (-0.3, 0.3)
+  assert velocity_stages[0]["ang_vel_z"] == (-0.5, 0.5)
   upright_stages = cfg.curriculum["upright_ramp"].params["stages"]
   assert upright_stages[0]["step"] == _CONT_BASE
   assert upright_stages[-1]["weight"] == 0.25
@@ -137,3 +147,53 @@ def test_push_robot_curriculum_applies_staged_velocity_range() -> None:
     push_stages=cast(list[PushRobotStage], push_stages),
   )
   assert term_cfg.params["velocity_range"]["x"] == (-0.4, 0.8)
+
+
+def test_hard_continue_stage0_matches_v9_terminal_at_cont_base(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  """At cont_base, hard_continue stage 0 should match base curriculum terminal."""
+  monkeypatch.setenv("TRAINING_REGIME", "hard_continue")
+  monkeypatch.setenv("RESUME", "true")
+  monkeypatch.setenv("PHASE_ITERATIONS", str(_PHASE_ITERATIONS))
+
+  hard_stages = _hard_continue_velocity_stages(_CONT_BASE)
+  base_stages = (
+    make_velocity_env_cfg().curriculum["command_vel"].params["velocity_stages"]
+  )
+
+  hard_env, hard_term = _make_command_curriculum_env(_CONT_BASE)
+  commands_vel(
+    hard_env,
+    env_ids=torch.tensor([0]),
+    command_name="twist",
+    velocity_stages=cast(list[VelocityStage], hard_stages),
+  )
+
+  base_env, base_term = _make_command_curriculum_env(_CONT_BASE)
+  commands_vel(
+    base_env,
+    env_ids=torch.tensor([0]),
+    command_name="twist",
+    velocity_stages=cast(list[VelocityStage], base_stages),
+  )
+
+  assert hard_term.cfg.ranges.lin_vel_x == base_term.cfg.ranges.lin_vel_x
+  assert hard_term.cfg.ranges.lin_vel_y == base_term.cfg.ranges.lin_vel_y
+  assert hard_term.cfg.ranges.ang_vel_z == base_term.cfg.ranges.ang_vel_z
+  assert hard_term.cfg.ranges.lin_vel_x == (-0.5, 0.5)
+  assert hard_term.cfg.ranges.lin_vel_y == (-0.3, 0.3)
+  assert hard_term.cfg.ranges.ang_vel_z == (-0.5, 0.5)
+
+
+def _make_command_curriculum_env(step_counter: int) -> tuple[MagicMock, MagicMock]:
+  ranges = MagicMock()
+  ranges.lin_vel_x = (0.0, 0.0)
+  ranges.lin_vel_y = (0.0, 0.0)
+  ranges.ang_vel_z = (0.0, 0.0)
+  term = MagicMock()
+  term.cfg.ranges = ranges
+  env = MagicMock()
+  env.common_step_counter = step_counter
+  env.command_manager.get_term = MagicMock(return_value=term)
+  return env, term
