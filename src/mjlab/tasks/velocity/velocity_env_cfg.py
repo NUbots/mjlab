@@ -526,6 +526,13 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.commands_vel,
       params={
         "command_name": "twist",
+        # Stage steps are in ``common_step_counter`` units (num_envs-independent,
+        # advancing by num_steps_per_env=24 each iteration). They are scaled so
+        # the wide strafe/backward/yaw stage is reached early in a ~1250-iter run
+        # (stage1 ~iter 250, stage2 ~iter 562) rather than the previous
+        # 9000/12000-iter thresholds which were never reached. The final stage
+        # keeps the restored symmetric ranges (lin_x +/-0.5, lin_y +/-0.3,
+        # ang_z +/-0.5).
         "velocity_stages": [
           {
             "step": 0,
@@ -534,13 +541,13 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
             "ang_vel_z": (-0.05, 0.05),
           },
           {
-            "step": 9000 * 24,
+            "step": int(0.2 * 1250 * 24),  # ~iter 250
             "lin_vel_x": (-0.5, 0.5),
             "lin_vel_y": (-0.2, 0.2),
             "ang_vel_z": (-0.1, 0.1),
           },
           {
-            "step": 12000 * 24,
+            "step": int(0.45 * 1250 * 24),  # ~iter 562
             "lin_vel_x": (-0.5, 0.5),
             "lin_vel_y": (-0.3, 0.3),
             "ang_vel_z": (-0.5, 0.5),

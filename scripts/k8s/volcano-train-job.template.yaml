@@ -54,6 +54,22 @@ spec:
                   value: "${STAND_W}"
                 - name: PHASE_C_FRAC
                   value: "${PHASE_C_FRAC}"
+                # Curriculum phase boundaries are derived from PHASE_ITERATIONS,
+                # decoupled from MAX_ITERATIONS (which only drives the training
+                # length). Freeze at 1250 so resumed/extended runs keep the same
+                # absolute phase timing.
+                - name: PHASE_ITERATIONS
+                  value: "${PHASE_ITERATIONS}"
+                # Training length (additive on resume: rsl-rl runs this many more
+                # iterations starting from the checkpoint's iteration). Overrides
+                # the configmap default per cell.
+                - name: MAX_ITERATIONS
+                  value: "${MAX_ITERATIONS}"
+                # New clock_anneal variant knobs read by the factory.
+                - name: SILENCE_CLOCK
+                  value: "${SILENCE_CLOCK}"
+                - name: CURRENT_OBS
+                  value: "${CURRENT_OBS}"
                 - name: GAIT_PERIOD
                   value: "${GAIT_PERIOD}"
                 - name: EFFORT_LO
@@ -82,12 +98,15 @@ spec:
                 # early curriculum) while keeping v3 stand-still shaping.
                 - name: GIT_COMMIT
                   value: "a7a43f78db3a0cb7cd796c18ba87f813c83fe4f5"
+                # Resume/continuation: set per cell by gen-gridsearch.sh. When
+                # RESUME=true the run continues from WANDB_RUN_PATH's latest
+                # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
                 - name: RESUME
-                  value: "false"
+                  value: "${RESUME}"
                 - name: WANDB_RUN_PATH
-                  value: ""
+                  value: "${WANDB_RUN_PATH}"
                 - name: WANDB_RUN_NAME
-                  value: ""
+                  value: "${WANDB_RUN_NAME}"
               envFrom:
                 - configMapRef:
                     name: mjlab-train-config

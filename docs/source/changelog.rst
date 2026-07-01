@@ -8,6 +8,25 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added an optional ``actuator_current`` velocity observation that estimates
+  per-servo electrical current as ``tau / Kt`` (Amps), with an optional
+  quantization to a sensor resolution (e.g. the Dynamixel XH540-W270
+  2.69 mA present-current unit). A matching ``current_sensor`` reset-mode
+  domain-randomization event randomizes a per-servo current gain/offset the
+  observation reads (modeling servo-to-servo variation and thermal drift), and
+  a Gaussian noise/bias models measurement error. Exposed for NUbots Nugus via
+  the ``CURRENT_OBS`` env knob (registered on actor and critic). Enabling it
+  changes the actor input dimension, so those runs train from scratch.
+- Added a ``silence_stages`` option to the ``gait_clock`` observation that fades
+  the clock output to zero on a staged schedule read from
+  ``common_step_counter``. Exposed for NUbots Nugus via the ``SILENCE_CLOCK``
+  env knob, which (for the ``clock_anneal`` variant) mirrors the clock-reward
+  anneal so the policy is weaned off the phase signal it would lack on hardware.
+- Added a ``PHASE_ITERATIONS`` env knob for the NUbots Nugus velocity task that
+  decouples the curriculum phase boundaries from the training length
+  (``MAX_ITERATIONS``, which now only drives ``--agent.max-iterations``). This
+  lets a run extend or resume past its original length with the phase timing
+  frozen at fixed absolute step counts.
 - Added Kubernetes manifest bundle under ``scripts/k8s/`` for 4-GPU single-node
   training with a PVC-backed git workspace, the public GHCR runtime image,
   TensorBoard, and HTTPRoute (AI-Cluster).
@@ -66,6 +85,11 @@ Added
 Changed
 ^^^^^^^
 
+- Rescaled the velocity ``command_vel`` curriculum stage thresholds so the wide
+  backward/strafe/yaw command ranges are reached early within a training run
+  (around iterations 250 and 562) instead of the previous 9000/12000-iteration
+  thresholds that were never reached, which had left strafe and yaw commands
+  stuck at their narrow initial ranges.
 - ``feet_lateral_distance_cost`` is now two-sided: it penalizes lateral foot
   separation above nominal as well as below, discouraging over-wide steps
   during strafing that the previous one-sided form did not constrain.

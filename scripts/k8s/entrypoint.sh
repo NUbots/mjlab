@@ -92,6 +92,11 @@ export GAIT_PERIOD="${GAIT_PERIOD:-0.7}"
 export EFFORT_LO="${EFFORT_LO:-}"
 export EFFORT_HI="${EFFORT_HI:-}"
 export SEED="${SEED:-}"
+# Phase boundaries decouple from training length; clock-silence and current-obs
+# variant knobs. Only export when set so the factory falls back to its defaults.
+[[ -n "${PHASE_ITERATIONS:-}" ]] && export PHASE_ITERATIONS
+[[ -n "${SILENCE_CLOCK:-}" ]] && export SILENCE_CLOCK
+[[ -n "${CURRENT_OBS:-}" ]] && export CURRENT_OBS
 
 TRAIN_ARGS=(
   "${TASK}"

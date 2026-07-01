@@ -298,3 +298,62 @@ def test_gait_clock_ungated_without_command_name():
   clock = gait_clock(_make_clock_obs_env(2, still), period=0.8)
   assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
   assert math.isclose(clock[0, 1].item(), 0.0, abs_tol=1e-6)
+
+
+def _make_clock_silence_env(episode_step: int, step_counter: int) -> MagicMock:
+  """Mock env for gait_clock silence tests (always commanded, moving)."""
+  env = MagicMock()
+  env.step_dt = 0.1
+  env.episode_length_buf = torch.tensor([episode_step], dtype=torch.long)
+  env.common_step_counter = step_counter
+  env.command_manager.get_command = MagicMock(
+    return_value=torch.tensor([[0.5, 0.0, 0.0]])
+  )
+  return env
+
+
+def test_gait_clock_silence_scales_at_stage_boundaries():
+  # A stepped silence schedule fades the clock 1.0 -> 0.0. The scale of the last
+  # stage whose step has been reached is applied (step function, no interp). At
+  # episode_step=2 (phase 0.25) the unsilenced clock is [1, 0], so the observed
+  # magnitude equals the active scale.
+  stages = [
+    {"step": 0, "scale": 1.0},
+    {"step": 100, "scale": 0.5},
+    {"step": 200, "scale": 0.1},
+    {"step": 300, "scale": 0.0},
+  ]
+  # Just before the first boundary: full-strength clock.
+  clock = gait_clock(
+    _make_clock_silence_env(2, 50),
+    period=0.8,
+    command_name="twist",
+    silence_stages=stages,
+  )
+  assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
+  # Between stage 1 and 2: half scale.
+  clock = gait_clock(
+    _make_clock_silence_env(2, 150),
+    period=0.8,
+    command_name="twist",
+    silence_stages=stages,
+  )
+  assert math.isclose(clock[0, 0].item(), 0.5, abs_tol=1e-6)
+  # Past the final boundary: fully silenced.
+  clock = gait_clock(
+    _make_clock_silence_env(2, 500),
+    period=0.8,
+    command_name="twist",
+    silence_stages=stages,
+  )
+  assert torch.equal(clock, torch.zeros(1, 2))
+
+
+def test_gait_clock_no_silence_without_stages():
+  # Without silence_stages the clock is never attenuated by the step counter.
+  clock = gait_clock(
+    _make_clock_silence_env(2, 10_000),
+    period=0.8,
+    command_name="twist",
+  )
+  assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)

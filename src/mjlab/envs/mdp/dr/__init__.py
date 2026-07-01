@@ -79,5 +79,7 @@ from .pair import pair_friction as pair_friction
 
 # Actuator.
 # isort: split
+from .actuator import current_sensor as current_sensor
 from .actuator import effort_limits as effort_limits
+from .actuator import get_current_sensor_buffers as get_current_sensor_buffers
 from .actuator import pd_gains as pd_gains

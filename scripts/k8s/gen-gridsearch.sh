@@ -77,6 +77,11 @@ STAND_W_VALUES=(0.1 0.3)
 PHASE_C_FRACS=(0.5 0.7)
 SEEDS=(1)
 
+# Resolved W&B run paths for the BATCH=v4 continuation (latest COMPLETED
+# clock_anneal pc-0.5 runs). Override via env if the runs to continue change.
+V4_WANDB_RUN_PATH_SW01="${V4_WANDB_RUN_PATH_SW01:-vincenttumm-the-university-of-newcastle/mjlab/7fivy5q7}"
+V4_WANDB_RUN_PATH_SW03="${V4_WANDB_RUN_PATH_SW03:-vincenttumm-the-university-of-newcastle/mjlab/eyiowvgo}"
+
 # Batch identifier. Distinguishes successive grid-search runs of the same
 # matrix so a new batch does not collide with jobs from an earlier batch and is
 # easy to filter in W&B/TensorBoard. It is appended to every Kubernetes job
@@ -94,6 +99,18 @@ EFFORT_HI="${EFFORT_HI:-1.2}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-nugus_gridsearch_${BATCH}}"
 LOGGER="${LOGGER:-wandb}"
 WANDB_PROJECT="${WANDB_PROJECT:-mjlab}"
+
+# Training-length / phase / variant knobs. These are ALWAYS substituted into the
+# template (the env entries are static), so defaults must reproduce prior
+# behaviour for the legacy matrix: MAX_ITERATIONS matches the configmap default
+# and PHASE_ITERATIONS freezes phase boundaries at that same length.
+MAX_ITERATIONS="${MAX_ITERATIONS:-1250}"
+PHASE_ITERATIONS="${PHASE_ITERATIONS:-1250}"
+SILENCE_CLOCK="${SILENCE_CLOCK:-0}"
+CURRENT_OBS="${CURRENT_OBS:-0}"
+RESUME="${RESUME:-false}"
+WANDB_RUN_PATH="${WANDB_RUN_PATH:-}"
+WANDB_RUN_NAME="${WANDB_RUN_NAME:-}"
 
 # JOULE_W tag helper: keep scientific notation when already formatted.
 joule_tag() {
@@ -146,55 +163,129 @@ joule_job_slug() {
 
 MANIFESTS=()
 
-for variant in "${VARIANTS[@]}"; do
-  for stand_w in "${STAND_W_VALUES[@]}"; do
-    for phase_c_frac in "${PHASE_C_FRACS[@]}"; do
-      for seed in "${SEEDS[@]}"; do
-        joule_label="$(joule_tag "$JOULE_W")"
-        run_name="${variant}__stand-${stand_w}__pc-${phase_c_frac}__joule-${joule_label}__s${seed}__${BATCH}"
-        job_slug="$(k8s_slug "${BATCH}-$(variant_job_slug "$variant")-$(stand_job_slug "$stand_w")-$(phase_c_job_slug "$phase_c_frac")-$(joule_job_slug "$JOULE_W")-s${seed}")"
-        job_name="mj-gs-${job_slug}"
-        pod_name="${job_name}-train-0"
-        if ((${#pod_name} > 63)); then
-          echo "Pod name too long (${#pod_name}): ${pod_name}" >&2
-          exit 1
-        fi
-        wandb_tags="${variant},stand-${stand_w},pc-${phase_c_frac},joule-${joule_label},seed-${seed},gridsearch,batch-${BATCH}"
+# Render the template for one cell using the currently-exported env vars.
+# Guards the pod-name length and routes output per --dry-run / -o DIR / --apply.
+emit_manifest() {
+  local job_name="$1"
+  local pod_name="${job_name}-train-0"
+  if ((${#pod_name} > 63)); then
+    echo "Pod name too long (${#pod_name}): ${pod_name}" >&2
+    exit 1
+  fi
+  export JOB_NAME="$job_name"
+  if [[ -n "$OUTPUT_DIR" ]]; then
+    mkdir -p "$OUTPUT_DIR"
+    local out="${OUTPUT_DIR}/${job_name}.yaml"
+    envsubst <"$TEMPLATE" >"$out"
+    MANIFESTS+=("$out")
+  elif $DRY_RUN && ! $APPLY; then
+    echo "---"
+    envsubst <"$TEMPLATE"
+  else
+    local tmp
+    tmp="$(mktemp "${TMPDIR:-/tmp}/mjlab-gs-XXXXXX.yaml")"
+    envsubst <"$TEMPLATE" >"$tmp"
+    MANIFESTS+=("$tmp")
+  fi
+}
 
-        export JOB_NAME="$job_name"
-        export MJLAB_VARIANT="$variant"
-        export STAND_W="$stand_w"
-        export JOULE_W="$JOULE_W"
-        export PHASE_C_FRAC="$phase_c_frac"
-        export GAIT_PERIOD="$GAIT_PERIOD"
-        export EFFORT_LO="$EFFORT_LO"
-        export EFFORT_HI="$EFFORT_HI"
-        export SEED="$seed"
-        export LOGGER="$LOGGER"
-        export EXPERIMENT_NAME="$EXPERIMENT_NAME"
-        export RUN_NAME="$run_name"
-        export WANDB_PROJECT="$WANDB_PROJECT"
-        export WANDB_TAGS="$wandb_tags"
+# Export the knobs that are constant across a batch once. Per-cell values are
+# exported inside each generator below just before emit_manifest.
+export GAIT_PERIOD EFFORT_LO EFFORT_HI LOGGER EXPERIMENT_NAME WANDB_PROJECT
+export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME
+export WANDB_RUN_PATH WANDB_RUN_NAME
 
-        if [[ -n "$OUTPUT_DIR" ]]; then
-          mkdir -p "$OUTPUT_DIR"
-          out="${OUTPUT_DIR}/${job_name}.yaml"
-          envsubst <"$TEMPLATE" >"$out"
-          MANIFESTS+=("$out")
-        elif $DRY_RUN && ! $APPLY; then
-          echo "---"
-          envsubst <"$TEMPLATE"
-        else
-          tmp="$(mktemp "${TMPDIR:-/tmp}/mjlab-gs-XXXXXX.yaml")"
-          envsubst <"$TEMPLATE" >"$tmp"
-          MANIFESTS+=("$tmp")
-        fi
+gen_default_matrix() {
+  for variant in "${VARIANTS[@]}"; do
+    for stand_w in "${STAND_W_VALUES[@]}"; do
+      for phase_c_frac in "${PHASE_C_FRACS[@]}"; do
+        for seed in "${SEEDS[@]}"; do
+          joule_label="$(joule_tag "$JOULE_W")"
+          export RUN_NAME="${variant}__stand-${stand_w}__pc-${phase_c_frac}__joule-${joule_label}__s${seed}__${BATCH}"
+          job_slug="$(k8s_slug "${BATCH}-$(variant_job_slug "$variant")-$(stand_job_slug "$stand_w")-$(phase_c_job_slug "$phase_c_frac")-$(joule_job_slug "$JOULE_W")-s${seed}")"
+          export MJLAB_VARIANT="$variant"
+          export STAND_W="$stand_w"
+          export JOULE_W="$JOULE_W"
+          export PHASE_C_FRAC="$phase_c_frac"
+          export SEED="$seed"
+          export WANDB_TAGS="${variant},stand-${stand_w},pc-${phase_c_frac},joule-${joule_label},seed-${seed},gridsearch,batch-${BATCH}"
+          emit_manifest "mj-gs-${job_slug}"
+        done
       done
     done
   done
-done
+}
 
-expected=$(( ${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]} ))
+# BATCH=v4: continuation of the two COMPLETED clock_anneal pc-0.5 runs
+# (STAND_W 0.1 and 0.3). Resume from their latest checkpoint and run
+# MAX_ITERATIONS more iterations (additive on resume) so they end at ~2000.
+# PHASE_ITERATIONS freezes the curriculum timing at the original 1250-iter
+# boundaries; by the resume point the counter is already past the wide command
+# stage and the clock anneal, so commands are wide immediately.
+gen_v4_continuation() {
+  export MJLAB_VARIANT="clock_anneal"
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export SEED="1"
+  export RESUME="true"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  local joule_label
+  joule_label="$(joule_tag "$JOULE_W")"
+  local stand_w run_path
+  for stand_w in 0.1 0.3; do
+    if [[ "$stand_w" == "0.1" ]]; then
+      run_path="$V4_WANDB_RUN_PATH_SW01"
+    else
+      run_path="$V4_WANDB_RUN_PATH_SW03"
+    fi
+    if [[ -z "$run_path" ]]; then
+      echo "Missing W&B run path for STAND_W=${stand_w}; refusing to launch v4." >&2
+      exit 1
+    fi
+    export STAND_W="$stand_w"
+    export WANDB_RUN_PATH="$run_path"
+    export RUN_NAME="clock_anneal__stand-${stand_w}__pc-0.5__joule-${joule_label}__cont2000__${BATCH}"
+    export WANDB_TAGS="clock_anneal,stand-${stand_w},pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},continuation"
+    emit_manifest "mj-gs-${BATCH}-ca-$(stand_job_slug "$stand_w")-p05-cont"
+  done
+}
+
+# BATCH=v5: fresh 2x2 grid over CURRENT_OBS x SILENCE_CLOCK for clock_anneal
+# pc-0.5, STAND_W 0.15, seed 1, trained from scratch to MAX_ITERATIONS with
+# phase boundaries frozen at PHASE_ITERATIONS. The (current=0, silence=0) cell
+# doubles as a from-scratch 2000-iter baseline.
+gen_v5_grid() {
+  export MJLAB_VARIANT="clock_anneal"
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export RESUME="false"
+  export WANDB_RUN_PATH=""
+  local joule_label
+  joule_label="$(joule_tag "$JOULE_W")"
+  local cur sil
+  for cur in 0 1; do
+    for sil in 0 1; do
+      export CURRENT_OBS="$cur"
+      export SILENCE_CLOCK="$sil"
+      export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__cur${cur}__sil${sil}__s1__${BATCH}"
+      export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},current-${cur},silence-${sil}"
+      emit_manifest "mj-gs-${BATCH}-ca-cur${cur}-sil${sil}"
+    done
+  done
+}
+
+case "$BATCH" in
+  v4) gen_v4_continuation; expected=2 ;;
+  v5) gen_v5_grid; expected=4 ;;
+  *)
+    gen_default_matrix
+    expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))
+    ;;
+esac
+
 if [[ -n "$OUTPUT_DIR" ]] || $APPLY; then
   if [[ ${#MANIFESTS[@]} -ne $expected ]]; then
     echo "Expected ${expected} manifests, got ${#MANIFESTS[@]}" >&2

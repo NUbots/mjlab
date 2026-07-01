@@ -45,6 +45,15 @@ _DEFAULT_PHASE_C_FRAC = 0.6
 _DEFAULT_STAND_W = -0.15
 _DEFAULT_EFFORT_LO = 0.7
 _DEFAULT_EFFORT_HI = 1.2
+# Per-servo torque constants (Nm/A) for the actuator-current observation.
+# XH540-W270 (legs) and MX106 (hip yaw) are ~2.0 Nm/A; the smaller MX64 arm/head
+# servos are approximated lower. Matched by regex against actuator names.
+_NUGUS_CURRENT_KT: dict[str, float] = {
+  r"(shoulder|elbow|neck|head)": 1.5,
+  "default": 2.0,
+}
+# Dynamixel XH540-W270 "present current" unit: 2.69 mA per LSB.
+_CURRENT_QUANTIZE_A = 0.00269
 _PHASE_C_JOINT_ACC_W = -1e-4
 _PHASE_C_TORQUE_RATE_W = -1e-3
 _PHASE_C_SOFT_LANDING_W = -0.01
@@ -59,6 +68,13 @@ def _env_float(name: str, default: float) -> float:
 def _env_int(name: str, default: int) -> int:
   raw = os.environ.get(name)
   return default if raw is None else int(raw)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+  raw = os.environ.get(name)
+  if raw is None:
+    return default
+  return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _phase_steps(max_iterations: int, phase_c_frac: float) -> tuple[int, int, int]:
@@ -248,8 +264,17 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     stand_w = -stand_w
   effort_lo = _env_float("EFFORT_LO", _DEFAULT_EFFORT_LO)
   effort_hi = _env_float("EFFORT_HI", _DEFAULT_EFFORT_HI)
+  silence_clock = _env_bool("SILENCE_CLOCK", False)
+  current_obs = _env_bool("CURRENT_OBS", False)
   max_iterations = _env_int("MAX_ITERATIONS", _DEFAULT_MAX_ITERATIONS)
-  p1, p2, p3 = _phase_steps(max_iterations, phase_c_frac)
+  # Phase curriculum boundaries are derived from PHASE_ITERATIONS, which is
+  # decoupled from MAX_ITERATIONS (the latter only drives the
+  # --agent.max-iterations training-length flag). Defaulting PHASE_ITERATIONS to
+  # MAX_ITERATIONS preserves the previous behaviour, while setting it explicitly
+  # lets a run extend (or resume) past its original length with the phase
+  # boundaries frozen at fixed absolute step counts.
+  phase_iterations = _env_int("PHASE_ITERATIONS", max_iterations)
+  p1, p2, p3 = _phase_steps(phase_iterations, phase_c_frac)
 
   cfg = make_velocity_env_cfg()
 
@@ -514,16 +539,56 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # value commands a slower cadence, which is the main knob for "larger, slower
   # steps"; ``swing_ratio`` is the swing fraction of each cycle. The obs and
   # reward MUST share ``GAIT_PERIOD``.
-  clock_obs = ObservationTermCfg(
-    func=mdp.gait_clock,
-    params={
-      "period": gait_period,
-      "command_name": "twist",
-      "command_threshold": 0.05,
-    },
-  )
+  clock_params: dict = {
+    "period": gait_period,
+    "command_name": "twist",
+    "command_threshold": 0.05,
+  }
+  # Clock-silencing variant: fade the gait-clock OBSERVATION out to zero on the
+  # same staged schedule as the clock REWARD anneal (foot_swing_height: 0.75 ->
+  # 0.4 -> 0.1 -> 0.0 over 0/p1/p2/p3). The scale mirrors that weight normalized
+  # to 1.0 at the start, so by p3 the policy receives a zero clock and cannot
+  # depend on a phase signal it would lack on hardware. Only meaningful for the
+  # clock_anneal variant (the only one that anneals foot_swing_height).
+  if silence_clock and variant == "clock_anneal":
+    clock_params["silence_stages"] = [
+      {"step": 0, "scale": 1.0},
+      {"step": p1, "scale": 0.4 / 0.75},
+      {"step": p2, "scale": 0.1 / 0.75},
+      {"step": p3, "scale": 0.0},
+    ]
+  clock_obs = ObservationTermCfg(func=mdp.gait_clock, params=clock_params)
   cfg.observations["actor"].terms["gait_clock"] = clock_obs
   cfg.observations["critic"].terms["gait_clock"] = clock_obs
+
+  # Servo current/torque observation. Estimated electrical current per actuator
+  # (tau / Kt, quantized to the Dynamixel present-current resolution) given to
+  # the policy AND critic. This grows the actor input dimension, so runs with
+  # CURRENT_OBS enabled cannot resume an old checkpoint and must train from
+  # scratch. A GaussianNoiseCfg (with a small constant mean bias) models
+  # measurement noise/bias, while per-servo gain/offset variation is randomized
+  # on reset by the current_sensor event below.
+  if current_obs:
+    current_term = ObservationTermCfg(
+      func=mdp.actuator_current,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "kt": _NUGUS_CURRENT_KT,
+        "quantize": _CURRENT_QUANTIZE_A,
+      },
+      noise=Gnoise(mean=0.02, std=0.05),  # Amps: constant bias + sensor noise.
+    )
+    cfg.observations["actor"].terms["actuator_current"] = current_term
+    cfg.observations["critic"].terms["actuator_current"] = current_term
+    cfg.events["current_sensor"] = EventTermCfg(
+      mode="reset",
+      func=dr.current_sensor,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "gain_range": (0.9, 1.1),
+        "offset_range": (-0.1, 0.1),
+      },
+    )
   swing_height = cfg.rewards["foot_swing_height"]
   swing_height.func = mdp.feet_swing_height_clock
   swing_height.weight = 0.75
