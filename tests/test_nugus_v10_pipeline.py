@@ -99,10 +99,40 @@ def test_hard_continue_stages_anchor_at_resume_base(
 
 def test_hard_continue_cont_base_override(monkeypatch: pytest.MonkeyPatch) -> None:
   monkeypatch.setenv("TRAINING_REGIME", "hard_continue")
+  monkeypatch.setenv("RESUME", "true")
   monkeypatch.setenv("CONT_BASE_STEP", "12345")
   cfg = nubots_nugus_flat_env_cfg()
   velocity_stages = cfg.curriculum["command_vel"].params["velocity_stages"]
   assert velocity_stages[0]["step"] == 12345
+
+
+def test_hard_continue_fresh_base_hard_keeps_base_command_vel(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  """Fresh base→hard with CONT_BASE_STEP keeps base command_vel until cont_base."""
+  monkeypatch.setenv("TRAINING_REGIME", "hard_continue")
+  monkeypatch.setenv("RESUME", "false")
+  monkeypatch.setenv("CONT_BASE_STEP", str(_CONT_BASE))
+  monkeypatch.setenv("PHASE_ITERATIONS", str(_PHASE_ITERATIONS))
+  cfg = nubots_nugus_flat_env_cfg()
+  base_stages = (
+    make_velocity_env_cfg().curriculum["command_vel"].params["velocity_stages"]
+  )
+  assert cfg.curriculum["command_vel"].params["velocity_stages"] == base_stages
+  assert "push_robot_ramp" in cfg.curriculum
+  push_stages = cfg.curriculum["push_robot_ramp"].params["push_stages"]
+  assert push_stages[0]["step"] == _CONT_BASE
+
+
+def test_base_then_hard_alias_matches_hard_continue(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "base_then_hard")
+  monkeypatch.setenv("RESUME", "false")
+  monkeypatch.setenv("CONT_BASE_STEP", str(_CONT_BASE))
+  monkeypatch.setenv("PHASE_ITERATIONS", str(_PHASE_ITERATIONS))
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "push_robot_ramp" in cfg.curriculum
 
 
 def test_hard_continue_absent_in_base_regime(monkeypatch: pytest.MonkeyPatch) -> None:

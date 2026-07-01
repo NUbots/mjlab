@@ -297,15 +297,17 @@ def _add_hard_continue_curriculum(
   cont_base: int,
   upright_w_start: float,
   std_walking: dict[str, float],
+  replace_command_vel: bool = True,
 ) -> None:
   """Ramp command velocity, push disturbances, and balance penalties after resume."""
-  cfg.curriculum["command_vel"] = CurriculumTermCfg(
-    func=mdp.commands_vel,
-    params={
-      "command_name": "twist",
-      "velocity_stages": _hard_continue_velocity_stages(cont_base),
-    },
-  )
+  if replace_command_vel:
+    cfg.curriculum["command_vel"] = CurriculumTermCfg(
+      func=mdp.commands_vel,
+      params={
+        "command_name": "twist",
+        "velocity_stages": _hard_continue_velocity_stages(cont_base),
+      },
+    )
   cfg.curriculum["push_robot_ramp"] = CurriculumTermCfg(
     func=mdp.push_robot_curriculum,
     params={
@@ -921,23 +923,30 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
 
-  if training_regime == "hard_continue":
+  if training_regime in ("hard_continue", "base_then_hard"):
     cont_base_raw = os.environ.get("CONT_BASE_STEP")
-    if cont_base_raw not in (None, ""):
+    cont_base_explicit = cont_base_raw not in (None, "")
+    if cont_base_explicit:
+      assert cont_base_raw is not None
       cont_base = int(cont_base_raw)
     else:
       cont_base = phase_iterations * _NUM_STEPS_PER_ENV if resume_mode else 0
     std_walking = cfg.rewards["pose"].params["std_walking"]
     assert isinstance(std_walking, dict)
+    # Fresh base→hard: keep the base command_vel curriculum until cont_base;
+    # resume continuations replace it so stage 0 matches the checkpoint terminal.
+    replace_command_vel = resume_mode or not cont_base_explicit
     _add_hard_continue_curriculum(
       cfg,
       cont_base=cont_base,
       upright_w_start=upright_w,
       std_walking=std_walking,
+      replace_command_vel=replace_command_vel,
     )
   elif training_regime != "base":
     raise ValueError(
-      f"TRAINING_REGIME must be 'base' or 'hard_continue'; got {training_regime!r}"
+      "TRAINING_REGIME must be 'base', 'hard_continue', or 'base_then_hard'; "
+      f"got {training_regime!r}"
     )
 
   # Apply play mode overrides.

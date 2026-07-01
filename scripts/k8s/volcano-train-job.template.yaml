@@ -80,6 +80,8 @@ spec:
                   value: "${PROGRESS_BACKSLIDE_W}"
                 - name: TRAINING_REGIME
                   value: "${TRAINING_REGIME}"
+                - name: CONT_BASE_STEP
+                  value: "${CONT_BASE_STEP}"
                 - name: CRITIC_HEIGHT_SCAN
                   value: "${CRITIC_HEIGHT_SCAN}"
                 - name: TASK

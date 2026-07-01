@@ -34,6 +34,11 @@ Fixed
 - ``TRAINING_REGIME=hard_continue`` stage 0 at the continuation base now matches
   the v9 terminal command ranges (±0.5, ±0.3, ±0.5) before ramping harder.
 
+- Fresh base→hard runs (``RESUME=false`` with explicit ``CONT_BASE_STEP``) keep
+  the base ``command_vel`` curriculum for the initial phase and only add
+  push/upright/balance ramps from the continuation base. ``base_then_hard`` is
+  an alias for the same behaviour.
+
 Added
 ^^^^^
 
@@ -48,8 +53,10 @@ Added
   ``hard_continue`` regime ramps command velocity, push disturbances, and balance
   penalties from a continuation base anchored at ``PHASE_ITERATIONS × 24`` on
   resume. Kubernetes grid generators ``BATCH=v10`` (two parallel jobs: flat hard
-  continuation + flat height-scan retrain) and ``BATCH=v10b`` (rough continuation
-  from stage B, documented for manual launch after B completes) wire the new knobs.
+  continuation + flat height-scan retrain), ``BATCH=v10b`` (rough continuation
+  from stage B, documented for manual launch after B completes), and
+  ``BATCH=v11`` (four overnight base→hard single-run seeds with critic
+  height_scan) wire the new knobs.
 
 - Added an optional ``actuator_current`` velocity observation that estimates
   per-servo electrical current as ``tau / Kt`` (Amps), with an optional

@@ -117,6 +117,7 @@ PHASE_DELTA_STRONG_W="${PHASE_DELTA_STRONG_W:-}"
 UPRIGHT_W="${UPRIGHT_W:-}"
 PROGRESS_BACKSLIDE_W="${PROGRESS_BACKSLIDE_W:-}"
 TRAINING_REGIME="${TRAINING_REGIME:-}"
+CONT_BASE_STEP="${CONT_BASE_STEP:-}"
 CRITIC_HEIGHT_SCAN="${CRITIC_HEIGHT_SCAN:-}"
 TASK="${TASK:-Mjlab-Velocity-Flat-Nubots-Nugus}"
 
@@ -205,7 +206,7 @@ export GAIT_PERIOD EFFORT_LO EFFORT_HI LOGGER EXPERIMENT_NAME WANDB_PROJECT
 export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME RESAMPLE_MIN
 export WANDB_RUN_PATH WANDB_RUN_NAME
 export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W UPRIGHT_W PROGRESS_BACKSLIDE_W
-export TRAINING_REGIME CRITIC_HEIGHT_SCAN TASK
+export TRAINING_REGIME CONT_BASE_STEP CRITIC_HEIGHT_SCAN TASK
 
 gen_default_matrix() {
   for variant in "${VARIANTS[@]}"; do
@@ -442,6 +443,38 @@ gen_v10_grid() {
   emit_manifest "mj-gs-v10-cl-cur0-hs"
 }
 
+# BATCH=v11: overnight base→hard single-run (no resume). Each seed trains 4000
+# iters: v9-equivalent base for PHASE_ITERATIONS=2000, then hard_continue ramps
+# from CONT_BASE_STEP=48000 (2000*24). Uses critic height_scan.
+gen_v11_overnight() {
+  export MJLAB_VARIANT="clock_learned"
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="hard_continue"
+  export CONT_BASE_STEP="48000"
+  export CRITIC_HEIGHT_SCAN="true"
+  export RESUME="false"
+  export WANDB_RUN_PATH=""
+  local joule_label seed
+  joule_label="$(joule_tag "$JOULE_W")"
+  for seed in 1 2 3 4; do
+    export SEED="$seed"
+    export RUN_NAME="clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__s${seed}__${BATCH}"
+    export WANDB_TAGS="clock_learned,stand-0.15,pc-0.5,joule-${joule_label},seed-${seed},gridsearch,batch-${BATCH},critic-height-scan,base-hard"
+    emit_manifest "mj-gs-${BATCH}-cl-cur0-hs-s${seed}"
+  done
+}
+
 # BATCH=v10b: rough hard continuation from stage B (not queued in v10 launch).
 # Run manually after stage B completes:
 #   V10B_WANDB_RUN_PATH=<wandb/path/from/stage-B> BATCH=v10b ./scripts/k8s/gen-gridsearch.sh --apply
@@ -485,6 +518,7 @@ case "$BATCH" in
   v9) gen_v9_grid; expected=3 ;;
   v10) gen_v10_grid; expected=2 ;;
   v10b) gen_v10b_rough_cont; expected=1 ;;
+  v11) gen_v11_overnight; expected=4 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))
