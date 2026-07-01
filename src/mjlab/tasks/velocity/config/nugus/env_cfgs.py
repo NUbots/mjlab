@@ -151,6 +151,27 @@ def _phase_c_ramp_stages(
   return stages
 
 
+def _coalesce_reward_curriculum_stages(
+  stages: list[dict[str, float]],
+) -> list[dict[str, float]]:
+  """Drop or merge stages so ``step`` thresholds are nondecreasing.
+
+  Short runs can place ``p1`` before the clock_learned strong-handoff step;
+  skip those entries and merge weights that share the same threshold.
+  """
+  coalesced: list[dict[str, float]] = []
+  for stage in stages:
+    step = int(stage["step"])
+    payload = {k: v for k, v in stage.items() if k != "step"}
+    if coalesced and step < coalesced[-1]["step"]:
+      continue
+    if coalesced and step == coalesced[-1]["step"]:
+      coalesced[-1].update(payload)
+      continue
+    coalesced.append({"step": step, **payload})
+  return coalesced
+
+
 def _add_phase_c_curriculum(
   cfg: ManagerBasedRlEnvCfg,
   *,
@@ -192,13 +213,15 @@ def _add_gait_curriculum(
       func=mdp.reward_curriculum,
       params={
         "reward_name": "phase_delta_nominal",
-        "stages": [
-          {"step": 0, "weight": phase_delta_strong_w},
-          {"step": strong_end, "weight": -0.5},
-          {"step": p1, "weight": -0.2},
-          {"step": p2, "weight": -0.05},
-          {"step": p3, "weight": 0.0},
-        ],
+        "stages": _coalesce_reward_curriculum_stages(
+          [
+            {"step": 0, "weight": phase_delta_strong_w},
+            {"step": strong_end, "weight": -0.5},
+            {"step": p1, "weight": -0.2},
+            {"step": p2, "weight": -0.05},
+            {"step": p3, "weight": 0.0},
+          ]
+        ),
       },
     )
   elif variant == "clock_anneal":

@@ -183,6 +183,25 @@ def test_clock_learned_phase_delta_nominal_curriculum(monkeypatch):
   ]
 
 
+def test_clock_learned_phase_delta_nominal_curriculum_short_run(monkeypatch):
+  """Grid-search runs use 2k iters with a 1k-iter strong phase."""
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_learned")
+  monkeypatch.setenv("MAX_ITERATIONS", "2000")
+  monkeypatch.setenv("PHASE_ITERATIONS", "2000")
+  monkeypatch.setenv("PHASE_C_FRAC", "0.5")
+  monkeypatch.setenv("PHASE_DELTA_STRONG_ITERS", "1000")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  stages = cfg.curriculum["phase_delta_nominal_anneal"].params["stages"]
+  assert stages == [
+    {"step": 0, "weight": -5.0},
+    {"step": 24000, "weight": -0.05},
+    {"step": 40800, "weight": 0.0},
+  ]
+
+
 def test_clock_learned_phase_delta_strong_env_knobs(monkeypatch):
   monkeypatch.setenv("MJLAB_VARIANT", "clock_learned")
   monkeypatch.setenv("PHASE_DELTA_STRONG_W", "-8.0")

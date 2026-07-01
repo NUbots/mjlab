@@ -8,6 +8,8 @@ Upcoming version (not yet released)
 Fixed
 ^^^^^
 
+- ``clock_learned`` Nugus grid-search runs with short ``PHASE_ITERATIONS`` and a long ``PHASE_DELTA_STRONG_ITERS`` window no longer fail at env init with out-of-order curriculum stages.
+
 - NUbots Nugus factory env knobs (``_env_float`` / ``_env_int`` / ``_env_bool``)
   now treat an empty string as unset so Volcano Job cells with blank optional
   env vars fall back to defaults instead of failing at import time. The k8s
@@ -184,6 +186,8 @@ Changed
 
 Fixed
 ^^^^^
+
+- ``clock_learned`` Nugus grid-search runs with short ``PHASE_ITERATIONS`` and a long ``PHASE_DELTA_STRONG_ITERS`` window no longer fail at env init with out-of-order curriculum stages.
 
 - Fixed ONNX policies no longer being uploaded to W&B after the upgrade to
   ``rsl-rl-lib`` 5.4.0. The runners gated the upload (and the run-name
@@ -368,6 +372,8 @@ Changed
 
 Fixed
 ^^^^^
+
+- ``clock_learned`` Nugus grid-search runs with short ``PHASE_ITERATIONS`` and a long ``PHASE_DELTA_STRONG_ITERS`` window no longer fail at env init with out-of-order curriculum stages.
 
 - ``train`` and ``play`` now print a top-level usage message when invoked
   with ``-h`` / ``--help`` and no task argument, pointing users at
@@ -609,6 +615,8 @@ Changed
 Fixed
 ^^^^^
 
+- ``clock_learned`` Nugus grid-search runs with short ``PHASE_ITERATIONS`` and a long ``PHASE_DELTA_STRONG_ITERS`` window no longer fail at env init with out-of-order curriculum stages.
+
 - Fixed actuator target resolution for entities whose ``spec_fn`` uses
   internal ``MjSpec.attach(prefix=...)``
   (`#709 <https://github.com/mujocolab/mjlab/issues/709>`_).
@@ -652,6 +660,8 @@ Added
 
 Fixed
 ^^^^^
+
+- ``clock_learned`` Nugus grid-search runs with short ``PHASE_ITERATIONS`` and a long ``PHASE_DELTA_STRONG_ITERS`` window no longer fail at env init with out-of-order curriculum stages.
 
 - Fixed ``play.py`` defaulting to the base rsl-rl ``OnPolicyRunner`` instead
   of ``MjlabOnPolicyRunner``, which caused a ``TypeError`` from an unexpected
@@ -705,6 +715,8 @@ Changed
 
 Fixed
 ^^^^^
+
+- ``clock_learned`` Nugus grid-search runs with short ``PHASE_ITERATIONS`` and a long ``PHASE_DELTA_STRONG_ITERS`` window no longer fail at env init with out-of-order curriculum stages.
 
 - Fixed ``randomize_pd_gains`` crash with ``num_envs > 1`` (`#564 <https://github.com/mujocolab/mjlab/pull/564>`_).
 - Fixed ``ctrl_ids`` index error with multiple actuated entities (`#573 <https://github.com/mujocolab/mjlab/pull/573>`_).
