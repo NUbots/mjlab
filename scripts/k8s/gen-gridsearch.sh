@@ -624,10 +624,18 @@ gen_v15_clock_anneal_hard_long() {
   export CRITIC_HEIGHT_SCAN="false"
   export RESUME="false"
   export WANDB_RUN_PATH=""
-  export SEED="1"
-  export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__base-hard__20k__s1__${BATCH}"
-  export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},base-hard,20k,upright-0.5"
-  emit_manifest "mj-gs-${BATCH}-ca-base-hard-20k"
+  local seed job_suffix
+  for seed in 1 2; do
+    export SEED="$seed"
+    if [[ "$seed" == "1" ]]; then
+      job_suffix=""
+    else
+      job_suffix="-s${seed}"
+    fi
+    export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__base-hard__20k__s${seed}__${BATCH}"
+    export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-${seed},gridsearch,batch-${BATCH},base-hard,20k,upright-0.5"
+    emit_manifest "mj-gs-${BATCH}-ca-base-hard-20k${job_suffix}"
+  done
 }
 
 # BATCH=v10b: rough hard continuation from stage B (not queued in v10 launch).
@@ -677,7 +685,7 @@ case "$BATCH" in
   v12) gen_v12_pd_tail; expected=2 ;;
   v13) gen_v13_grid; expected=2 ;;
   v14) gen_v14_clock_anneal_hard; expected=1 ;;
-  v15) gen_v15_clock_anneal_hard_long; expected=1 ;;
+  v15) gen_v15_clock_anneal_hard_long; expected=2 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))
