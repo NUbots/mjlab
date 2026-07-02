@@ -567,6 +567,37 @@ gen_v13_grid() {
   emit_manifest "mj-gs-${BATCH}-ca"
 }
 
+
+# BATCH=v14: clock_anneal base→hard single-run (no resume), v11-style 4000 iters
+# with legacy critic (no height_scan). One job, seed 1.
+gen_v14_clock_anneal_hard() {
+  local joule_label
+  export MJLAB_VARIANT="clock_anneal"
+  export JOULE_W="3e-4"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export PHASE_DELTA_TAIL_W=""
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="hard_continue"
+  export CONT_BASE_STEP="48000"
+  export CRITIC_HEIGHT_SCAN="false"
+  export RESUME="false"
+  export WANDB_RUN_PATH=""
+  export SEED="1"
+  export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__base-hard__s1__${BATCH}"
+  export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},base-hard,upright-0.5"
+  emit_manifest "mj-gs-${BATCH}-ca-base-hard"
+}
+
 # BATCH=v10b: rough hard continuation from stage B (not queued in v10 launch).
 # Run manually after stage B completes:
 #   V10B_WANDB_RUN_PATH=<wandb/path/from/stage-B> BATCH=v10b ./scripts/k8s/gen-gridsearch.sh --apply
@@ -613,6 +644,7 @@ case "$BATCH" in
   v11) gen_v11_overnight; expected=4 ;;
   v12) gen_v12_pd_tail; expected=2 ;;
   v13) gen_v13_grid; expected=2 ;;
+  v14) gen_v14_clock_anneal_hard; expected=1 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))
