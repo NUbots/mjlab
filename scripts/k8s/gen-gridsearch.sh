@@ -114,6 +114,7 @@ WANDB_RUN_PATH="${WANDB_RUN_PATH:-}"
 WANDB_RUN_NAME="${WANDB_RUN_NAME:-}"
 PHASE_DELTA_STRONG_ITERS="${PHASE_DELTA_STRONG_ITERS:-}"
 PHASE_DELTA_STRONG_W="${PHASE_DELTA_STRONG_W:-}"
+PHASE_DELTA_TAIL_W="${PHASE_DELTA_TAIL_W:-}"
 UPRIGHT_W="${UPRIGHT_W:-}"
 PROGRESS_BACKSLIDE_W="${PROGRESS_BACKSLIDE_W:-}"
 TRAINING_REGIME="${TRAINING_REGIME:-}"
@@ -205,7 +206,7 @@ emit_manifest() {
 export GAIT_PERIOD EFFORT_LO EFFORT_HI LOGGER EXPERIMENT_NAME WANDB_PROJECT
 export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME RESAMPLE_MIN
 export WANDB_RUN_PATH WANDB_RUN_NAME
-export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W UPRIGHT_W PROGRESS_BACKSLIDE_W
+export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W PHASE_DELTA_TAIL_W UPRIGHT_W PROGRESS_BACKSLIDE_W
 export TRAINING_REGIME CONT_BASE_STEP CRITIC_HEIGHT_SCAN TASK
 
 gen_default_matrix() {
@@ -475,6 +476,39 @@ gen_v11_overnight() {
   done
 }
 
+# BATCH=v12: v11 overnight base→hard with non-zero phase_delta_nominal tail.
+# Two runs (seed 1) compare moderate vs lighter cadence hold after strong start.
+gen_v12_pd_tail() {
+  export MJLAB_VARIANT="clock_learned"
+  export JOULE_W="$JOULE_W"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="hard_continue"
+  export CONT_BASE_STEP="48000"
+  export CRITIC_HEIGHT_SCAN="true"
+  export RESUME="false"
+  export WANDB_RUN_PATH=""
+  export SEED="1"
+  local joule_label tail_w tail_slug
+  joule_label="$(joule_tag "$JOULE_W")"
+  for tail_w in -0.2 -0.1; do
+    export PHASE_DELTA_TAIL_W="$tail_w"
+    tail_slug="${tail_w#-}"
+    export RUN_NAME="clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__pd-tail-${tail_slug}__s1__${BATCH}"
+    export WANDB_TAGS="clock_learned,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan,base-hard,pd-tail-${tail_slug}"
+    emit_manifest "mj-gs-${BATCH}-cl-pd-tail-${tail_slug}"
+  done
+}
+
 # BATCH=v10b: rough hard continuation from stage B (not queued in v10 launch).
 # Run manually after stage B completes:
 #   V10B_WANDB_RUN_PATH=<wandb/path/from/stage-B> BATCH=v10b ./scripts/k8s/gen-gridsearch.sh --apply
@@ -519,6 +553,7 @@ case "$BATCH" in
   v10) gen_v10_grid; expected=2 ;;
   v10b) gen_v10b_rough_cont; expected=1 ;;
   v11) gen_v11_overnight; expected=4 ;;
+  v12) gen_v12_pd_tail; expected=2 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))

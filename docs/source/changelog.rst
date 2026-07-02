@@ -155,7 +155,8 @@ Changed
 - ``clock_learned`` now starts with a strong ``phase_delta_nominal`` penalty
   (default weight ``-5.0`` for the first 100 PPO iterations) before transitioning
   to the existing p1/p2/p3 anneal schedule. Tunable via ``PHASE_DELTA_STRONG_W``
-  and ``PHASE_DELTA_STRONG_ITERS``.
+  and ``PHASE_DELTA_STRONG_ITERS``. The final p3 stage now holds a non-zero tail
+  weight (default ``-0.1`` via ``PHASE_DELTA_TAIL_W``) instead of annealing to zero.
 - NUbots Nugus ``upright`` reward weight is tunable via ``UPRIGHT_W`` (default
   ``1.0``).
 - Rescaled the velocity ``command_vel`` curriculum stage thresholds so the wide

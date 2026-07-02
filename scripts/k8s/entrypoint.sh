@@ -128,6 +128,7 @@ GPU_IDS="${GPU_IDS:-0}"
 [[ -n "${CURRENT_OBS:-}" ]] && export CURRENT_OBS
 [[ -n "${PHASE_DELTA_STRONG_ITERS:-}" ]] && export PHASE_DELTA_STRONG_ITERS
 [[ -n "${PHASE_DELTA_STRONG_W:-}" ]] && export PHASE_DELTA_STRONG_W
+[[ -n "${PHASE_DELTA_TAIL_W:-}" ]] && export PHASE_DELTA_TAIL_W
 [[ -n "${UPRIGHT_W:-}" ]] && export UPRIGHT_W
 [[ -n "${PROGRESS_BACKSLIDE_W:-}" ]] && export PROGRESS_BACKSLIDE_W
 [[ -n "${TRAINING_REGIME:-}" ]] && export TRAINING_REGIME

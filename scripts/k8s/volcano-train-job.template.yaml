@@ -74,6 +74,8 @@ spec:
                   value: "${PHASE_DELTA_STRONG_ITERS}"
                 - name: PHASE_DELTA_STRONG_W
                   value: "${PHASE_DELTA_STRONG_W}"
+                - name: PHASE_DELTA_TAIL_W
+                  value: "${PHASE_DELTA_TAIL_W}"
                 - name: UPRIGHT_W
                   value: "${UPRIGHT_W}"
                 - name: PROGRESS_BACKSLIDE_W

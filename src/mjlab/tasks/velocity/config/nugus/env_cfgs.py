@@ -49,6 +49,7 @@ _DEFAULT_EFFORT_HI = 1.2
 _DEFAULT_RESAMPLE_MIN = 3.0
 _DEFAULT_PHASE_DELTA_STRONG_W = -5.0
 _DEFAULT_PHASE_DELTA_STRONG_ITERS = 100
+_DEFAULT_PHASE_DELTA_TAIL_W = -0.1
 _DEFAULT_UPRIGHT_W = 1.0
 _DEFAULT_PROGRESS_BACKSLIDE_W = -0.5
 # Per-servo torque constants (Nm/A) for the actuator-current observation.
@@ -389,6 +390,7 @@ def _add_gait_curriculum(
   p3: int,
   phase_delta_strong_w: float = _DEFAULT_PHASE_DELTA_STRONG_W,
   phase_delta_strong_iters: int = _DEFAULT_PHASE_DELTA_STRONG_ITERS,
+  phase_delta_tail_w: float = _DEFAULT_PHASE_DELTA_TAIL_W,
 ) -> None:
   """Configure staged gait handoff curriculums for the selected variant."""
   if variant == "clock_learned":
@@ -403,7 +405,7 @@ def _add_gait_curriculum(
             {"step": strong_end, "weight": -0.5},
             {"step": p1, "weight": -0.2},
             {"step": p2, "weight": -0.05},
-            {"step": p3, "weight": 0.0},
+            {"step": p3, "weight": phase_delta_tail_w},
           ]
         ),
       },
@@ -517,6 +519,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   phase_delta_strong_iters = _env_int(
     "PHASE_DELTA_STRONG_ITERS", _DEFAULT_PHASE_DELTA_STRONG_ITERS
   )
+  phase_delta_tail_w = _env_float("PHASE_DELTA_TAIL_W", _DEFAULT_PHASE_DELTA_TAIL_W)
   upright_w = _env_float("UPRIGHT_W", _DEFAULT_UPRIGHT_W)
   progress_backslide_w = _env_float(
     "PROGRESS_BACKSLIDE_W", _DEFAULT_PROGRESS_BACKSLIDE_W
@@ -920,6 +923,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     p3=p3,
     phase_delta_strong_w=phase_delta_strong_w,
     phase_delta_strong_iters=phase_delta_strong_iters,
+    phase_delta_tail_w=phase_delta_tail_w,
   )
   _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
 

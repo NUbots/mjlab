@@ -179,7 +179,7 @@ def test_clock_learned_phase_delta_nominal_curriculum(monkeypatch):
     {"step": 2400, "weight": -0.5},
     {"step": 120000, "weight": -0.2},
     {"step": 288000, "weight": -0.05},
-    {"step": 408000, "weight": 0.0},
+    {"step": 408000, "weight": -0.1},
   ]
 
 
@@ -198,8 +198,23 @@ def test_clock_learned_phase_delta_nominal_curriculum_short_run(monkeypatch):
   assert stages == [
     {"step": 0, "weight": -5.0},
     {"step": 24000, "weight": -0.05},
-    {"step": 40800, "weight": 0.0},
+    {"step": 40800, "weight": -0.1},
   ]
+
+
+def test_clock_learned_phase_delta_tail_env_knob(monkeypatch):
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_learned")
+  monkeypatch.setenv("MAX_ITERATIONS", "2000")
+  monkeypatch.setenv("PHASE_ITERATIONS", "2000")
+  monkeypatch.setenv("PHASE_C_FRAC", "0.5")
+  monkeypatch.setenv("PHASE_DELTA_STRONG_ITERS", "1000")
+  monkeypatch.setenv("PHASE_DELTA_TAIL_W", "-0.2")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  stages = cfg.curriculum["phase_delta_nominal_anneal"].params["stages"]
+  assert stages[-1] == {"step": 40800, "weight": -0.2}
 
 
 def test_clock_learned_phase_delta_strong_env_knobs(monkeypatch):
@@ -232,6 +247,7 @@ def test_nugus_empty_env_vars_use_defaults(monkeypatch):
   for name in (
     "PHASE_DELTA_STRONG_W",
     "PHASE_DELTA_STRONG_ITERS",
+    "PHASE_DELTA_TAIL_W",
     "UPRIGHT_W",
     "JOULE_W",
     "MAX_ITERATIONS",
