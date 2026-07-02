@@ -120,7 +120,7 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "5f7f78443b4b2d99353bf949f50e9eb6625508eb"
+                  value: "ccbfd91174d9f2cd46fd5365caf48cc8a2c18f66"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
