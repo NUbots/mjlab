@@ -168,6 +168,7 @@ joule_job_slug() {
   case "$1" in
     3e-4) echo "j3e4" ;;
     1e-4) echo "j1e4" ;;
+    1e-5) echo "j1e5" ;;
     *) k8s_slug "j-${1}" ;;
   esac
 }
@@ -509,6 +510,63 @@ gen_v12_pd_tail() {
   done
 }
 
+
+# BATCH=v13: lower joule (1e-5) on v12-like clock_learned base→hard (pd-tail -0.1)
+# plus v9-equivalent clock_anneal flat baseline at default JOULE_W=3e-4.
+gen_v13_grid() {
+  local joule_label
+
+  export MJLAB_VARIANT="clock_learned"
+  export JOULE_W="1e-5"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export PHASE_DELTA_TAIL_W="-0.1"
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="hard_continue"
+  export CONT_BASE_STEP="48000"
+  export CRITIC_HEIGHT_SCAN="true"
+  export RESUME="false"
+  export WANDB_RUN_PATH=""
+  export SEED="1"
+  export RUN_NAME="clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__pd-tail-0.1__joule-${joule_label}__s1__${BATCH}"
+  export WANDB_TAGS="clock_learned,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan,base-hard,pd-tail-0.1,joule-1e-5"
+  emit_manifest "mj-gs-${BATCH}-cl-joule-1e5-pd01"
+
+  export MJLAB_VARIANT="clock_anneal"
+  export JOULE_W="3e-4"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export WANDB_RUN_PATH=""
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="base"
+  export CONT_BASE_STEP=""
+  export CRITIC_HEIGHT_SCAN="false"
+  export PHASE_DELTA_TAIL_W=""
+  export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__s1__${BATCH}"
+  export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},upright-0.5"
+  emit_manifest "mj-gs-${BATCH}-ca"
+}
+
 # BATCH=v10b: rough hard continuation from stage B (not queued in v10 launch).
 # Run manually after stage B completes:
 #   V10B_WANDB_RUN_PATH=<wandb/path/from/stage-B> BATCH=v10b ./scripts/k8s/gen-gridsearch.sh --apply
@@ -554,6 +612,7 @@ case "$BATCH" in
   v10b) gen_v10b_rough_cont; expected=1 ;;
   v11) gen_v11_overnight; expected=4 ;;
   v12) gen_v12_pd_tail; expected=2 ;;
+  v13) gen_v13_grid; expected=2 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))
