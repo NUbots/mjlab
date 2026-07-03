@@ -67,7 +67,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [x] ~~v16 base validated~~ **v16 COLLAPSED at p3 — see `06-v16-collapse-analysis.md`**: swing target infeasible on new actuators + clock_anneal→0 handoff; joule/DR largely acquitted
 - [x] ~~v16b re-baseline~~ **v16b FAILED — never stood (ep_len ~25 for 1400 iters, both seeds); jobs killed. See `08-v16b-postmortem.md`**: un-specced effort-limit cut to rated torque + Phase-C penalties from step 0 with no alive bonus = learned fast-termination
 - [x] v16c launched @ `547c67d` (2026-07-03) — **WALKS** (alive bonus fixed bootstrap) but shuffles/limps and tracking declines post-warm-up; jacc −3e-5 cell clearly better than −1e-4. Full analysis in `09-v16c-analysis-v16d.md`
-- [x] v16d launched @ `94dae96` (2026-07-03) — 3 vcjobs @ 2000 iters; cluster pin `94dae96` (+ configmap commit `2ba9d84`); mirror height_scan fix in `94dae96`; **training gate pending** (~iter 1500–2000, doc 09 thresholds)
+- [x] v16d launched @ `94dae96` (2026-07-03) — main + jacc **Completed** 2000 iters; nomirror **Running** (GPU queue). Doc 09 gate: **main FAIL** (tracking decline, shuffle metrics); **no eval**. See summary §v16d.
 - [x] peak-swing-height metric added to clock_persist telemetry (`Metrics/peak_height_mean` on `feet_swing_height_clock`, `94dae96`)
 - [x] Velocity limits corrected: XH540 no-load is 39–46 rpm = 4.1–4.8 rad/s (Phase 0 used 3.2 from a wrong 30 rpm figure); set from measured bus voltage; check `saturation_effort` = stall torque (doc 06 §V5). Units are rad/s — confirmed, not rpm
 - [ ] Classical-walk joint-velocity/torque log captured from the real robot (ground truth for limits + gait envelope)

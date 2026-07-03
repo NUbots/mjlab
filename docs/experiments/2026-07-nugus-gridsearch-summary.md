@@ -469,7 +469,23 @@ v13 baseline `l9wok1ss` on **same eval build** — **failed to load** (actor obs
 | jacc −3e-5 (mirror) | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/n85kiuli |
 | nomirror | (pending URL — job queued behind GPU) |
 
-**Doc 09 thresholds @ iter 1500–2000:** **PENDING** (runs in progress; no `nugus_eval` / `sim2sim_eval` until main passes).
+**Doc 09 thresholds (kubectl logs, last iter blocks):**
+
+| Metric | Threshold | main @1999 | jacc-3e5 @1999 | Pass? |
+|--------|-----------|------------|----------------|-------|
+| `Episode_Reward/track_linear_velocity` | ≥1.2, no post-warmup decline | **0.99** (was **2.07** @iter ~60) | **0.23** | **FAIL** |
+| `Metrics/twist/error_vel_x` | ≤0.15 m/s | **0.24** | **0.07** | main FAIL / jacc PASS |
+| `Metrics/air_time_mean` | ≥0.15 s | **0.063** | **0.067** | **FAIL** |
+| `Metrics/gait_air_cv_mean` | ≤0.2; mirror < nomirror | **0.38** | **0.30** | **FAIL** (nomirror TBD) |
+| `Episode_Termination/fell_over` | ≤0.5/ep | **5.4** | **45.0** | **FAIL** |
+
+**Verdict:** v16d-main still shuffles / limps; tracking collapses after warm-up (same failure mode as v16c, attenuated). **`nugus_eval` / `sim2sim_eval` not run.** Next levers per doc 09: raise `AIR_TIME_W` → 0.25; wire `foot_clearance` target to `SWING_TARGET_HEIGHT`; try `JOINT_ACC_W=0`.
+
+| Cell | W&B |
+|------|-----|
+| main | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/xexvp9eb |
+| jacc −3e-5 | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/n85kiuli |
+| nomirror | in progress (started after main/jacc finished) |
 
 **Overnight wave-0 status (2026-07-03 ~19:30 UTC+9):** `mj-gs-v16d-main` and `mj-gs-v16d-jacc-3e5` **Running** (~55 min elapsed, ETA ~35 min → ~iter 1200/2000 est. from timing). `mj-gs-v16d-nomirror` **Pending** (GPU). W&B: main `xexvp9eb`, jacc `n85kiuli`. **D0 / BASE1 not yet chosen.**
 
