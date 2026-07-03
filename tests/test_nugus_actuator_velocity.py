@@ -37,10 +37,10 @@ def test_xh540_velocity_limit_in_expected_range() -> None:
     NUGUS_ACTUATOR_HEAD,
   ],
 )
-def test_saturation_effort_exceeds_effort_limit(
+def test_saturation_effort_equals_effort_limit(
   actuator_cfg: DcMotorActuatorCfg,
 ) -> None:
-  assert actuator_cfg.saturation_effort > actuator_cfg.effort_limit
+  assert actuator_cfg.saturation_effort == actuator_cfg.effort_limit
 
 
 def test_xh540_knee_actuators_use_correct_velocity_limit(

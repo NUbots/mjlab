@@ -47,6 +47,10 @@ Per sim2real plan (`docs/plans/sim2real-training-regime/README.md`):
 
 **v16 (Phase 0 smoke, 2026-07-03):** `BATCH=v16` → `scripts/k8s/gen_v16/mj-gs-v16-ca-hs-joule-1e5.yaml` (2000 iters). **Completed** @ `a1af0d4` — walk metrics OK @ iter ~630–960 then **collapsed** by iter 1999 (reward **3.08**, ep_len **165**); W&B `shhm98rd`. See doc 06 — **invalid base for v17**.
 
+**v16b (re-baseline launch, 2026-07-03):** `BATCH=v16b` → `scripts/k8s/gen_v16b/` (2k iters, seeds 1–2). **FAILED** @ `5eccb3d` — never stood; ep_len stuck **~22–30** (~0.5 s) for **1400+** iters, both seeds identical (learned fast termination). W&B `obp8h6ol` / `zf7ad97s`; jobs **killed ~iter 1400/2000** 2026-07-03. Root cause: rated-torque effort cut + Phase-C penalties from step 0 with no alive bonus — see `08-v16b-postmortem.md`. **No eval gate run.**
+
+**v16c (planned):** restore stall effort limits, `ALIVE_W=0.5`, `PHASE_C_WARMUP=1` (penalties ramp iters 500–1000), + `joint_acc_l2` −3e-5 ablation cell — spec in doc 08. Pre-launch: `scripts/tools/nugus_stand_smoke.py` + `nugus_noise_smoke.py`.
+
 ---
 
 ## 2. Timeline / batches
@@ -70,6 +74,8 @@ Shared defaults unless overridden: `PHASE_C_FRAC=0.5`, flat task `Mjlab-Velocity
 | **v15** | v14 extended to **20k** iters, seeds 1–2 | `MAX_ITERATIONS=20000` | `mj-gs-v15-ca-base-hard-20k`, `…-s2` | `ynquy630` s1, `rntq7onj` s2 | **38–40** plateau / fell **0.5–1.1**/ep | **Stopped** per F2 — flatlined ~4k–15k; do not relaunch |
 | **v16-short** | Phase 0 validation — same as v16, shorter | `clock_anneal`, **500** iters, `JOULE_W=1e-5`, hs-critic, `TRAINING_REGIME=base` | `mj-gs-v16-short-ca-hs-joule-1e5` | `gr1hb5uh` | reward **26.75**, ep_len **851** @ iter 499 | **Smoke only** — not authoritative gate (1-env CPU eval); completed 2026-07-03 |
 | **v16** | Phase 0 smoke — post-E0.2/A3/C1 physics base | `clock_anneal`, 2k iters, `JOULE_W=1e-5`, `CRITIC_HEIGHT_SCAN=true`, `TRAINING_REGIME=base` | `mj-gs-v16-ca-hs-joule-1e5` | `shhm98rd` | reward **3.08**, ep_len **165** @ iter 1999; peak **~53** @ iter ~960 | **Collapsed @ p3** — doc 06; completed @ `a1af0d4` |
+| **v16b** | Re-baseline after v16 collapse — actuator V5 + clock_persist | `clock_persist`, 2k iters, `JOULE_W=1e-5`, hs-critic, swing **0.05**, `GAIT_PERIOD=1.0`, trimmed DR, `FLATTEN_PHASE_C=1` | `mj-gs-v16b-cp-hs-joule-1e5`, `…-s2` | `obp8h6ol`, `zf7ad97s` | ep_len **~25** @ iter ~1400 | **FAILED** — fast-termination trap; killed ~1400/2000 |
+| **v16c** | Post-v16b fix — stall efforts, alive bonus, penalty warmup | `PHASE_C_WARMUP=1`, `ALIVE_W=0.5`, `FLATTEN_PHASE_C=0`; + jacc −3e-5 ablation | (pending) | (pending) | (pending) | **Not launched** — manifests via `BATCH=v16c` |
 | **v17** | B1 decoupling grid (5 cells) | resume from v16 @ `a1af0d4`, 4k iters | `mj-gs-v17-{all,commands,phasec,pushes,upright}` | partial W&B (`ts21daeb`, `9nzuqlnr`) | degraded pre-CONT_BASE | **Killed / invalid** — ran on collapsed v16; **not analyzed**; vcjobs deleted 2026-07-03 (stop-v17) |
 
 **Legacy job still on cluster:** `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` → W&B `ufk65r9v` (v3-era naming, 1250 iters, final summary reward **−0.17**). Pod logs at iter **1187/1250**: mean reward **−25.40** (in progress, not final).
@@ -281,6 +287,8 @@ Snapshot: `kubectl get vcjob -n mjlab` on **2026-07-03 ~15:05 JST** (post stop-v
 | `mj-gs-v15-ca-base-hard-20k-s2` | **Deleted** | 0 | Stopped ~iter 16200/20000 |
 | `mj-gs-v16-short-ca-hs-joule-1e5` | **Completed** | 0 | Training smoke OK; W&B `gr1hb5uh`, 500/500 iters (gate **not** authoritative — §8) |
 | `mj-gs-v16-ca-hs-joule-1e5` | **Completed** | 0 | 2000/2000; W&B `shhm98rd`; collapsed late — invalid v17 base |
+| `mj-gs-v16b-cp-hs-joule-1e5` | **Deleted** | 0 | **FAILED** @ `5eccb3d`; W&B `obp8h6ol`; killed ~iter 1400 |
+| `mj-gs-v16b-cp-hs-joule-1e5-s2` | **Deleted** | 0 | **FAILED** @ `5eccb3d`; W&B `zf7ad97s`; killed ~iter 1400 |
 | `mj-gs-v17-all` | **Deleted** | 0 | **Killed** stop-v17 — invalid base; was ~1956/4000 @ delete |
 | `mj-gs-v17-commands` | **Deleted** | 0 | **Killed** stop-v17 — invalid base; was ~2025/4000 @ delete |
 | `mj-gs-v17-phasec` | **Deleted** | 0 | **Killed** stop-v17 — never analyzed |
@@ -395,7 +403,19 @@ Other overall: `lin_vel_rmse` **0.33**, `ang_vel_rmse` **0.33**, `slip_vel` **0.
 
 Pods: `mj-gs-v17-all-train-0` (munin), `mj-gs-v17-commands-train-0` (hugin). Both show the familiar base→pre-hard degradation (peak ~28 @ iter ~384, collapse to single digits by iter ~2000). `commands` crossed CONT_BASE first with **higher** falls (~33 vs ~21) and **lower** reward (~3 vs ~10) — command widening alone may already be destabilizing, but B1 requires fixed eval (`nugus_eval` @ 0.75 vs 0.3 m/s) on all 5 checkpoints. **v18 not queued.**
 
-**Stop-v17 (2026-07-03):** All `mj-gs-v17-*` vcjobs **deleted** / absent on cluster. Batch **invalid** — launched on collapsed v16 @ `a1af0d4`. **No fixed eval, no destabilizer call.** Relaunch only after v16b passes full eval spec (≥256 envs/command). Partial W&B (`ts21daeb`, `9nzuqlnr`) retained for forensics only.
+
+### v16b launch (2026-07-03)
+
+| Field | Value |
+| --- | --- |
+| Git | `5eccb3d746378f7e358e033f9da80c7c9189c18c` on `add-phase-clock` |
+| Configmap | `GIT_COMMIT` pinned; `kubectl apply -f scripts/k8s/configmap.yaml` |
+| Manifests | `BATCH=v16b ./scripts/k8s/gen-gridsearch.sh -o scripts/k8s/gen_v16b`; `kubectl apply -f scripts/k8s/gen_v16b/` |
+| vcjobs | `mj-gs-v16b-cp-hs-joule-1e5`, `mj-gs-v16b-cp-hs-joule-1e5-s2` |
+| W&B | `nugus_gridsearch_v16b` — `clock_persist__stand-0.15__pc-flat__joule-1e-5__hs__s1__v16b`, `…__s2__v16b` |
+| Status | Training started; **killed ~iter 1400/2000** — ep_len ~25 both seeds; **no eval gate** |
+
+**Stop-v17 (2026-07-03):** All `mj-gs-v17-*` vcjobs **deleted** / absent on cluster. Batch **invalid** — launched on collapsed v16 @ `a1af0d4`. **No fixed eval, no destabilizer call.** Relaunch only after v16c passes training + eval gates (≥256 envs/command). Partial W&B (`ts21daeb`, `9nzuqlnr`) retained for forensics only.
 
 ---
 

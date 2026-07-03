@@ -65,12 +65,13 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [x] No-op audit test (DR scale terms have nonzero baselines; active rewards fire)
 - [ ] v16 smoke batch: confirm training still converges on new physics (manifests ready; **blocked on commit+push** — Phase 0 code is local-only)
 - [x] ~~v16 base validated~~ **v16 COLLAPSED at p3 — see `06-v16-collapse-analysis.md`**: swing target infeasible on new actuators + clock_anneal→0 handoff; joule/DR largely acquitted
-- [ ] v16b re-baseline launched (clock_persist, GAIT_PERIOD 1.0, swing 0.05, flattened Phase-C, trimmed DR — spec in doc 06)
-- [ ] Velocity limits corrected: XH540 no-load is 39–46 rpm = 4.1–4.8 rad/s (Phase 0 used 3.2 from a wrong 30 rpm figure); set from measured bus voltage; check `saturation_effort` = stall torque (doc 06 §V5). Units are rad/s — confirmed, not rpm
+- [x] ~~v16b re-baseline~~ **v16b FAILED — never stood (ep_len ~25 for 1400 iters, both seeds); jobs killed. See `08-v16b-postmortem.md`**: un-specced effort-limit cut to rated torque + Phase-C penalties from step 0 with no alive bonus = learned fast-termination
+- [ ] v16c launched (restore stall-torque effort limits, +0.5 alive bonus, penalty warm-up iters 500–1000 — spec in doc 08; plus joint_acc −3e-5 ablation cell)
+- [x] Velocity limits corrected: XH540 no-load is 39–46 rpm = 4.1–4.8 rad/s (Phase 0 used 3.2 from a wrong 30 rpm figure); set from measured bus voltage; check `saturation_effort` = stall torque (doc 06 §V5). Units are rad/s — confirmed, not rpm
 - [ ] Classical-walk joint-velocity/torque log captured from the real robot (ground truth for limits + gait envelope)
 - [ ] Stage 2 gait-period-as-command (v19) — variable step timing, doc 07
-- [ ] `Metrics/vel_sat_frac_*` saturation telemetry added
-- [ ] B1 decoupling grid re-launched on v16b base (first v17 attempt **killed 2026-07-03** — ran on collapsed v16 base; **not analyzed** via fixed eval)
+- [x] `Metrics/vel_sat_frac_*` saturation telemetry added
+- [ ] B1 decoupling grid re-launched on **v16c** base (first v17 attempt **killed 2026-07-03** — ran on collapsed v16 base; **not analyzed** via fixed eval)
 - [ ] B1 analyzed via fixed eval → destabilizer identified (**v17 attempt N/A — killed before eval**)
 - [ ] B2 hard-from-start launched (v18)
 - [ ] A1 BAM friction params adopted + DR re-centered
@@ -107,6 +108,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `05-track-d-hardware-loop.md` | Sim-to-sim gate, first deployment protocol, logging spec |
 | `06-v16-collapse-analysis.md` | v16 post-mortem (infeasible swing target, anneal handoff), v16b re-baseline spec, public config sources |
 | `07-gait-timing-strategy.md` | Variable step timing done right: period-as-command (Stage 2), push-window phase freedom, unclocked endgame |
+| `08-v16b-postmortem.md` | v16b never-stands failure (effort cut + step-0 penalties, no alive bonus), v16c spec, pre-launch smoke-test pattern. Supersedes doc 06 item 5 and §V5 effort wording |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |

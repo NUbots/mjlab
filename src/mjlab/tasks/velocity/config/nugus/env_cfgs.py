@@ -20,6 +20,7 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg, PhaseDeltaActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg, requires_model_fields
 from mjlab.managers.observation_manager import ObservationTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import (
   ContactMatch,
@@ -64,7 +65,7 @@ _NUGUS_CURRENT_KT: dict[str, float] = {
 }
 # Dynamixel XH540-W270 "present current" unit: 2.69 mA per LSB.
 _CURRENT_QUANTIZE_A = 0.00269
-_PHASE_C_JOINT_ACC_W = -1e-4
+_DEFAULT_JOINT_ACC_W = -1e-4
 _PHASE_C_TORQUE_RATE_W = -1e-3
 _PHASE_C_SOFT_LANDING_W = -0.01
 _PHASE_C_BASE_HEIGHT_W = 0.3
@@ -163,6 +164,32 @@ def _phase_c_ramp_stages(
     step = p2 if n_steps == 1 else int(round(p2 + (p3 - p2) * i / (n_steps - 1)))
     step = max(step, int(stages[-1]["step"]))
     stages.append({"step": step, "weight": peak * frac})
+  return stages
+
+
+def _phase_c_warmup_stages(
+  final_weight: float,
+  *,
+  warmup_start_iter: int = 500,
+  warmup_end_iter: int = 1000,
+  n_steps: int = 4,
+) -> list[dict[str, float]]:
+  """Ramp one Phase-C penalty from 0 at iter 500 to full weight at iter 1000."""
+  start_step = warmup_start_iter * _NUM_STEPS_PER_ENV
+  end_step = warmup_end_iter * _NUM_STEPS_PER_ENV
+  stages: list[dict[str, float]] = [
+    {"step": 0, "weight": 0.0},
+    {"step": start_step, "weight": 0.0},
+  ]
+  for i in range(1, n_steps + 1):
+    frac = i / n_steps
+    step = (
+      start_step
+      if n_steps == 1
+      else int(round(start_step + (end_step - start_step) * i / n_steps))
+    )
+    step = max(step, int(stages[-1]["step"]))
+    stages.append({"step": step, "weight": final_weight * frac})
   return stages
 
 
@@ -412,10 +439,11 @@ def _apply_flat_phase_c_weights(
   cfg: ManagerBasedRlEnvCfg,
   *,
   joule_w: float,
+  joint_acc_w: float,
 ) -> None:
   """Apply Phase-C reward weights permanently from iteration 0 (no ramp)."""
   cfg.rewards["joule_heating"].weight = joule_w
-  cfg.rewards["joint_acc_l2"].weight = _PHASE_C_JOINT_ACC_W
+  cfg.rewards["joint_acc_l2"].weight = joint_acc_w
   cfg.rewards["torque_rate"].weight = _PHASE_C_TORQUE_RATE_W
   cfg.rewards["soft_landing"].weight = _PHASE_C_SOFT_LANDING_W
   cfg.rewards["base_height"].weight = _PHASE_C_BASE_HEIGHT_W
@@ -426,6 +454,7 @@ def _apply_hard_from_start_static(
   *,
   upright_w: float,
   joule_w: float,
+  joint_acc_w: float,
   std_walking: dict[str, float],
 ) -> None:
   """Apply final hard-stage commands, pushes, and reward weights from iteration 0."""
@@ -446,7 +475,7 @@ def _apply_hard_from_start_static(
   )
   cfg.rewards["body_ang_vel"].weight = _HARD_FINAL_BODY_ANG_VEL_W
   cfg.rewards["angular_momentum"].weight = _HARD_FINAL_ANGULAR_MOMENTUM_W
-  _apply_flat_phase_c_weights(cfg, joule_w=joule_w)
+  _apply_flat_phase_c_weights(cfg, joule_w=joule_w, joint_acc_w=joint_acc_w)
 
 
 def _add_phase_c_curriculum(
@@ -455,11 +484,12 @@ def _add_phase_c_curriculum(
   p2: int,
   p3: int,
   joule_w: float,
+  joint_acc_w: float,
 ) -> None:
   """Anneal smoothness + energy penalties in during Phase C."""
   for reward_name, peak_weight in (
     ("joule_heating", joule_w),
-    ("joint_acc_l2", _PHASE_C_JOINT_ACC_W),
+    ("joint_acc_l2", joint_acc_w),
     ("torque_rate", _PHASE_C_TORQUE_RATE_W),
     ("soft_landing", _PHASE_C_SOFT_LANDING_W),
     ("base_height", _PHASE_C_BASE_HEIGHT_W),
@@ -469,6 +499,31 @@ def _add_phase_c_curriculum(
       params={
         "reward_name": reward_name,
         "stages": _phase_c_ramp_stages(p2, p3, peak_weight),
+      },
+    )
+
+
+def _add_phase_c_warmup_curriculum(
+  cfg: ManagerBasedRlEnvCfg,
+  *,
+  joule_w: float,
+  joint_acc_w: float,
+) -> None:
+  """Ramp movement penalties from iter 500→1000; base_height on from step 0."""
+  cfg.rewards["base_height"].weight = _PHASE_C_BASE_HEIGHT_W
+  for reward_name, peak_weight in (
+    ("joule_heating", joule_w),
+    ("joint_acc_l2", joint_acc_w),
+    ("torque_rate", _PHASE_C_TORQUE_RATE_W),
+    ("soft_landing", _PHASE_C_SOFT_LANDING_W),
+  ):
+    cfg.curriculum[f"{reward_name}_warmup"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": reward_name,
+        "stages": _coalesce_reward_curriculum_stages(
+          _phase_c_warmup_stages(peak_weight)
+        ),
       },
     )
 
@@ -587,6 +642,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   gait_period = _env_float("GAIT_PERIOD", _DEFAULT_GAIT_PERIOD)
   swing_target_height = _env_float("SWING_TARGET_HEIGHT", _DEFAULT_SWING_TARGET_HEIGHT)
   flatten_phase_c = _env_bool("FLATTEN_PHASE_C", default=False)
+  phase_c_warmup = _env_bool("PHASE_C_WARMUP", default=False)
+  alive_w = _env_float("ALIVE_W", 0.0)
+  joint_acc_w = _env_float("JOINT_ACC_W", _DEFAULT_JOINT_ACC_W)
+  if joint_acc_w > 0:
+    joint_acc_w = -joint_acc_w
   link_mass_scale_min = _env_float("LINK_MASS_SCALE_MIN", 0.85)
   link_mass_scale_max = _env_float("LINK_MASS_SCALE_MAX", 1.15)
   payload_kg_min = _env_float("PAYLOAD_KG_MIN", -0.3)
@@ -780,6 +840,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["stand_still_pose"].weight = stand_w
   cfg.rewards["stand_still_motion"].weight = -0.003
+  cfg.rewards["is_alive"] = RewardTermCfg(func=envs_mdp.is_alive, weight=alive_w)
 
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
   cfg.events["base_com"].params["asset_cfg"].body_names = ("torso",)
@@ -1073,11 +1134,17 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   if training_regime == "hard_from_start":
     _apply_hard_from_start_static(
-      cfg, upright_w=upright_w, joule_w=joule_w, std_walking=std_walking
+      cfg,
+      upright_w=upright_w,
+      joule_w=joule_w,
+      joint_acc_w=joint_acc_w,
+      std_walking=std_walking,
     )
   elif training_regime in ("hard_continue", "base_then_hard"):
     if "phasec" in hard_components:
-      _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
+      _add_phase_c_curriculum(
+        cfg, p2=p2, p3=p3, joule_w=joule_w, joint_acc_w=joint_acc_w
+      )
     cont_base_raw = os.environ.get("CONT_BASE_STEP")
     cont_base_explicit = cont_base_raw not in (None, "")
     if cont_base_explicit:
@@ -1097,10 +1164,14 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       enabled_components=hard_components,
     )
   elif training_regime == "base":
-    if flatten_phase_c:
-      _apply_flat_phase_c_weights(cfg, joule_w=joule_w)
+    if phase_c_warmup:
+      _add_phase_c_warmup_curriculum(cfg, joule_w=joule_w, joint_acc_w=joint_acc_w)
+    elif flatten_phase_c:
+      _apply_flat_phase_c_weights(cfg, joule_w=joule_w, joint_acc_w=joint_acc_w)
     else:
-      _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
+      _add_phase_c_curriculum(
+        cfg, p2=p2, p3=p3, joule_w=joule_w, joint_acc_w=joint_acc_w
+      )
   else:
     raise ValueError(
       "TRAINING_REGIME must be 'base', 'hard_continue', 'base_then_hard', or "

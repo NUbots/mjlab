@@ -41,6 +41,9 @@ def _clear_nugus_env(monkeypatch: pytest.MonkeyPatch) -> None:
     "PROGRESS_BACKSLIDE_W",
     "SWING_TARGET_HEIGHT",
     "FLATTEN_PHASE_C",
+    "PHASE_C_WARMUP",
+    "ALIVE_W",
+    "JOINT_ACC_W",
     "LINK_MASS_SCALE_MIN",
     "LINK_MASS_SCALE_MAX",
     "PAYLOAD_KG_MIN",
@@ -347,3 +350,60 @@ def test_v16b_dr_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_vel_sat_frac_event_registered() -> None:
   cfg = nubots_nugus_flat_env_cfg()
   assert cfg.events["vel_sat_frac"].mode == "step"
+
+
+def test_alive_reward_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+  monkeypatch.setenv("ALIVE_W", "0.5")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert cfg.rewards["is_alive"].weight == 0.5
+
+
+def test_phase_c_warmup_curriculum(monkeypatch: pytest.MonkeyPatch) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "base")
+  monkeypatch.setenv("PHASE_C_WARMUP", "1")
+  monkeypatch.setenv("FLATTEN_PHASE_C", "0")
+  monkeypatch.setenv("JOULE_W", "1e-5")
+  monkeypatch.setenv("JOINT_ACC_W", "-1e-4")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "joule_heating_rampup" not in cfg.curriculum
+  assert "joule_heating_warmup" in cfg.curriculum
+  assert "joint_acc_l2_warmup" in cfg.curriculum
+  assert cfg.rewards["base_height"].weight == 0.3
+  assert cfg.rewards["joule_heating"].weight == 0.0
+  joule_stages = cfg.curriculum["joule_heating_warmup"].params["stages"]
+  assert joule_stages[0] == {"step": 0, "weight": 0.0}
+  assert joule_stages[1] == {"step": 500 * _NUM_STEPS_PER_ENV, "weight": 0.0}
+  assert joule_stages[-1]["step"] == 1000 * _NUM_STEPS_PER_ENV
+  assert joule_stages[-1]["weight"] == pytest.approx(-1e-5)
+
+
+def test_v16c_pipeline_env(monkeypatch: pytest.MonkeyPatch) -> None:
+  """Sanity-check the v16c batch knob combination from gen_v16c."""
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_persist")
+  monkeypatch.setenv("GAIT_PERIOD", "1.0")
+  monkeypatch.setenv("SWING_TARGET_HEIGHT", "0.05")
+  monkeypatch.setenv("PHASE_C_WARMUP", "1")
+  monkeypatch.setenv("FLATTEN_PHASE_C", "0")
+  monkeypatch.setenv("ALIVE_W", "0.5")
+  monkeypatch.setenv("JOINT_ACC_W", "-1e-4")
+  monkeypatch.setenv("JOULE_W", "1e-5")
+  monkeypatch.setenv("STAND_W", "0.15")
+  monkeypatch.setenv("CRITIC_HEIGHT_SCAN", "true")
+  monkeypatch.setenv("TRAINING_REGIME", "base")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert cfg.rewards["is_alive"].weight == 0.5
+  assert cfg.rewards["foot_swing_height"].params["target_height"] == 0.05
+  assert cfg.rewards["foot_swing_height"].params["period"] == 1.0
+  assert "joule_heating_warmup" in cfg.curriculum
+  assert "joule_heating_rampup" not in cfg.curriculum
+  assert cfg.rewards["joule_heating"].weight == 0.0
+  assert cfg.rewards["base_height"].weight == 0.3
+
+
+def test_joint_acc_w_ablation_override(monkeypatch: pytest.MonkeyPatch) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "base")
+  monkeypatch.setenv("PHASE_C_WARMUP", "1")
+  monkeypatch.setenv("JOINT_ACC_W", "-3e-5")
+  cfg = nubots_nugus_flat_env_cfg()
+  stages = cfg.curriculum["joint_acc_l2_warmup"].params["stages"]
+  assert stages[-1]["weight"] == pytest.approx(-3e-5)

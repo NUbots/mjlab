@@ -46,6 +46,9 @@ def _clear_nugus_env(monkeypatch: pytest.MonkeyPatch) -> None:
     "SEED",
     "SWING_TARGET_HEIGHT",
     "FLATTEN_PHASE_C",
+    "PHASE_C_WARMUP",
+    "ALIVE_W",
+    "JOINT_ACC_W",
     "LINK_MASS_SCALE_MIN",
     "LINK_MASS_SCALE_MAX",
     "PAYLOAD_KG_MIN",
@@ -182,6 +185,25 @@ def test_active_reward_terms_fire_under_random_actions(device: str) -> None:
     ]
     silent = [name for name in required if not fired.get(name)]
     assert not silent, f"reward terms never produced nonzero values: {silent}"
+  finally:
+    env.close()
+
+
+def test_alive_reward_fires_immediately(
+  device: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+  monkeypatch.setenv("ALIVE_W", "0.5")
+  cfg = nubots_nugus_flat_env_cfg()
+  cfg.scene.num_envs = 4
+  cfg.seed = 0
+  env = ManagerBasedRlEnv(cfg=cfg, device=device)
+  try:
+    env.reset(seed=0)
+    action_dim = env.action_manager.total_action_dim
+    zero = torch.zeros(env.num_envs, action_dim, device=device)
+    env.step(zero)
+    idx = env.reward_manager.active_terms.index("is_alive")
+    assert torch.all(env.reward_manager._step_reward[:, idx] != 0.0)
   finally:
     env.close()
 

@@ -97,7 +97,7 @@ ARMATURE_MX106 = 0.0266
 ACTUATOR_MX106 = ElectricActuator(
   reflected_inertia=ARMATURE_MX106,
   velocity_limit=VELOCITY_LIMIT_MX106,
-  effort_limit=RATED_TORQUE_MX106,
+  effort_limit=_STALL_TORQUE_MX106,
 )
 
 # MX64 motor (most other joints)
@@ -105,7 +105,7 @@ ARMATURE_MX64 = 0.01195
 ACTUATOR_MX64 = ElectricActuator(
   reflected_inertia=ARMATURE_MX64,
   velocity_limit=VELOCITY_LIMIT_MX64,
-  effort_limit=RATED_TORQUE_MX64,
+  effort_limit=_STALL_TORQUE_MX64,
 )
 
 # XH540-W270 motor (knee joints)
@@ -113,7 +113,7 @@ ARMATURE_XH540 = 0.0266
 ACTUATOR_XH540 = ElectricActuator(
   reflected_inertia=ARMATURE_XH540,
   velocity_limit=VELOCITY_LIMIT_XH540,
-  effort_limit=RATED_TORQUE_XH540,
+  effort_limit=_STALL_TORQUE_XH540,
 )
 
 # Natural frequency and damping ratio for PD control
@@ -139,7 +139,7 @@ NUGUS_ACTUATOR_ARMS = DcMotorActuatorCfg(
   ),
   stiffness=STIFFNESS_MX64,
   damping=DAMPING_MX64,
-  effort_limit=ACTUATOR_MX64.effort_limit,
+  effort_limit=_STALL_TORQUE_MX64,
   saturation_effort=_STALL_TORQUE_MX64,
   velocity_limit=VELOCITY_LIMIT_MX64,
   armature=ACTUATOR_MX64.reflected_inertia,
@@ -156,7 +156,7 @@ NUGUS_ACTUATOR_HIPS = DcMotorActuatorCfg(
   ),
   stiffness=STIFFNESS_MX106,
   damping=DAMPING_MX106,
-  effort_limit=ACTUATOR_MX106.effort_limit,
+  effort_limit=_STALL_TORQUE_MX106,
   saturation_effort=_STALL_TORQUE_MX106,
   velocity_limit=VELOCITY_LIMIT_MX106,
   armature=ACTUATOR_MX106.reflected_inertia,
@@ -181,7 +181,7 @@ NUGUS_ACTUATOR_LEGS = DcMotorActuatorCfg(
   ),
   stiffness=STIFFNESS_XH540,
   damping=DAMPING_XH540,
-  effort_limit=ACTUATOR_XH540.effort_limit,
+  effort_limit=_STALL_TORQUE_XH540,
   saturation_effort=_STALL_TORQUE_XH540,
   velocity_limit=VELOCITY_LIMIT_XH540,
   armature=ACTUATOR_XH540.reflected_inertia,
@@ -195,7 +195,7 @@ NUGUS_ACTUATOR_HEAD = DcMotorActuatorCfg(
   target_names_expr=("neck_yaw", "head_pitch"),
   stiffness=STIFFNESS_MX64,
   damping=DAMPING_MX64,
-  effort_limit=ACTUATOR_MX64.effort_limit,
+  effort_limit=_STALL_TORQUE_MX64,
   saturation_effort=_STALL_TORQUE_MX64,
   velocity_limit=VELOCITY_LIMIT_MX64,
   armature=ACTUATOR_MX64.reflected_inertia,

@@ -3,13 +3,13 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: ${JOB_NAME}
+  name: mj-gs-v16b-cp-hs-joule-1e5-s2
   namespace: mjlab
   labels:
     app.kubernetes.io/name: mjlab-train
     app.kubernetes.io/component: gridsearch
     mjlab/gridsearch: "true"
-    mjlab/variant: ${MJLAB_VARIANT}
+    mjlab/variant: clock_persist
 spec:
   schedulerName: volcano
   queue: mjlab-train
@@ -26,7 +26,7 @@ spec:
             app.kubernetes.io/name: mjlab-train
             app.kubernetes.io/component: gridsearch
             mjlab/gridsearch: "true"
-            mjlab/variant: ${MJLAB_VARIANT}
+            mjlab/variant: clock_persist
         spec:
           restartPolicy: Never
           runtimeClassName: nvidia
@@ -47,87 +47,81 @@ spec:
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
-                  value: "${MJLAB_VARIANT}"
+                  value: "clock_persist"
                 - name: JOULE_W
-                  value: "${JOULE_W}"
+                  value: "1e-5"
                 - name: STAND_W
-                  value: "${STAND_W}"
+                  value: "0.15"
                 - name: PHASE_C_FRAC
-                  value: "${PHASE_C_FRAC}"
+                  value: "0.5"
                 # Curriculum phase boundaries are derived from PHASE_ITERATIONS,
                 # decoupled from MAX_ITERATIONS (which only drives the training
                 # length). Freeze at 1250 so resumed/extended runs keep the same
                 # absolute phase timing.
                 - name: PHASE_ITERATIONS
-                  value: "${PHASE_ITERATIONS}"
+                  value: "2000"
                 # Training length (additive on resume: rsl-rl runs this many more
                 # iterations starting from the checkpoint's iteration). Overrides
                 # the configmap default per cell.
                 - name: MAX_ITERATIONS
-                  value: "${MAX_ITERATIONS}"
+                  value: "2000"
                 # New clock_anneal variant knobs read by the factory.
                 - name: SILENCE_CLOCK
-                  value: "${SILENCE_CLOCK}"
+                  value: "0"
                 - name: CURRENT_OBS
-                  value: "${CURRENT_OBS}"
+                  value: "0"
                 - name: PHASE_DELTA_STRONG_ITERS
-                  value: "${PHASE_DELTA_STRONG_ITERS}"
+                  value: "1000"
                 - name: PHASE_DELTA_STRONG_W
-                  value: "${PHASE_DELTA_STRONG_W}"
+                  value: "-5.0"
                 - name: PHASE_DELTA_TAIL_W
-                  value: "${PHASE_DELTA_TAIL_W}"
+                  value: ""
                 - name: UPRIGHT_W
-                  value: "${UPRIGHT_W}"
+                  value: "0.5"
                 - name: PROGRESS_BACKSLIDE_W
-                  value: "${PROGRESS_BACKSLIDE_W}"
+                  value: "-0.5"
                 - name: TRAINING_REGIME
-                  value: "${TRAINING_REGIME}"
+                  value: "base"
                 - name: HARD_COMPONENTS
-                  value: "${HARD_COMPONENTS}"
+                  value: ""
                 - name: CONT_BASE_STEP
-                  value: "${CONT_BASE_STEP}"
+                  value: ""
                 - name: CRITIC_HEIGHT_SCAN
-                  value: "${CRITIC_HEIGHT_SCAN}"
+                  value: "true"
                 - name: TASK
-                  value: "${TASK}"
+                  value: "Mjlab-Velocity-Flat-Nubots-Nugus"
                 - name: RESAMPLE_MIN
-                  value: "${RESAMPLE_MIN}"
+                  value: "3.0"
                 - name: GAIT_PERIOD
-                  value: "${GAIT_PERIOD}"
+                  value: "1.0"
                 - name: SWING_TARGET_HEIGHT
-                  value: "${SWING_TARGET_HEIGHT}"
+                  value: "0.05"
                 - name: FLATTEN_PHASE_C
-                  value: "${FLATTEN_PHASE_C}"
-                - name: PHASE_C_WARMUP
-                  value: "${PHASE_C_WARMUP}"
-                - name: ALIVE_W
-                  value: "${ALIVE_W}"
-                - name: JOINT_ACC_W
-                  value: "${JOINT_ACC_W}"
+                  value: "1"
                 - name: LINK_MASS_SCALE_MIN
-                  value: "${LINK_MASS_SCALE_MIN}"
+                  value: "0.90"
                 - name: LINK_MASS_SCALE_MAX
-                  value: "${LINK_MASS_SCALE_MAX}"
+                  value: "1.10"
                 - name: PAYLOAD_KG_MIN
-                  value: "${PAYLOAD_KG_MIN}"
+                  value: "-0.2"
                 - name: PAYLOAD_KG_MAX
-                  value: "${PAYLOAD_KG_MAX}"
+                  value: "0.2"
                 - name: EFFORT_LO
-                  value: "${EFFORT_LO}"
+                  value: "0.7"
                 - name: EFFORT_HI
-                  value: "${EFFORT_HI}"
+                  value: "1.2"
                 - name: SEED
-                  value: "${SEED}"
+                  value: "2"
                 - name: LOGGER
-                  value: "${LOGGER}"
+                  value: "wandb"
                 - name: EXPERIMENT_NAME
-                  value: "${EXPERIMENT_NAME}"
+                  value: "nugus_gridsearch_v16b"
                 - name: RUN_NAME
-                  value: "${RUN_NAME}"
+                  value: "clock_persist__stand-0.15__pc-flat__joule-1e-5__hs__s2__v16b"
                 - name: WANDB_PROJECT
-                  value: "${WANDB_PROJECT}"
+                  value: "mjlab"
                 - name: WANDB_TAGS
-                  value: "${WANDB_TAGS}"
+                  value: "clock_persist,stand-0.15,pc-flat,joule-1e-5,seed-2,gridsearch,batch-v16b,critic-height-scan,v16b"
                 # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
                   value: "all"
@@ -140,16 +134,16 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "${GIT_COMMIT}"
+                  value: "5eccb3d746378f7e358e033f9da80c7c9189c18c"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
                 - name: RESUME
-                  value: "${RESUME}"
+                  value: "false"
                 - name: WANDB_RUN_PATH
-                  value: "${WANDB_RUN_PATH}"
+                  value: ""
                 - name: WANDB_RUN_NAME
-                  value: "${WANDB_RUN_NAME}"
+                  value: ""
               envFrom:
                 - configMapRef:
                     name: mjlab-train-config

@@ -1,5 +1,13 @@
 # v16 collapse analysis (2026-07-03) and re-baseline spec (v16b)
 
+> **PARTIALLY SUPERSEDED by `08-v16b-postmortem.md`:** spec item 5 below
+> (flatten Phase-C from iteration 0) caused the v16b never-stands failure —
+> use doc 08's warm-up + alive-bonus scheme instead. §V5's "effort_limit =
+> rated/firmware torque cap" means the FIRMWARE cap (≈ stall at bus
+> voltage), NOT the rated continuous torque — doc 08 has the corrected
+> values. The rest of this doc (anneal-handoff finding, gait feasibility,
+> velocity limits, public config sources) stands.
+
 Post-mortem of the first batch on the Phase-0 physics. Supersedes the v16/v17
 launch sequence in `03-track-b-curriculum.md` until a stable base exists.
 

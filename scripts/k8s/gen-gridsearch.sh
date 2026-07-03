@@ -222,7 +222,8 @@ export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME RESAMPLE
 export WANDB_RUN_PATH WANDB_RUN_NAME
 export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W PHASE_DELTA_TAIL_W UPRIGHT_W PROGRESS_BACKSLIDE_W
 export TRAINING_REGIME CONT_BASE_STEP CRITIC_HEIGHT_SCAN TASK HARD_COMPONENTS
-export SWING_TARGET_HEIGHT FLATTEN_PHASE_C LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
+export SWING_TARGET_HEIGHT FLATTEN_PHASE_C PHASE_C_WARMUP ALIVE_W JOINT_ACC_W
+export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
 gen_default_matrix() {
@@ -690,6 +691,60 @@ gen_v16b() {
 }
 
 
+# BATCH=v16c: post-v16b fix — stall effort limits, alive bonus, Phase-C warmup.
+gen_v16c() {
+  local joule_label
+  export MJLAB_VARIANT="clock_persist"
+  export GAIT_PERIOD="1.0"
+  export SWING_TARGET_HEIGHT="0.05"
+  export PHASE_C_WARMUP="1"
+  export FLATTEN_PHASE_C="0"
+  export ALIVE_W="0.5"
+  export JOINT_ACC_W="-1e-4"
+  export LINK_MASS_SCALE_MIN="0.90"
+  export LINK_MASS_SCALE_MAX="1.10"
+  export PAYLOAD_KG_MIN="-0.2"
+  export PAYLOAD_KG_MAX="0.2"
+  export JOULE_W="1e-5"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export WANDB_RUN_PATH=""
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="base"
+  export CONT_BASE_STEP=""
+  export CRITIC_HEIGHT_SCAN="true"
+  export PHASE_DELTA_TAIL_W=""
+  local seed job_suffix run_tag
+  for seed in 1 2; do
+    export SEED="$seed"
+    export JOINT_ACC_W="-1e-4"
+    if [[ "$seed" == "1" ]]; then
+      job_suffix=""
+    else
+      job_suffix="-s${seed}"
+    fi
+    export RUN_NAME="clock_persist__stand-0.15__pc-warmup__alive-0.5__joule-${joule_label}__hs__s${seed}__${BATCH}"
+    export WANDB_TAGS="clock_persist,stand-0.15,pc-warmup,alive-0.5,joule-${joule_label},seed-${seed},gridsearch,batch-${BATCH},critic-height-scan,v16c"
+    emit_manifest "mj-gs-${BATCH}-cp-hs-joule-1e5${job_suffix}"
+  done
+  export SEED="1"
+  export JOINT_ACC_W="-3e-5"
+  export RUN_NAME="clock_persist__stand-0.15__pc-warmup__alive-0.5__jacc-3e5__joule-${joule_label}__hs__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,stand-0.15,pc-warmup,alive-0.5,jacc-3e5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan,v16c"
+  emit_manifest "mj-gs-${BATCH}-cp-hs-joule-1e5-jacc-3e5"
+}
+
+
 # BATCH=v16: Phase-0 smoke — clock_anneal flat base (no hard_continue), 2k iters,
 # critic height_scan, JOULE_W=1e-5. Establishes the post-E0.2/A3/C1 baseline.
 gen_v16_base() {
@@ -888,6 +943,7 @@ case "$BATCH" in
   v16-short) gen_v16_short; expected=1 ;;
   v16) gen_v16_base; expected=1 ;;
   v16b) gen_v16b; expected=2 ;;
+  v16c) gen_v16c; expected=3 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
