@@ -280,7 +280,11 @@ Snapshot: `kubectl get vcjob -n mjlab` on **2026-07-03 ~11:25 JST** (orchestrati
 | `mj-gs-v15-ca-base-hard-20k-s2` | **Deleted** | 0 | Stopped ~iter 16200/20000 |
 | `mj-gs-v16-short-ca-hs-joule-1e5` | **Completed** | 0 | Gate **PASS**; W&B `gr1hb5uh`, 500/500 iters |
 | `mj-gs-v16-ca-hs-joule-1e5` | **Completed** | 0 | 2000/2000; W&B `shhm98rd`; walk gate PASS @ ~630 |
-| `mj-gs-v17-*` (5 cells) | **Running/Pending** | 2+ | Queued 2026-07-03 post v16; `scripts/k8s/gen_v17/` |
+| `mj-gs-v17-all` | **Running** | 1 | iter **1956**/4000, reward **10.28**, ep_len **302.65** (kubectl ~05:22 UTC) |
+| `mj-gs-v17-commands` | **Running** | 1 | iter **2025**/4000, reward **3.07**, ep_len **141.19** (kubectl ~05:22 UTC) |
+| `mj-gs-v17-phasec` | **Pending** | 0 | Queue `mjlab-train`; 8 GPU cluster, 4 GPU/job |
+| `mj-gs-v17-pushes` | **Pending** | 0 | Waiting for GPU |
+| `mj-gs-v17-upright` | **Pending** | 0 | Waiting for GPU |
 | `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` | Running | 0 | Legacy v3-era; pod Completed |
 | `mjlab-train` | Completed | 0 | Non-grid job |
 
@@ -368,6 +372,19 @@ Other overall: `lin_vel_rmse` **0.33**, `ang_vel_rmse` **0.33**, `slip_vel` **0.
 | Applied | `kubectl apply -f scripts/k8s/gen_v17/` |
 | Cells | `commands`, `pushes`, `upright`, `phasec`, `all` |
 | Cluster | **2× Running** (`mj-gs-v17-all`, `mj-gs-v17-commands`); **3× Pending** (8 GPU cluster, 4 GPU/job) |
+
+**Progress snapshot (kubectl, 2026-07-03 ~05:22 UTC):**
+
+| vcjob | Status | Iter / reward (logs) | W&B run name | W&B link |
+|-------|--------|----------------------|--------------|----------|
+| `mj-gs-v17-all` | Running | **1956/4000**, reward **10.28**, ep_len **302.65** | `clock_anneal__stand-0.15__pc-0.5__joule-1e-5__hard-all__s1__v17` | ID not in logs (API key unavailable locally) |
+| `mj-gs-v17-commands` | Running | **2025/4000**, reward **3.07**, ep_len **141.19** | `clock_anneal__stand-0.15__pc-0.5__joule-1e-5__hard-commands__s1__v17` | ID not in logs (API key unavailable locally) |
+| `mj-gs-v17-phasec` | Pending | — | — | — |
+| `mj-gs-v17-pushes` | Pending | — | — | — |
+| `mj-gs-v17-upright` | Pending | — | — | — |
+
+Pods: `mj-gs-v17-all-train-0` (munin), `mj-gs-v17-commands-train-0` (hugin). Both ~halfway through 4000-iter base→hard decoupling runs; rewards well below v16 peak (~53 @ iter ~960) — expected during hard-regime ramp / post-ramp window.
+
 
 ### Next after v16 full
 
