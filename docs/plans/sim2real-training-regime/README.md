@@ -64,8 +64,14 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [x] C1 Critic observes sampled DR parameters
 - [x] No-op audit test (DR scale terms have nonzero baselines; active rewards fire)
 - [ ] v16 smoke batch: confirm training still converges on new physics (manifests ready; **blocked on commit+push** — Phase 0 code is local-only)
-- [ ] B1 decoupling grid launched (v17, 5 cells)
-- [ ] B1 analyzed via fixed eval → destabilizer identified
+- [x] ~~v16 base validated~~ **v16 COLLAPSED at p3 — see `06-v16-collapse-analysis.md`**: swing target infeasible on new actuators + clock_anneal→0 handoff; joule/DR largely acquitted
+- [ ] v16b re-baseline launched (clock_persist, GAIT_PERIOD 1.0, swing 0.05, flattened Phase-C, trimmed DR — spec in doc 06)
+- [ ] Velocity limits corrected: XH540 no-load is 39–46 rpm = 4.1–4.8 rad/s (Phase 0 used 3.2 from a wrong 30 rpm figure); set from measured bus voltage; check `saturation_effort` = stall torque (doc 06 §V5). Units are rad/s — confirmed, not rpm
+- [ ] Classical-walk joint-velocity/torque log captured from the real robot (ground truth for limits + gait envelope)
+- [ ] Stage 2 gait-period-as-command (v19) — variable step timing, doc 07
+- [ ] `Metrics/vel_sat_frac_*` saturation telemetry added
+- [ ] B1 decoupling grid re-launched on v16b base (first v17 attempt **killed 2026-07-03** — ran on collapsed v16 base; **not analyzed** via fixed eval)
+- [ ] B1 analyzed via fixed eval → destabilizer identified (**v17 attempt N/A — killed before eval**)
 - [ ] B2 hard-from-start launched (v18)
 - [ ] A1 BAM friction params adopted + DR re-centered
 - [ ] **Deferred (post-D1):** A4 latency measurement, A2 bench replay, D2 hardware deployment — start after v17/v18 winner passes the D1 sim-to-sim gate
@@ -78,8 +84,10 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 
 - **Retire `clock_learned` for now** (B4). Every run shows the learned phase
   delta collapsing back to the nominal clock; the best "clock_learned" run
-  (v13) is functionally a fixed-clock policy. Revisit only after a fixed-clock
-  policy walks on hardware. Rationale and data: `00-context-and-findings.md` §F3.
+  (v13) is functionally a fixed-clock policy. Rationale and data:
+  `00-context-and-findings.md` §F3. The variable-step-timing goal it served
+  is NOT retired — the supported path is `07-gait-timing-strategy.md`
+  (gait period as a command, push-window phase freedom).
 - **Keep `CRITIC_HEIGHT_SCAN=true`** in all future batches (v10 evidence:
   fell_over → 0; v14/v15 dropped it and regressed).
 - **Keep `JOULE_W=1e-5`**, not 3e-4 (v13 evidence; independently matches the
@@ -97,6 +105,8 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `03-track-b-curriculum.md` | B1 decoupling grid, B2 hard-from-start, B3 plateau curriculum, B4 clock_learned retirement |
 | `04-track-c-policy.md` | Mirror augmentation, optimizer hygiene, deferred CTS/history |
 | `05-track-d-hardware-loop.md` | Sim-to-sim gate, first deployment protocol, logging spec |
+| `06-v16-collapse-analysis.md` | v16 post-mortem (infeasible swing target, anneal handoff), v16b re-baseline spec, public config sources |
+| `07-gait-timing-strategy.md` | Variable step timing done right: period-as-command (Stage 2), push-window phase freedom, unclocked endgame |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |
