@@ -45,7 +45,7 @@ Per sim2real plan (`docs/plans/sim2real-training-regime/README.md`):
 
 **v16-short (Phase 0 validation, 2026-07-03):** `BATCH=v16-short` → `scripts/k8s/gen_v16_short/mj-gs-v16-short-ca-hs-joule-1e5.yaml` (500 iters). **Completed** @ `a1af0d4` — gate **PASS** @ iter ~336 (see §8); W&B `gr1hb5uh`, final reward **26.75** @ iter 499; fixed eval **falls_per_min 0.0** overall and at `(0.5,0,0)` / `(0,0,0)` (local smoke, 1 env/cmd — see §8).
 
-**v16 (Phase 0 smoke, 2026-07-03):** `BATCH=v16` → `scripts/k8s/gen_v16/mj-gs-v16-ca-hs-joule-1e5.yaml` (2000 iters). **Running** on cluster @ `a1af0d4` (queued after v16-short gate PASS). Success criterion: walks by iter ~1000 on fixed eval (`falls_per_min < 2` at `(0.5,0,0)`); v16 metrics become the baseline for Track A/B/C. **v17/v18 not queued.**
+**v16 (Phase 0 smoke, 2026-07-03):** `BATCH=v16` → `scripts/k8s/gen_v16/mj-gs-v16-ca-hs-joule-1e5.yaml` (2000 iters). **Completed** @ `a1af0d4` — walk gate **PASS** @ iter ~630–960 (kubectl); final reward **3.08**, ep_len **165** @ iter 1999 (late regression post ~iter 1000 curriculum); W&B `shhm98rd`. **v17 queued** (5 cells) after gate + completion.
 
 ---
 
@@ -69,7 +69,7 @@ Shared defaults unless overridden: `PHASE_C_FRAC=0.5`, flat task `Mjlab-Velocity
 | **v14** | `clock_anneal` base→hard single run, legacy critic | 4000 iters | `mj-gs-v14-ca-base-hard` | `jyksw3mg` | **33.43**, ep_len **913.16** | Hard regime hurt vs flat 2k anneal |
 | **v15** | v14 extended to **20k** iters, seeds 1–2 | `MAX_ITERATIONS=20000` | `mj-gs-v15-ca-base-hard-20k`, `…-s2` | `ynquy630` s1, `rntq7onj` s2 | **38–40** plateau / fell **0.5–1.1**/ep | **Stopped** per F2 — flatlined ~4k–15k; do not relaunch |
 | **v16-short** | Phase 0 validation — same as v16, shorter | `clock_anneal`, **500** iters, `JOULE_W=1e-5`, hs-critic, `TRAINING_REGIME=base` | `mj-gs-v16-short-ca-hs-joule-1e5` | `gr1hb5uh` | reward **26.75**, ep_len **851** @ iter 499 | **PASS** — completed 2026-07-03 |
-| **v16** | Phase 0 smoke — post-E0.2/A3/C1 physics base | `clock_anneal`, 2k iters, `JOULE_W=1e-5`, `CRITIC_HEIGHT_SCAN=true`, `TRAINING_REGIME=base` | `mj-gs-v16-ca-hs-joule-1e5` | `shhm98rd` | reward **~0.1**, ep_len **~27** @ iter ~175 (in progress) | **Running** @ `a1af0d4` |
+| **v16** | Phase 0 smoke — post-E0.2/A3/C1 physics base | `clock_anneal`, 2k iters, `JOULE_W=1e-5`, `CRITIC_HEIGHT_SCAN=true`, `TRAINING_REGIME=base` | `mj-gs-v16-ca-hs-joule-1e5` | `shhm98rd` | reward **3.08**, ep_len **165** @ iter 1999; peak **~53** @ iter ~960 | **Completed** @ `a1af0d4` |
 
 **Legacy job still on cluster:** `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` → W&B `ufk65r9v` (v3-era naming, 1250 iters, final summary reward **−0.17**). Pod logs at iter **1187/1250**: mean reward **−25.40** (in progress, not final).
 
@@ -279,7 +279,8 @@ Snapshot: `kubectl get vcjob -n mjlab` on **2026-07-03 ~11:25 JST** (orchestrati
 | `mj-gs-v15-ca-base-hard-20k` | **Deleted** | 0 | Stopped ~iter 16200/20000 |
 | `mj-gs-v15-ca-base-hard-20k-s2` | **Deleted** | 0 | Stopped ~iter 16200/20000 |
 | `mj-gs-v16-short-ca-hs-joule-1e5` | **Completed** | 0 | Gate **PASS**; W&B `gr1hb5uh`, 500/500 iters |
-| `mj-gs-v16-ca-hs-joule-1e5` | **Running** | 1 | Queued after gate @ `a1af0d4`, 2000 iters |
+| `mj-gs-v16-ca-hs-joule-1e5` | **Completed** | 0 | 2000/2000; W&B `shhm98rd`; walk gate PASS @ ~630 |
+| `mj-gs-v17-*` (5 cells) | **Running/Pending** | 2+ | Queued 2026-07-03 post v16; `scripts/k8s/gen_v17/` |
 | `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` | Running | 0 | Legacy v3-era; pod Completed |
 | `mjlab-train` | Completed | 0 | Non-grid job |
 
@@ -340,7 +341,7 @@ Other overall: `lin_vel_rmse` **0.33**, `ang_vel_rmse` **0.33**, `slip_vel` **0.
 
 | Item | Value |
 |------|-------|
-| vcjob | `mj-gs-v16-ca-hs-joule-1e5` — **Running** (`GIT_COMMIT=a1af0d4`) |
+| vcjob | `mj-gs-v16-ca-hs-joule-1e5` — **Completed** (`GIT_COMMIT=a1af0d4`, 96m wall) |
 | Iters | 2000 (`MAX_ITERATIONS=2000`) |
 | Experiment | `nugus_gridsearch_v16` |
 | W&B run | `shhm98rd` — https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/shhm98rd |
@@ -348,9 +349,25 @@ Other overall: `lin_vel_rmse` **0.33**, `ang_vel_rmse` **0.33**, `slip_vel` **0.
 
 ### v16 full progress snapshots (kubectl)
 
-| Time (JST ~) | Iter | Mean reward | Ep length | fell_over | NaN/crash | Notes |
+| Time (UTC ~) | Iter | Mean reward | Ep length | fell_over | NaN/crash | Notes |
 |--------------|------|-------------|-----------|-----------|-----------|-------|
-| 2026-07-03 ~11:26 | **~175/2000** | **~0.1** | **~27** | ~309 | **None** | Early base phase; W&B `shhm98rd` — https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/shhm98rd |
+| 2026-07-03 02:26 | **~175/2000** | **~0.1** | **~27** | ~309 | **None** | Early base; learning |
+| 2026-07-03 02:46 | **~630/2000** | **~46.8** | **~959** | **~0.67** | **None** | **Walk gate PASS** — stable gait |
+| 2026-07-03 03:04 | **~1008/2000** | **~39** | **~889** | **~1.3** | **None** | Still walking; post-iter-1000 curriculum stress |
+| 2026-07-03 03:28 | **~1515/2000** | **~33** | **~889** | **~2.5** | **None** | Reward easing; ep_len high |
+| 2026-07-03 03:51 | **1999/2000** | **3.08** | **165** | (rising) | **None** | **Completed** — vcjob `Completed`; checkpoint expected on W&B |
+
+**Walk gate (~iter 1000):** **PASS** on training metrics (reward **>40**, ep_len **>900**, `fell_over` **<2** @ iter 630–960). Fixed-eval `nugus_eval.py` on `shhm98rd` **not run** locally (needs GPU/W&B artifact pull; prior `heading_command` cfg issue noted in §8 — retry when convenient).
+
+### v17 decoupling grid queued (2026-07-03)
+
+| Item | Value |
+|------|-------|
+| Trigger | v16 walk gate PASS @ ~630 + v16 full **Completed** 2000/2000 |
+| Manifests | `BATCH=v17 ./scripts/k8s/gen-gridsearch.sh -o scripts/k8s/gen_v17` → 5 YAMLs |
+| Applied | `kubectl apply -f scripts/k8s/gen_v17/` |
+| Cells | `commands`, `pushes`, `upright`, `phasec`, `all` |
+| Cluster | **2× Running** (`mj-gs-v17-all`, `mj-gs-v17-commands`); **3× Pending** (8 GPU cluster, 4 GPU/job) |
 
 ### Next after v16 full
 

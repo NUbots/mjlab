@@ -1,0 +1,172 @@
+# Volcano Job template for mjlab grid-search cells. Do not apply directly.
+# Generate manifests with scripts/k8s/gen-gridsearch.sh (see --help).
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  name: mj-gs-v17-pushes
+  namespace: mjlab
+  labels:
+    app.kubernetes.io/name: mjlab-train
+    app.kubernetes.io/component: gridsearch
+    mjlab/gridsearch: "true"
+    mjlab/variant: clock_anneal
+spec:
+  schedulerName: volcano
+  queue: mjlab-train
+  minAvailable: 1
+  maxRetry: 0
+  ttlSecondsAfterFinished: 86400
+  tasks:
+    - name: train
+      replicas: 1
+      minAvailable: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: mjlab-train
+            app.kubernetes.io/component: gridsearch
+            mjlab/gridsearch: "true"
+            mjlab/variant: clock_anneal
+        spec:
+          restartPolicy: Never
+          runtimeClassName: nvidia
+          priorityClassName: training-medium
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          containers:
+            - name: train
+              image: ghcr.io/mujocolab/mjlab:latest
+              imagePullPolicy: Always
+              command:
+                - /scripts/entrypoint.sh
+              env:
+                - name: MUJOCO_GL
+                  value: egl
+                - name: UV_LINK_MODE
+                  value: copy
+                - name: MJLAB_VARIANT
+                  value: "clock_anneal"
+                - name: JOULE_W
+                  value: "1e-5"
+                - name: STAND_W
+                  value: "0.15"
+                - name: PHASE_C_FRAC
+                  value: "0.5"
+                # Curriculum phase boundaries are derived from PHASE_ITERATIONS,
+                # decoupled from MAX_ITERATIONS (which only drives the training
+                # length). Freeze at 1250 so resumed/extended runs keep the same
+                # absolute phase timing.
+                - name: PHASE_ITERATIONS
+                  value: "2000"
+                # Training length (additive on resume: rsl-rl runs this many more
+                # iterations starting from the checkpoint's iteration). Overrides
+                # the configmap default per cell.
+                - name: MAX_ITERATIONS
+                  value: "4000"
+                # New clock_anneal variant knobs read by the factory.
+                - name: SILENCE_CLOCK
+                  value: "0"
+                - name: CURRENT_OBS
+                  value: "0"
+                - name: PHASE_DELTA_STRONG_ITERS
+                  value: "1000"
+                - name: PHASE_DELTA_STRONG_W
+                  value: "-5.0"
+                - name: PHASE_DELTA_TAIL_W
+                  value: ""
+                - name: UPRIGHT_W
+                  value: "0.5"
+                - name: PROGRESS_BACKSLIDE_W
+                  value: "-0.5"
+                - name: TRAINING_REGIME
+                  value: "hard_continue"
+                - name: HARD_COMPONENTS
+                  value: "pushes"
+                - name: CONT_BASE_STEP
+                  value: "48000"
+                - name: CRITIC_HEIGHT_SCAN
+                  value: "true"
+                - name: TASK
+                  value: "Mjlab-Velocity-Flat-Nubots-Nugus"
+                - name: RESAMPLE_MIN
+                  value: "3.0"
+                - name: GAIT_PERIOD
+                  value: "0.7"
+                - name: EFFORT_LO
+                  value: "0.7"
+                - name: EFFORT_HI
+                  value: "1.2"
+                - name: SEED
+                  value: "1"
+                - name: LOGGER
+                  value: "wandb"
+                - name: EXPERIMENT_NAME
+                  value: "nugus_gridsearch_v17"
+                - name: RUN_NAME
+                  value: "clock_anneal__stand-0.15__pc-0.5__joule-1e-5__hard-pushes__s1__v17"
+                - name: WANDB_PROJECT
+                  value: "mjlab"
+                - name: WANDB_TAGS
+                  value: "clock_anneal,stand-0.15,pc-0.5,joule-1e-5,seed-1,gridsearch,batch-v17,critic-height-scan,base-hard,hard-pushes"
+                # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
+                - name: GPU_IDS
+                  value: "all"
+                # Pin commit + force fresh, isolated runs regardless of the shared
+                # mjlab-train-config configmap (which is rewritten by other tooling).
+                # NOTE: c04e4ec adds the actuator_current (CURRENT_OBS) and
+                # clock-silence (SILENCE_CLOCK) clock_anneal variants, decouples the
+                # curriculum phase timing via PHASE_ITERATIONS, and rescales the
+                # command_vel curriculum so the wide backward/strafe/yaw ranges are
+                # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
+                # policy learns to rotate).
+                - name: GIT_COMMIT
+                  value: "a1af0d4fb8aef683f80f6fec9b6d4e63613d5ac0"
+                # Resume/continuation: set per cell by gen-gridsearch.sh. When
+                # RESUME=true the run continues from WANDB_RUN_PATH's latest
+                # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
+                - name: RESUME
+                  value: "false"
+                - name: WANDB_RUN_PATH
+                  value: ""
+                - name: WANDB_RUN_NAME
+                  value: ""
+              envFrom:
+                - configMapRef:
+                    name: mjlab-train-config
+                - secretRef:
+                    name: mjlab-wandb
+                    optional: true
+              resources:
+                requests:
+                  nvidia.com/gpu: "4"
+                limits:
+                  nvidia.com/gpu: "4"
+              volumeMounts:
+                - name: workspace
+                  mountPath: /workspace
+                - name: logs
+                  mountPath: /logs
+                - name: entrypoint
+                  mountPath: /scripts
+                - name: dshm
+                  mountPath: /dev/shm
+          volumes:
+            # Per-pod clone instead of the shared mjlab-workspace PVC: that PVC is
+            # longhorn-local pinned to node munin, which forces every job onto munin
+            # and leaves hugin idle. emptyDir lets each 4-GPU job land on any GPU node
+            # (one on munin, one on hugin) and clone the repo fresh at the pinned commit.
+            - name: workspace
+              emptyDir: {}
+            - name: logs
+              persistentVolumeClaim:
+                claimName: mjlab-logs
+            - name: entrypoint
+              configMap:
+                name: mjlab-entrypoint
+                defaultMode: 0755
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 16Gi
