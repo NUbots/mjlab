@@ -557,6 +557,9 @@ def feet_flat_orientation(
   command_name: str,
   command_threshold: float = 0.05,
   sole_normal_axis: int = 2,
+  one_sided_pitch: bool = False,
+  pitch_tangent_axis: int | None = None,
+  toe_down_pitch_sign: float = 1.0,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """Penalize foot-sole tilt during swing to encourage flat-footed stepping.
@@ -570,7 +573,13 @@ def feet_flat_orientation(
 
   For the Nugus foot the four corner sites share the same local-X coordinate, so
   the sole normal is the local X axis (``sole_normal_axis=0``); the tangent
-  components then correspond to fore-aft pitch and medial-lateral roll.
+  components then correspond to medial-lateral roll (first tangent axis) and
+  fore-aft pitch (second tangent axis).
+
+  When ``one_sided_pitch`` is set, only the fore-aft pitch component is penalized
+  and only when the toe is below the heel (toe-digging attitude). Roll stays
+  two-sided. ``toe_down_pitch_sign`` selects which sign of the pitch tangent
+  component corresponds to toe-below-heel for the robot's foot frame.
 
   Only swing feet (no ground contact) are penalized so the term does not fight
   terrain conformance during stance.
@@ -585,7 +594,28 @@ def feet_flat_orientation(
   gravity_b = quat_apply_inverse(foot_quat_w, gravity_w)  # [B, F, 3]
 
   tangent_axes = [a for a in range(3) if a != sole_normal_axis]
-  tilt = torch.sum(torch.square(gravity_b[..., tangent_axes]), dim=-1)  # [B, F]
+  if pitch_tangent_axis is None:
+    pitch_tangent_axis = tangent_axes[1]
+  if pitch_tangent_axis not in tangent_axes:
+    raise ValueError(
+      f"pitch_tangent_axis={pitch_tangent_axis} must be tangent to sole normal "
+      f"axis {sole_normal_axis}; valid choices are {tangent_axes}"
+    )
+  roll_tangent_axis = (
+    tangent_axes[0] if pitch_tangent_axis != tangent_axes[0] else tangent_axes[1]
+  )
+
+  pitch_component = gravity_b[..., pitch_tangent_axis]
+  roll_component = gravity_b[..., roll_tangent_axis]
+  if one_sided_pitch:
+    pitch_tilt = (
+      torch.square(pitch_component)
+      * ((pitch_component * toe_down_pitch_sign) > 0).float()
+    )
+  else:
+    pitch_tilt = torch.square(pitch_component)
+  roll_tilt = torch.square(roll_component)
+  tilt = pitch_tilt + roll_tilt  # [B, F]
 
   in_air = (contact_sensor.data.found == 0).float()  # [B, F]
   cost = torch.sum(tilt * in_air, dim=1)  # [B]

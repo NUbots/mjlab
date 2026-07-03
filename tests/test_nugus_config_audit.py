@@ -53,6 +53,10 @@ def _clear_nugus_env(monkeypatch: pytest.MonkeyPatch) -> None:
     "LINK_MASS_SCALE_MAX",
     "PAYLOAD_KG_MIN",
     "PAYLOAD_KG_MAX",
+    "FOOT_FLAT_W",
+    "FOOT_FLAT_ONESIDED",
+    "CLEARANCE_PER_CORNER",
+    "SWING_HEIGHT_SOURCE",
   ):
     monkeypatch.delenv(key, raising=False)
 

@@ -479,6 +479,46 @@ def test_feet_flat_orientation_ignores_stance_and_zero_command():
   assert cost[1] == pytest.approx(0.0, abs=1e-6)
 
 
+def test_feet_flat_orientation_one_sided_pitch():
+  """Toe-down pitch is penalized; toe-up pitch is free; roll stays two-sided."""
+  zero = torch.zeros(1)
+  # Nugus sole normal is local X (axis 0); level foot ≈ pitch −1.5 rad about Y.
+  level_pitch = torch.tensor([-1.5])
+
+  def _foot_quat(pitch_delta: float, roll: float = 0.0) -> torch.Tensor:
+    pitch = level_pitch + pitch_delta
+    roll_t = torch.tensor([roll])
+    return quat_from_euler_xyz(roll_t, pitch, zero)[0]
+
+  toe_down = _foot_quat(-0.4)
+  toe_up = _foot_quat(+0.4)
+  rolled = _foot_quat(0.0, roll=0.5)
+
+  quats = torch.stack([toe_down, toe_up, rolled]).unsqueeze(1)
+  found = torch.zeros(3, 1)
+  command = torch.ones(3, 3)
+  command[:, 1:] = 0.0
+
+  env = _make_flat_foot_env(quats, found, command)
+  asset_cfg = SceneEntityCfg(name="robot", body_ids=[0])
+  common = dict(
+    env=env,
+    sensor_name="feet_ground_contact",
+    command_name="twist",
+    command_threshold=0.05,
+    sole_normal_axis=0,
+    asset_cfg=asset_cfg,
+  )
+
+  cost_onesided = feet_flat_orientation(**common, one_sided_pitch=True)
+  cost_twosided = feet_flat_orientation(**common, one_sided_pitch=False)
+
+  assert cost_onesided[0] > 0.01
+  assert cost_onesided[1] == pytest.approx(0.0, abs=1e-5)
+  assert cost_onesided[2] > 0.001
+  assert cost_twosided[1] > 0.01
+
+
 def test_reward_manager_handles_nan_values(mock_env):
   """Test that RewardManager converts NaN/Inf reward values to zero."""
 

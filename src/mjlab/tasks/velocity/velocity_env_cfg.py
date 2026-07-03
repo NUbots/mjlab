@@ -495,6 +495,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_name": "twist",
         "command_threshold": 0.05,
         "sole_normal_axis": 2,  # Set per-robot.
+        "one_sided_pitch": False,
         "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
       },
     ),

@@ -112,6 +112,14 @@ spec:
                   value: "${AIR_TIME_W}"
                 - name: MIRROR_AUG
                   value: "${MIRROR_AUG}"
+                - name: FOOT_FLAT_W
+                  value: "${FOOT_FLAT_W}"
+                - name: FOOT_FLAT_ONESIDED
+                  value: "${FOOT_FLAT_ONESIDED}"
+                - name: CLEARANCE_PER_CORNER
+                  value: "${CLEARANCE_PER_CORNER}"
+                - name: SWING_HEIGHT_SOURCE
+                  value: "${SWING_HEIGHT_SOURCE}"
                 - name: LR_CAP
                   value: "${LR_CAP}"
                 - name: LR_CAP_START_ITER

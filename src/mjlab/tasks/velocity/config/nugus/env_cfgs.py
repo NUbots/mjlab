@@ -66,6 +66,7 @@ _NUGUS_CURRENT_KT: dict[str, float] = {
 # Dynamixel XH540-W270 "present current" unit: 2.69 mA per LSB.
 _CURRENT_QUANTIZE_A = 0.00269
 _DEFAULT_JOINT_ACC_W = -1e-4
+_DEFAULT_FOOT_FLAT_W = -0.5
 _PHASE_C_TORQUE_RATE_W = -1e-3
 _PHASE_C_SOFT_LANDING_W = -0.01
 _PHASE_C_BASE_HEIGHT_W = 0.3
@@ -684,6 +685,17 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   progress_backslide_w = _env_float(
     "PROGRESS_BACKSLIDE_W", _DEFAULT_PROGRESS_BACKSLIDE_W
   )
+  foot_flat_w = _env_float("FOOT_FLAT_W", _DEFAULT_FOOT_FLAT_W)
+  if foot_flat_w > 0:
+    foot_flat_w = -foot_flat_w
+  foot_flat_onesided = _env_bool("FOOT_FLAT_ONESIDED", default=False)
+  clearance_per_corner = _env_bool("CLEARANCE_PER_CORNER", default=False)
+  swing_height_source = _env_str("SWING_HEIGHT_SOURCE", "min_corner")
+  if swing_height_source not in ("min_corner", "center"):
+    raise ValueError(
+      "SWING_HEIGHT_SOURCE must be 'min_corner' or 'center'; "
+      f"got {swing_height_source!r}"
+    )
   critic_height_scan = _env_bool("CRITIC_HEIGHT_SCAN", default=False)
   training_regime = _env_str("TRAINING_REGIME", "base")
   resume_mode = _env_bool("RESUME", default=False)
@@ -796,6 +808,33 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       # the foot geometry, so no ring needed.
       sensor.pattern = RingPatternCfg(rings=(), include_center=True)
       sensor.group_size = 4
+
+  foot_corner_height_scan = TerrainHeightSensorCfg(
+    name="foot_corner_height_scan",
+    frame=tuple(ObjRef(type="site", name=s, entity="robot") for s in corner_site_names),
+    ray_alignment="yaw",
+    pattern=RingPatternCfg(rings=(), include_center=True),
+    max_distance=1.0,
+    exclude_parent_body=True,
+    include_geom_groups=(0,),
+    debug_vis=False,
+    group_size=1,
+  )
+  foot_center_height_scan = TerrainHeightSensorCfg(
+    name="foot_center_height_scan",
+    frame=tuple(ObjRef(type="site", name=s, entity="robot") for s in site_names),
+    ray_alignment="yaw",
+    pattern=RingPatternCfg(rings=(), include_center=True),
+    max_distance=1.0,
+    exclude_parent_body=True,
+    include_geom_groups=(0,),
+    debug_vis=False,
+    group_size=1,
+  )
+  cfg.scene.sensors = (cfg.scene.sensors or ()) + (
+    foot_corner_height_scan,
+    foot_center_height_scan,
+  )
 
   feet_ground_cfg = ContactSensorCfg(
     name="feet_ground_contact",
@@ -990,8 +1029,18 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["gait_phase_regularity"].params["command_threshold"] = 0.02
 
-  for reward_name in ["foot_clearance", "foot_slip"]:
-    cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
+  cfg.rewards["foot_slip"].params["asset_cfg"].site_names = site_names
+  if clearance_per_corner:
+    cfg.rewards["foot_clearance"].params["height_sensor_name"] = (
+      "foot_corner_height_scan"
+    )
+    cfg.rewards["foot_clearance"].params["asset_cfg"].site_names = corner_site_names
+  else:
+    cfg.rewards["foot_clearance"].params["asset_cfg"].site_names = site_names
+
+  swing_height_sensor_name = (
+    "foot_center_height_scan" if swing_height_source == "center" else "foot_height_scan"
+  )
 
   # De-game foot_clearance (E5): squared, one-sided (below-target only) error so
   # the gradient grows as the foot sits below target and a high apex is never
@@ -1068,7 +1117,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   swing_height.func = mdp.feet_swing_height_clock
   swing_height.weight = 0.75
   swing_height.params = {
-    "height_sensor_name": "foot_height_scan",
+    "height_sensor_name": swing_height_sensor_name,
     "sensor_name": "feet_ground_contact",
     "target_height": swing_target_height,
     "period": gait_period,
@@ -1087,7 +1136,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   landing_height.weight = 0.0
   landing_height.params = {
     "sensor_name": "feet_ground_contact",
-    "height_sensor_name": "foot_height_scan",
+    "height_sensor_name": swing_height_sensor_name,
     "target_height": swing_target_height,
     "command_name": "twist",
     "command_threshold": 0.05,
@@ -1099,6 +1148,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # stops the toe from pitching down and digging into the turf on touchdown.
   cfg.rewards["foot_flat"].params["asset_cfg"].body_names = ("left_foot", "right_foot")
   cfg.rewards["foot_flat"].params["sole_normal_axis"] = 0
+  cfg.rewards["foot_flat"].params["one_sided_pitch"] = foot_flat_onesided
   cfg.rewards["foot_flat"].params["command_threshold"] = 0.02
 
   cfg.rewards["feet_distance"].params["asset_cfg"].site_names = site_names
@@ -1115,7 +1165,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["gait_phase_regularity"].weight = -0.1
   cfg.rewards["limb_symmetry"].weight = -0.0  # Disable (debugging)
   cfg.rewards["feet_distance"].weight = -0.1
-  cfg.rewards["foot_flat"].weight = -0.5  # Encourage flat-footed, level swing.
+  cfg.rewards["foot_flat"].weight = foot_flat_w
   cfg.rewards["joule_heating"].weight = 0.0
   cfg.rewards["joint_acc_l2"].weight = 0.0
   cfg.rewards["torque_rate"].weight = 0.0
