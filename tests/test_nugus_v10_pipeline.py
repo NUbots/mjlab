@@ -39,6 +39,12 @@ def _clear_nugus_env(monkeypatch: pytest.MonkeyPatch) -> None:
     "MAX_ITERATIONS",
     "UPRIGHT_W",
     "PROGRESS_BACKSLIDE_W",
+    "SWING_TARGET_HEIGHT",
+    "FLATTEN_PHASE_C",
+    "LINK_MASS_SCALE_MIN",
+    "LINK_MASS_SCALE_MAX",
+    "PAYLOAD_KG_MIN",
+    "PAYLOAD_KG_MAX",
   ):
     monkeypatch.delenv(key, raising=False)
 
@@ -304,3 +310,40 @@ def test_hard_from_start_applies_static_final_values(
   assert cfg.rewards["joint_acc_l2"].weight == -1e-4
   assert cfg.rewards["foot_swing_height"].weight == 0.75
   assert "clock_anneal" in cfg.curriculum
+
+
+def test_flatten_phase_c_skips_phase_c_curriculum(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "base")
+  monkeypatch.setenv("FLATTEN_PHASE_C", "1")
+  monkeypatch.setenv("JOULE_W", "1e-5")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "joule_heating_rampup" not in cfg.curriculum
+  assert cfg.rewards["joule_heating"].weight == -1e-5
+  assert cfg.rewards["joint_acc_l2"].weight == -1e-4
+  assert cfg.rewards["torque_rate"].weight == -1e-3
+  assert cfg.rewards["soft_landing"].weight == -0.01
+  assert cfg.rewards["base_height"].weight == 0.3
+
+
+def test_swing_target_height_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+  monkeypatch.setenv("SWING_TARGET_HEIGHT", "0.05")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert cfg.rewards["foot_swing_height"].params["target_height"] == 0.05
+  assert cfg.rewards["foot_swing_height_landing"].params["target_height"] == 0.05
+
+
+def test_v16b_dr_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+  monkeypatch.setenv("LINK_MASS_SCALE_MIN", "0.90")
+  monkeypatch.setenv("LINK_MASS_SCALE_MAX", "1.10")
+  monkeypatch.setenv("PAYLOAD_KG_MIN", "-0.2")
+  monkeypatch.setenv("PAYLOAD_KG_MAX", "0.2")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert cfg.events["link_mass"].params["ranges"] == (0.90, 1.10)
+  assert cfg.events["payload"].params["ranges"] == (-0.2, 0.2)
+
+
+def test_vel_sat_frac_event_registered() -> None:
+  cfg = nubots_nugus_flat_env_cfg()
+  assert cfg.events["vel_sat_frac"].mode == "step"

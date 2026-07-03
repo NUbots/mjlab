@@ -32,6 +32,7 @@ from mjlab.sensor import (
 from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.config.nugus.dr_observations import dr_ratios
 from mjlab.tasks.velocity.config.nugus.rl_cfg import nubots_nugus_ppo_runner_cfg
+from mjlab.tasks.velocity.config.nugus.vel_sat_telemetry import log_vel_sat_frac
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
 _NUM_STEPS_PER_ENV = 24
 _DEFAULT_MAX_ITERATIONS = nubots_nugus_ppo_runner_cfg().max_iterations
 _DEFAULT_GAIT_PERIOD = 0.7
+_DEFAULT_SWING_TARGET_HEIGHT = 0.08
 _DEFAULT_JOULE_W = -3e-4
 _DEFAULT_PHASE_C_FRAC = 0.6
 _DEFAULT_STAND_W = -0.15
@@ -406,6 +408,19 @@ def _add_hard_continue_curriculum(
     )
 
 
+def _apply_flat_phase_c_weights(
+  cfg: ManagerBasedRlEnvCfg,
+  *,
+  joule_w: float,
+) -> None:
+  """Apply Phase-C reward weights permanently from iteration 0 (no ramp)."""
+  cfg.rewards["joule_heating"].weight = joule_w
+  cfg.rewards["joint_acc_l2"].weight = _PHASE_C_JOINT_ACC_W
+  cfg.rewards["torque_rate"].weight = _PHASE_C_TORQUE_RATE_W
+  cfg.rewards["soft_landing"].weight = _PHASE_C_SOFT_LANDING_W
+  cfg.rewards["base_height"].weight = _PHASE_C_BASE_HEIGHT_W
+
+
 def _apply_hard_from_start_static(
   cfg: ManagerBasedRlEnvCfg,
   *,
@@ -431,11 +446,7 @@ def _apply_hard_from_start_static(
   )
   cfg.rewards["body_ang_vel"].weight = _HARD_FINAL_BODY_ANG_VEL_W
   cfg.rewards["angular_momentum"].weight = _HARD_FINAL_ANGULAR_MOMENTUM_W
-  cfg.rewards["joule_heating"].weight = joule_w
-  cfg.rewards["joint_acc_l2"].weight = _PHASE_C_JOINT_ACC_W
-  cfg.rewards["torque_rate"].weight = _PHASE_C_TORQUE_RATE_W
-  cfg.rewards["soft_landing"].weight = _PHASE_C_SOFT_LANDING_W
-  cfg.rewards["base_height"].weight = _PHASE_C_BASE_HEIGHT_W
+  _apply_flat_phase_c_weights(cfg, joule_w=joule_w)
 
 
 def _add_phase_c_curriculum(
@@ -574,6 +585,12 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
 
   gait_period = _env_float("GAIT_PERIOD", _DEFAULT_GAIT_PERIOD)
+  swing_target_height = _env_float("SWING_TARGET_HEIGHT", _DEFAULT_SWING_TARGET_HEIGHT)
+  flatten_phase_c = _env_bool("FLATTEN_PHASE_C", default=False)
+  link_mass_scale_min = _env_float("LINK_MASS_SCALE_MIN", 0.85)
+  link_mass_scale_max = _env_float("LINK_MASS_SCALE_MAX", 1.15)
+  payload_kg_min = _env_float("PAYLOAD_KG_MIN", -0.3)
+  payload_kg_max = _env_float("PAYLOAD_KG_MAX", 0.5)
   joule_w = _env_float("JOULE_W", _DEFAULT_JOULE_W)
   if joule_w > 0:
     joule_w = -joule_w
@@ -775,7 +792,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         body_names=(_NUGUS_LINK_MASS_BODY_REGEX,),
       ),
       "operation": "scale",
-      "ranges": (0.85, 1.15),
+      "ranges": (link_mass_scale_min, link_mass_scale_max),
     },
   )
   cfg.events["payload"] = EventTermCfg(
@@ -784,8 +801,13 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={
       "asset_cfg": SceneEntityCfg("robot", body_names=("torso",)),
       "operation": "add",
-      "ranges": (-0.3, 0.5),
+      "ranges": (payload_kg_min, payload_kg_max),
     },
+  )
+  cfg.events["vel_sat_frac"] = EventTermCfg(
+    mode="step",
+    func=log_vel_sat_frac,
+    params={},
   )
 
   # Per-servo strength / stiction DR — re-sample each episode.
@@ -982,7 +1004,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   swing_height.weight = 0.75
   swing_height.params = {
     "height_sensor_name": "foot_height_scan",
-    "target_height": 0.08,
+    "target_height": swing_target_height,
     "period": gait_period,
     "swing_ratio": 0.45,
     "std": 0.05,
@@ -1000,7 +1022,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   landing_height.params = {
     "sensor_name": "feet_ground_contact",
     "height_sensor_name": "foot_height_scan",
-    "target_height": 0.08,
+    "target_height": swing_target_height,
     "command_name": "twist",
     "command_threshold": 0.05,
   }
@@ -1075,7 +1097,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       enabled_components=hard_components,
     )
   elif training_regime == "base":
-    _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
+    if flatten_phase_c:
+      _apply_flat_phase_c_weights(cfg, joule_w=joule_w)
+    else:
+      _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
   else:
     raise ValueError(
       "TRAINING_REGIME must be 'base', 'hard_continue', 'base_then_hard', or "

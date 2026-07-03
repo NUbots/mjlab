@@ -3,6 +3,20 @@
 Line numbers drift; regex/grep from the anchors given here. Everything NUgus
 is net-new on this branch relative to `main`.
 
+> **UPDATE (post `a1af0d4`, Phase 0):** actuators migrated
+> `BuiltinPositionActuatorCfg` → `DcMotorActuatorCfg` with velocity limits
+> (rad/s), BAM frictionloss/viscous-damping baselines, and
+> `saturation_effort`; new DR events `link_mass`/`payload`/`joint_damping`;
+> critic DR-param obs in `config/nugus/dr_observations.py`; mirror map in
+> `config/nugus/mirror_map.py`; runner hooks (`ENTROPY_DECAY`, `LR_CAP`,
+> `GAMMA`, `MIRROR_AUG`) in `config/nugus/runner.py`; eval harnesses
+> `scripts/nugus_eval.py`, `scripts/sim2sim_eval.py`;
+> `HARD_COMPONENTS` env var gates hard-stage pieces. The actuator sections
+> below describe the PRE-Phase-0 state; trust the diff of `a1af0d4` and
+> docs 06–07 over this file where they conflict. Known Phase-0 issue: the
+> XH540 velocity limit 3.2 rad/s is too low (true no-load 4.1–4.8 rad/s;
+> doc 06 §V5).
+
 ## Entry points
 
 | What | Where |

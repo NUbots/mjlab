@@ -222,6 +222,8 @@ export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME RESAMPLE
 export WANDB_RUN_PATH WANDB_RUN_NAME
 export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W PHASE_DELTA_TAIL_W UPRIGHT_W PROGRESS_BACKSLIDE_W
 export TRAINING_REGIME CONT_BASE_STEP CRITIC_HEIGHT_SCAN TASK HARD_COMPONENTS
+export SWING_TARGET_HEIGHT FLATTEN_PHASE_C LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
+export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
 gen_default_matrix() {
   for variant in "${VARIANTS[@]}"; do
@@ -642,6 +644,52 @@ gen_v16_short() {
 }
 
 
+# BATCH=v16b: re-baseline after v16 collapse — clock_persist, GAIT_PERIOD=1.0,
+# SWING_TARGET_HEIGHT=0.05, flattened Phase-C, trimmed DR. Requires actuator fixes.
+gen_v16b() {
+  local joule_label
+  export MJLAB_VARIANT="clock_persist"
+  export GAIT_PERIOD="1.0"
+  export SWING_TARGET_HEIGHT="0.05"
+  export FLATTEN_PHASE_C="1"
+  export LINK_MASS_SCALE_MIN="0.90"
+  export LINK_MASS_SCALE_MAX="1.10"
+  export PAYLOAD_KG_MIN="-0.2"
+  export PAYLOAD_KG_MAX="0.2"
+  export JOULE_W="1e-5"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export WANDB_RUN_PATH=""
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="base"
+  export CONT_BASE_STEP=""
+  export CRITIC_HEIGHT_SCAN="true"
+  export PHASE_DELTA_TAIL_W=""
+  local seed job_suffix
+  for seed in 1 2; do
+    export SEED="$seed"
+    if [[ "$seed" == "1" ]]; then
+      job_suffix=""
+    else
+      job_suffix="-s${seed}"
+    fi
+    export RUN_NAME="clock_persist__stand-0.15__pc-flat__joule-${joule_label}__hs__s${seed}__${BATCH}"
+    export WANDB_TAGS="clock_persist,stand-0.15,pc-flat,joule-${joule_label},seed-${seed},gridsearch,batch-${BATCH},critic-height-scan,v16b"
+    emit_manifest "mj-gs-${BATCH}-cp-hs-joule-1e5${job_suffix}"
+  done
+}
+
+
 # BATCH=v16: Phase-0 smoke — clock_anneal flat base (no hard_continue), 2k iters,
 # critic height_scan, JOULE_W=1e-5. Establishes the post-E0.2/A3/C1 baseline.
 gen_v16_base() {
@@ -839,6 +887,7 @@ case "$BATCH" in
   v15) gen_v15_clock_anneal_hard_long; expected=2 ;;
   v16-short) gen_v16_short; expected=1 ;;
   v16) gen_v16_base; expected=1 ;;
+  v16b) gen_v16b; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import mujoco
@@ -52,17 +53,51 @@ _XH540_GEAR_SCALE = 270.4 / 225.0
 FRICTIONLOSS_XH540 = FRICTIONLOSS_MX106 * _XH540_GEAR_SCALE
 VISCOUS_DAMPING_XH540 = VISCOUS_DAMPING_MX106 * _XH540_GEAR_SCALE
 
-# No-load speed @ 12 V (rad/s): 45 / 30 / 63 rpm for MX-106 / XH540 / MX-64.
-VELOCITY_LIMIT_MX106 = 4.7
-VELOCITY_LIMIT_XH540 = 3.2
-VELOCITY_LIMIT_MX64 = 6.6
+# Bus voltage for no-load speed / torque scaling (4S LiPo nominal).
+# VERIFY: confirm NUgus supply matches before hardware transfer.
+_BUS_VOLTAGE = 14.8
+_REFERENCE_VOLTAGE = 12.0
+
+# No-load speed @ 12 V (rpm) from ROBOTIS e-Manual: MX-106 / XH540 / MX-64.
+_RPM_NO_LOAD_12V_MX106 = 45.0
+_RPM_NO_LOAD_12V_XH540 = 39.0
+_RPM_NO_LOAD_12V_MX64 = 63.0
+# XH540 @ 14.8 V is listed directly in e-Manual (46 rpm); MX series scaled.
+_RPM_NO_LOAD_14V8_XH540 = 46.0
+
+
+def _rpm_to_rad_s(rpm: float) -> float:
+  return rpm * 2.0 * math.pi / 60.0
+
+
+def _rpm_at_bus(rpm_12v: float, v_bus: float = _BUS_VOLTAGE) -> float:
+  return rpm_12v * (v_bus / _REFERENCE_VOLTAGE)
+
+
+VELOCITY_LIMIT_MX106 = _rpm_to_rad_s(_rpm_at_bus(_RPM_NO_LOAD_12V_MX106))
+VELOCITY_LIMIT_XH540 = _rpm_to_rad_s(_RPM_NO_LOAD_14V8_XH540)
+VELOCITY_LIMIT_MX64 = _rpm_to_rad_s(_rpm_at_bus(_RPM_NO_LOAD_12V_MX64))
+
+# Stall / rated torque @ 14.8 V from ROBOTIS e-Manual (MX/XH540 spec tables).
+# VERIFY: bench replay on NUgus servos may refine these.
+_STALL_TORQUE_MX106 = 10.0
+_STALL_TORQUE_MX64 = 7.3
+_STALL_TORQUE_XH540 = 11.7
+# Rated continuous torque @ 12 V (performance-graph mid-range); scaled to bus.
+_RATED_TORQUE_12V_MX106 = 4.4
+_RATED_TORQUE_12V_MX64 = 3.0
+_RATED_TORQUE_12V_XH540 = 5.4
+_VOLTAGE_SCALE = _BUS_VOLTAGE / _REFERENCE_VOLTAGE
+RATED_TORQUE_MX106 = _RATED_TORQUE_12V_MX106 * _VOLTAGE_SCALE
+RATED_TORQUE_MX64 = _RATED_TORQUE_12V_MX64 * _VOLTAGE_SCALE
+RATED_TORQUE_XH540 = _RATED_TORQUE_12V_XH540 * _VOLTAGE_SCALE
 
 # MX106 motor (hip yaw joints)
 ARMATURE_MX106 = 0.0266
 ACTUATOR_MX106 = ElectricActuator(
   reflected_inertia=ARMATURE_MX106,
   velocity_limit=VELOCITY_LIMIT_MX106,
-  effort_limit=11.086,  # From forcerange in xml
+  effort_limit=RATED_TORQUE_MX106,
 )
 
 # MX64 motor (most other joints)
@@ -70,7 +105,7 @@ ARMATURE_MX64 = 0.01195
 ACTUATOR_MX64 = ElectricActuator(
   reflected_inertia=ARMATURE_MX64,
   velocity_limit=VELOCITY_LIMIT_MX64,
-  effort_limit=6.1621,  # From forcerange in xml
+  effort_limit=RATED_TORQUE_MX64,
 )
 
 # XH540-W270 motor (knee joints)
@@ -78,7 +113,7 @@ ARMATURE_XH540 = 0.0266
 ACTUATOR_XH540 = ElectricActuator(
   reflected_inertia=ARMATURE_XH540,
   velocity_limit=VELOCITY_LIMIT_XH540,
-  effort_limit=11.086,  # From forcerange in xml
+  effort_limit=RATED_TORQUE_XH540,
 )
 
 # Natural frequency and damping ratio for PD control
@@ -105,7 +140,7 @@ NUGUS_ACTUATOR_ARMS = DcMotorActuatorCfg(
   stiffness=STIFFNESS_MX64,
   damping=DAMPING_MX64,
   effort_limit=ACTUATOR_MX64.effort_limit,
-  saturation_effort=ACTUATOR_MX64.effort_limit,
+  saturation_effort=_STALL_TORQUE_MX64,
   velocity_limit=VELOCITY_LIMIT_MX64,
   armature=ACTUATOR_MX64.reflected_inertia,
   frictionloss=FRICTIONLOSS_MX64,
@@ -122,7 +157,7 @@ NUGUS_ACTUATOR_HIPS = DcMotorActuatorCfg(
   stiffness=STIFFNESS_MX106,
   damping=DAMPING_MX106,
   effort_limit=ACTUATOR_MX106.effort_limit,
-  saturation_effort=ACTUATOR_MX106.effort_limit,
+  saturation_effort=_STALL_TORQUE_MX106,
   velocity_limit=VELOCITY_LIMIT_MX106,
   armature=ACTUATOR_MX106.reflected_inertia,
   frictionloss=FRICTIONLOSS_MX106,
@@ -147,7 +182,7 @@ NUGUS_ACTUATOR_LEGS = DcMotorActuatorCfg(
   stiffness=STIFFNESS_XH540,
   damping=DAMPING_XH540,
   effort_limit=ACTUATOR_XH540.effort_limit,
-  saturation_effort=ACTUATOR_XH540.effort_limit,
+  saturation_effort=_STALL_TORQUE_XH540,
   velocity_limit=VELOCITY_LIMIT_XH540,
   armature=ACTUATOR_XH540.reflected_inertia,
   frictionloss=FRICTIONLOSS_XH540,
@@ -161,7 +196,7 @@ NUGUS_ACTUATOR_HEAD = DcMotorActuatorCfg(
   stiffness=STIFFNESS_MX64,
   damping=DAMPING_MX64,
   effort_limit=ACTUATOR_MX64.effort_limit,
-  saturation_effort=ACTUATOR_MX64.effort_limit,
+  saturation_effort=_STALL_TORQUE_MX64,
   velocity_limit=VELOCITY_LIMIT_MX64,
   armature=ACTUATOR_MX64.reflected_inertia,
   frictionloss=FRICTIONLOSS_MX64,

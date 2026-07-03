@@ -44,6 +44,12 @@ def _clear_nugus_env(monkeypatch: pytest.MonkeyPatch) -> None:
     "MAX_ITERATIONS",
     "MJLAB_VARIANT",
     "SEED",
+    "SWING_TARGET_HEIGHT",
+    "FLATTEN_PHASE_C",
+    "LINK_MASS_SCALE_MIN",
+    "LINK_MASS_SCALE_MAX",
+    "PAYLOAD_KG_MIN",
+    "PAYLOAD_KG_MAX",
   ):
     monkeypatch.delenv(key, raising=False)
 

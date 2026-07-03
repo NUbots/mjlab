@@ -382,6 +382,7 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
         peak_heights[active_idx],
       )
 
+    ep_len_before_step = unwrapped.episode_length_buf.clone()
     with torch.no_grad():
       actions = policy(obs)
     obs, _, dones, _ = env.step(actions)
@@ -391,7 +392,8 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
     newly_done = dones.bool() & ~done_envs
     if newly_done.any():
       fell = unwrapped.termination_manager.get_term("fell_over")[newly_done]
-      ep_len_s = unwrapped.episode_length_buf[newly_done].float() * unwrapped.step_dt
+      # auto_reset clears episode_length_buf before step() returns.
+      ep_len_s = (ep_len_before_step[newly_done] + 1).float() * unwrapped.step_dt
       for env_idx, length, fell_over in zip(
         newly_done.nonzero(as_tuple=True)[0],
         ep_len_s,

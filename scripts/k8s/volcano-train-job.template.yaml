@@ -94,6 +94,18 @@ spec:
                   value: "${RESAMPLE_MIN}"
                 - name: GAIT_PERIOD
                   value: "${GAIT_PERIOD}"
+                - name: SWING_TARGET_HEIGHT
+                  value: "${SWING_TARGET_HEIGHT}"
+                - name: FLATTEN_PHASE_C
+                  value: "${FLATTEN_PHASE_C}"
+                - name: LINK_MASS_SCALE_MIN
+                  value: "${LINK_MASS_SCALE_MIN}"
+                - name: LINK_MASS_SCALE_MAX
+                  value: "${LINK_MASS_SCALE_MAX}"
+                - name: PAYLOAD_KG_MIN
+                  value: "${PAYLOAD_KG_MIN}"
+                - name: PAYLOAD_KG_MAX
+                  value: "${PAYLOAD_KG_MAX}"
                 - name: EFFORT_LO
                   value: "${EFFORT_LO}"
                 - name: EFFORT_HI
