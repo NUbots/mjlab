@@ -97,6 +97,8 @@ def build_eval_env_cfg(
   twist_cmd.rel_world_envs = 0.0
   twist_cmd.rel_forward_envs = 0.0
   twist_cmd.heading_command = False
+  twist_cmd.rel_heading_envs = 0.0
+  twist_cmd.ranges.heading = None
   twist_cmd.init_velocity_prob = 0.0
 
   if "push_robot" not in cfg.events:

@@ -67,6 +67,19 @@ def test_build_eval_env_cfg_keeps_pushes_and_disables_resampling(nugus_eval):
   twist = cfg.commands["twist"]
   assert twist.resampling_time_range == (1e9, 1e9)
   assert twist.rel_stop_envs == 0.0
+  assert twist.heading_command is False
+  assert twist.ranges.heading is None
+
+
+def test_build_eval_env_cfg_instantiates_env(nugus_eval):
+  import mjlab.tasks  # noqa: F401
+  from mjlab.envs import ManagerBasedRlEnv
+
+  cfg = nugus_eval.build_eval_env_cfg(
+    seed=7, episode_length_s=1.0, num_envs=10, envs_per_command=1
+  )
+  env = ManagerBasedRlEnv(cfg=cfg, device="cpu")
+  env.close()
 
 
 def test_build_eval_env_cfg_rejects_too_few_envs(nugus_eval):
