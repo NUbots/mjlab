@@ -43,9 +43,9 @@ Per sim2real plan (`docs/plans/sim2real-training-regime/README.md`):
 - **`JOULE_W=1e-5`**, not default `3e-4` — v13 evidence; v12 tail −0.1 collapsed at 3e-4.
 - **Use fixed eval (E0.1) for comparisons** — reward curves are not comparable across curriculum stages or physics changes (F1).
 
-**v16-short (Phase 0 validation, 2026-07-03):** `BATCH=v16-short` → `scripts/k8s/gen_v16_short/mj-gs-v16-short-ca-hs-joule-1e5.yaml` (500 iters). **Running** on cluster @ `GIT_COMMIT=a1af0d4fb8aef683f80f6fec9b6d4e63613d5ac0` (see §8). Gate: no NaNs/crashes by ~300 iters before queueing v16 full.
+**v16-short (Phase 0 validation, 2026-07-03):** `BATCH=v16-short` → `scripts/k8s/gen_v16_short/mj-gs-v16-short-ca-hs-joule-1e5.yaml` (500 iters). **Completed** @ `a1af0d4` — gate **PASS** @ iter ~336 (see §8); W&B `gr1hb5uh`, final reward **26.75** @ iter 499.
 
-**v16 (Phase 0 smoke, 2026-07-03):** `BATCH=v16` → `scripts/k8s/gen_v16/mj-gs-v16-ca-hs-joule-1e5.yaml` (2000 iters). **Not launched** (blocked on push). Success criterion: walks by iter ~1000 on fixed eval (`falls_per_min < 2` at `(0.5,0,0)`); v16 metrics become the baseline for Track A/B/C. **v17/v18 not queued.**
+**v16 (Phase 0 smoke, 2026-07-03):** `BATCH=v16` → `scripts/k8s/gen_v16/mj-gs-v16-ca-hs-joule-1e5.yaml` (2000 iters). **Running** on cluster @ `a1af0d4` (queued after v16-short gate PASS). Success criterion: walks by iter ~1000 on fixed eval (`falls_per_min < 2` at `(0.5,0,0)`); v16 metrics become the baseline for Track A/B/C. **v17/v18 not queued.**
 
 ---
 
@@ -68,8 +68,8 @@ Shared defaults unless overridden: `PHASE_C_FRAC=0.5`, flat task `Mjlab-Velocity
 | **v13** | Low joule 1e-5 (learned base→hard) + v9-like `clock_anneal` 2k | 4000 / 2000 iters | `mj-gs-v13-cl-joule-1e5-pd01`, `mj-gs-v13-ca` | `l9wok1ss`, `ojozkbfs` | **68.98** / **54.99** | Low joule matches v12-quality learned hard run |
 | **v14** | `clock_anneal` base→hard single run, legacy critic | 4000 iters | `mj-gs-v14-ca-base-hard` | `jyksw3mg` | **33.43**, ep_len **913.16** | Hard regime hurt vs flat 2k anneal |
 | **v15** | v14 extended to **20k** iters, seeds 1–2 | `MAX_ITERATIONS=20000` | `mj-gs-v15-ca-base-hard-20k`, `…-s2` | `ynquy630` s1, `rntq7onj` s2 | **38–40** plateau / fell **0.5–1.1**/ep | **Stopped** per F2 — flatlined ~4k–15k; do not relaunch |
-| **v16-short** | Phase 0 validation — same as v16, shorter | `clock_anneal`, **500** iters, `JOULE_W=1e-5`, hs-critic, `TRAINING_REGIME=base` | `mj-gs-v16-short-ca-hs-joule-1e5` | — | — | **Running** @ `a1af0d4` (2026-07-03) |
-| **v16** | Phase 0 smoke — post-E0.2/A3/C1 physics base | `clock_anneal`, 2k iters, `JOULE_W=1e-5`, `CRITIC_HEIGHT_SCAN=true`, `TRAINING_REGIME=base` | `mj-gs-v16-ca-hs-joule-1e5` | — | — | **Hold** — queue after v16-short ~300 iter gate |
+| **v16-short** | Phase 0 validation — same as v16, shorter | `clock_anneal`, **500** iters, `JOULE_W=1e-5`, hs-critic, `TRAINING_REGIME=base` | `mj-gs-v16-short-ca-hs-joule-1e5` | `gr1hb5uh` | reward **26.75**, ep_len **851** @ iter 499 | **PASS** — completed 2026-07-03 |
+| **v16** | Phase 0 smoke — post-E0.2/A3/C1 physics base | `clock_anneal`, 2k iters, `JOULE_W=1e-5`, `CRITIC_HEIGHT_SCAN=true`, `TRAINING_REGIME=base` | `mj-gs-v16-ca-hs-joule-1e5` | (pending) | — | **Running** @ `a1af0d4` (queued post gate) |
 
 **Legacy job still on cluster:** `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` → W&B `ufk65r9v` (v3-era naming, 1250 iters, final summary reward **−0.17**). Pod logs at iter **1187/1250**: mean reward **−25.40** (in progress, not final).
 
@@ -266,7 +266,7 @@ Shared defaults unless overridden: `PHASE_C_FRAC=0.5`, flat task `Mjlab-Velocity
 
 ## 5. Current cluster status
 
-Snapshot: `kubectl get vcjob -n mjlab` on **2026-07-03 ~11:00 JST** (orchestration agent).
+Snapshot: `kubectl get vcjob -n mjlab` on **2026-07-03 ~11:25 JST** (orchestration agent).
 
 | vcjob | Status | Running pods | Notes |
 |-------|--------|--------------|-------|
@@ -278,12 +278,12 @@ Snapshot: `kubectl get vcjob -n mjlab` on **2026-07-03 ~11:00 JST** (orchestrati
 | `mj-gs-v14-ca-base-hard` | Completed | 0 | |
 | `mj-gs-v15-ca-base-hard-20k` | **Deleted** | 0 | Stopped ~iter 16200/20000 |
 | `mj-gs-v15-ca-base-hard-20k-s2` | **Deleted** | 0 | Stopped ~iter 16200/20000 |
-| `mj-gs-v16-short-ca-hs-joule-1e5` | **Running** | 1 | `a1af0d4` @ iter ~90, reward −0.65, W&B `gr1hb5uh` |
-| `mj-gs-v16-ca-hs-joule-1e5` | **Failed** | 0 | Stale pre-push attempt; **not re-queued** until v16-short healthy |
+| `mj-gs-v16-short-ca-hs-joule-1e5` | **Completed** | 0 | Gate **PASS**; W&B `gr1hb5uh`, 500/500 iters |
+| `mj-gs-v16-ca-hs-joule-1e5` | **Running** | 1 | Queued after gate @ `a1af0d4`, 2000 iters |
 | `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` | Running | 0 | Legacy v3-era; pod Completed |
 | `mjlab-train` | Completed | 0 | Non-grid job |
 
-Queue `mjlab-train`: **8/8 GPUs free** after v15 deletion. Prior worker queued v16 jobs with stale/malformed pins — deleted before scheduling.
+Queue `mjlab-train`: v16 full holds **4×4090**; failed stale `mj-gs-v16-ca-hs-joule-1e5` deleted before re-apply.
 
 ---
 
@@ -303,32 +303,41 @@ Queue `mjlab-train`: **8/8 GPUs free** after v15 deletion. Prior worker queued v
 |------|-------|
 | Commit | `a1af0d4fb8aef683f80f6fec9b6d4e63613d5ac0` on `add-phase-clock` (pushed) |
 | ConfigMap | `mjlab-train-config` `GIT_COMMIT` updated + applied |
-| Volcano job | `mj-gs-v16-short-ca-hs-joule-1e5` — **Running** (recreated; first pod used stale `8581f7e`) |
+| Volcano job | `mj-gs-v16-short-ca-hs-joule-1e5` — **Completed** (recreated; first pod used stale `8581f7e`) |
 | W&B run | `gr1hb5uh` — `clock_anneal__stand-0.15__pc-0.5__joule-1e-5__hs__s1__v16-short` / `nugus_gridsearch_v16-short` |
 | Local tests | 48 passed, 1 skipped (`pytest` nugus suite) |
 | Repo pin (follow-up) | `d91d439` — ConfigMap + manifest GIT_COMMIT tracked in git |
 
-**v16 full not queued** — wait for ~300 iters without NaNs before `BATCH=v16` apply.
+**v16 full queued** — gate **PASS** @ iter ~336; deleted failed `mj-gs-v16-ca-hs-joule-1e5`, `BATCH=v16 ./scripts/k8s/gen-gridsearch.sh -o scripts/k8s/gen_v16`, `kubectl apply -f scripts/k8s/gen_v16/` (2026-07-03 ~11:16 JST).
 
-### Monitoring snapshot (2026-07-03 ~11:05 JST)
+### Gate decision (2026-07-03 ~11:16 JST)
 
 | Signal | Value |
 |--------|-------|
-| vcjob / pod | **Running** (`mj-gs-v16-short-ca-hs-joule-1e5-train-0`, 4×4090) |
-| Progress | **~90/500** iters (~18% of gate window) |
-| Mean reward (log) | **−9.89 @ iter 4** → **−0.65 @ iter 90** (monotonic early climb) |
-| Mean episode length | **~14–42** steps early (short episodes while learning to stand) |
+| vcjob / pod | **Completed** (`mj-gs-v16-short-ca-hs-joule-1e5`, 500/500 iters) |
+| Progress @ gate (~300) | **~336/500** — reward **~1.6–1.9**, ep_len **~78** |
+| Mean reward trajectory | **−9.89 @ iter 4** → **−0.65 @ ~90** → **~0.8 @ ~291** → **26.75 @ iter 499** |
+| Mean episode length @ finish | **851** steps @ iter 499 |
 | NaNs / crash | **None** in logs |
 | W&B | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/gr1hb5uh |
+| Checkpoint (W&B) | `model_499.pt` + ONNX uploaded |
 
-**Gate status:** **OPEN** — below ~300 iter decision threshold; do not queue v16 full yet.
+**Gate status:** **PASS** — reward trending up, stable training, reasonable ep length growth.
 
-### Next after v16 success gate
+### v16 full launch (post-gate)
 
-1. `uv run python scripts/nugus_eval.py --checkpoint-file …` (`falls_per_min < 2` at `(0.5,0,0)`)
-2. Optional D1: `uv run python scripts/sim2sim_eval.py --onnx-file …`
+| Item | Value |
+|------|-------|
+| vcjob | `mj-gs-v16-ca-hs-joule-1e5` — **Running** (`GIT_COMMIT=a1af0d4`) |
+| Iters | 2000 (`MAX_ITERATIONS=2000`) |
+| Experiment | `nugus_gridsearch_v16` |
+
+### Next after v16 full
+
+1. `uv run python scripts/nugus_eval.py --wandb-run-path vincenttumm-the-university-of-newcastle/mjlab/gr1hb5uh --wandb-checkpoint-name model_499.pt` (local run hit `heading_command` cfg error 2026-07-03 — retry after fix or run on GPU node)
+2. Optional D1: `uv run python scripts/sim2sim_eval.py --onnx-file …` (ONNX on W&B run)
 3. Queue v17 (5 cells) — 1–2 cells first if capacity limited
-4. Do **not** queue v17/v18 if v16-short fails
+4. Do **not** queue v17/v18 if v16 full fails early
 
 ---
 
