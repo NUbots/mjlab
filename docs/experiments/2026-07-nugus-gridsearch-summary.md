@@ -448,6 +448,68 @@ Checkpoint `model_1500.pt` from `3mgdsxzo`.
 v13 baseline `l9wok1ss` on **same eval build** — **failed to load** (actor obs **72** vs eval env **71**; action dim **21** vs **20**). **2× v13 gate not computed.** **v17 not queued.**
 
 
+
+
+### v16d launch (2026-07-03)
+
+| Item | Value |
+|------|-------|
+| Commits | `95f4651` (v16d knobs + manifests), `94dae96` (mirror height_scan fix + peak_height telemetry), configmap pin `2ba9d84` |
+| Cluster `GIT_COMMIT` | `94dae9639f64978fb6fb58235988c5f0f85b6295` |
+| Manifests | `BATCH=v16d ./scripts/k8s/gen-gridsearch.sh -o scripts/k8s/gen_v16d`; `kubectl apply -f scripts/k8s/gen_v16d/` |
+| vcjobs | `mj-gs-v16d-main`, `mj-gs-v16d-nomirror`, `mj-gs-v16d-jacc-3e5` @ 2000 iters |
+| Experiment | `nugus_gridsearch_v16d` |
+| v16c cleanup | `mj-gs-v16c-cp-hs-joule-1e5-s2` **deleted** to free GPU (s1 already **Completed**) |
+
+**Launch notes:** First apply used stale manifest pin `547c67d`/`95f4651`; mirror cells crashed on rectangular `height_scan` (187 = 17×11) until `94dae96`. Relaunched all three cells with pinned SHA.
+
+| Cell | W&B |
+|------|-----|
+| main (mirror, jacc −1e-5) | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/xexvp9eb |
+| jacc −3e-5 (mirror) | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/n85kiuli |
+| nomirror | (pending URL — job queued behind GPU) |
+
+**Doc 09 thresholds @ iter 1500–2000:** **PENDING** (runs in progress; no `nugus_eval` / `sim2sim_eval` until main passes).
+
+**Overnight wave-0 status (2026-07-03 ~19:30 UTC+9):** `mj-gs-v16d-main` and `mj-gs-v16d-jacc-3e5` **Running** (~55 min elapsed, ETA ~35 min → ~iter 1200/2000 est. from timing). `mj-gs-v16d-nomirror` **Pending** (GPU). W&B: main `xexvp9eb`, jacc `n85kiuli`. **D0 / BASE1 not yet chosen.**
+
+**Wave-1 code ready (2026-07-03):** commits `8e63786` (heel-toe knobs + `feet_flat_orientation` one-sided pitch + unit test), `fe9ff61` (wave-1 manifests @ `8e63786`). Superseded by `ce4da03` (wave 2–4 knobs + full manifest regen). **Wave 1 not launched** — blocked on v16d D0.
+
+### Ready for overnight (2026-07-03)
+
+All code and manifests are local on branch `add-phase-clock`; cluster pin
+`ce4da03622c73d1516f656fcd16c730cc7e45690` (configmap + every manifest).
+Config-audit test green. **Do not push or apply until approved.**
+
+| Wave | Runs | Manifest dir | Launch |
+|------|------|--------------|--------|
+| 0 (in flight) | R1–R3 v16d | `scripts/k8s/gen_v16d/` | already running |
+| 1 | R4–R9 heel-toe + cadence | `scripts/k8s/gen_wave1/` | `kubectl apply -f scripts/k8s/gen_wave1/` after D0 |
+| 2 | R10–R13 economy + variance | `scripts/k8s/gen_wave2/` | after D1; pick **one** of `r13-airtime` or `r13-gamma` from wave-1 `air_time_mean` |
+| 3 | R14–R17 robustness + reach | `scripts/k8s/gen_wave3/` | after D2; run **one** R17 backfill if R12/R13 variant skipped |
+| 4 | R18–R20 consolidation | `scripts/k8s/gen_wave4/` | after D3; R20 = rough terrain taste (`Mjlab-Velocity-Rough-Nubots-Nugus`) |
+
+Regenerate after any code change:
+
+```sh
+SHA=$(git rev-parse HEAD)
+for b in wave1 wave2 wave3 wave4; do
+  BATCH=$b GIT_COMMIT=$SHA ./scripts/k8s/gen-gridsearch.sh -o scripts/k8s/gen_$b
+done
+```
+
+**Wave 1 cells:** `r4-flat-onesided`, `r5-heel-toe`, `r6-gait-085`, `r7-gait-07`, `r8-jacc-0`, `r9-integrator`.
+
+**Wave 2 cells:** `r10-base2-ref` (s1), `r11-base2-s2`, `r12-alive-025`, `r13-airtime` *or* `r13-gamma`.
+
+**Wave 3 cells:** `r14-wide-dr`, `r15-push-interval`, `r16-self-paced`, plus backfills `r17-gamma`, `r17-airtime`, `r17-alive` (run at most one).
+
+**Wave 4 cells:** `r18-final-4k`, `r19-final-s3`, `r20-rough`.
+
+**New env knobs (ce4da03):** `CLEARANCE_TARGET_HEIGHT`, `CLEARANCE_TARGET_FROM_SWING`, `PUSH_INTERVAL_SCALE`. Wave 2–4 also use existing `ALIVE_W`, `AIR_TIME_W`, `GAMMA`, wide DR (`LINK_MASS_*`, `PAYLOAD_*`), `MJLAB_VARIANT=self_paced`.
+
+**Push (after approval):** `git push origin add-phase-clock`
+
 **Stop-v17 (2026-07-03):** All `mj-gs-v17-*` vcjobs **deleted** / absent on cluster. Batch **invalid** — launched on collapsed v16 @ `a1af0d4`. **No fixed eval, no destabilizer call.** Relaunch only after v16c passes training + eval gates (≥256 envs/command). Partial W&B (`ts21daeb`, `9nzuqlnr`) retained for forensics only.
 
 ---

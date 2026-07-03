@@ -67,8 +67,8 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [x] ~~v16 base validated~~ **v16 COLLAPSED at p3 — see `06-v16-collapse-analysis.md`**: swing target infeasible on new actuators + clock_anneal→0 handoff; joule/DR largely acquitted
 - [x] ~~v16b re-baseline~~ **v16b FAILED — never stood (ep_len ~25 for 1400 iters, both seeds); jobs killed. See `08-v16b-postmortem.md`**: un-specced effort-limit cut to rated torque + Phase-C penalties from step 0 with no alive bonus = learned fast-termination
 - [x] v16c launched @ `547c67d` (2026-07-03) — **WALKS** (alive bonus fixed bootstrap) but shuffles/limps and tracking declines post-warm-up; jacc −3e-5 cell clearly better than −1e-4. Full analysis in `09-v16c-analysis-v16d.md`
-- [ ] v16d launched (jacc −1e-5, TRACK_LIN_W 3.0, swing 0.065, AIR_TIME_W 0.15, MIRROR_AUG on, LR cap from 1200; 3 cells incl. nomirror ablation — **code implemented + manifests in `scripts/k8s/gen_v16d/`; needs commit+push, configmap re-pin, manifest regen** — doc 09 launch checklist)
-- [ ] peak-swing-height metric added to clock_persist telemetry (doc 09 "known telemetry gap")
+- [x] v16d launched @ `94dae96` (2026-07-03) — 3 vcjobs @ 2000 iters; cluster pin `94dae96` (+ configmap commit `2ba9d84`); mirror height_scan fix in `94dae96`; **training gate pending** (~iter 1500–2000, doc 09 thresholds)
+- [x] peak-swing-height metric added to clock_persist telemetry (`Metrics/peak_height_mean` on `feet_swing_height_clock`, `94dae96`)
 - [x] Velocity limits corrected: XH540 no-load is 39–46 rpm = 4.1–4.8 rad/s (Phase 0 used 3.2 from a wrong 30 rpm figure); set from measured bus voltage; check `saturation_effort` = stall torque (doc 06 §V5). Units are rad/s — confirmed, not rpm
 - [ ] Classical-walk joint-velocity/torque log captured from the real robot (ground truth for limits + gait envelope)
 - [ ] Stage 2 gait-period-as-command (v19) — variable step timing, doc 07
@@ -81,7 +81,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [x] D1 Sim-to-sim ONNX gate script (`scripts/sim2sim_eval.py`; not yet run on a checkpoint)
 - [x] C2 Mirror augmentation (`mirror_map.py`, `MIRROR_AUG=1`; `tests/test_mirror_map.py`)
 - [x] C3 Entropy decay / LR cap / γ=0.97 cells (`NugusOnPolicyRunner`; `ENTROPY_DECAY`, `LR_CAP`, `GAMMA` env vars)
-- [x] Stopped the flatlined v15 runs — deleted `mj-gs-v15-ca-base-hard-20k{,-s2}` vcjobs 2026-07-03 (~iter 16200/20000)
+- [x] Overnight plan doc 10 + idea backlog doc 11 added; wave 1–4 manifests @ `ce4da03` (config-audit green; **push + launch pending approval**)
 
 ## Standing recommendations (not tasks)
 
@@ -112,6 +112,8 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `07-gait-timing-strategy.md` | Variable step timing done right: period-as-command (Stage 2), push-window phase freedom, unclocked endgame |
 | `08-v16b-postmortem.md` | v16b never-stands failure (effort cut + step-0 penalties, no alive bonus), v16c spec, pre-launch smoke-test pattern. Supersedes doc 06 item 5 and §V5 effort wording |
 | `09-v16c-analysis-v16d.md` | v16c walks-but-shuffles analysis (joint_acc kills tracking, no symmetry = limp, drag is incentive-limited), v16d change-set + launch checklist + success thresholds |
+| `10-overnight-20run-plan.md` | Autonomous 10 h / 20-run adaptive plan: heel-toe reward fixes (per-corner clearance, center swing height, one-sided foot_flat), cadence/stride grid, economy ablations, seed variance, DR/push restoration, self_paced stretch |
+| `11-idea-backlog.md` | Ranked backlog: adaptive command/push curricula (ADR-lite), single-support & stride rewards, IMU/incline DR, base-height & lean tweaks, AMP-from-classical-walk; ⭐ items are overnight-backfill eligible |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |
