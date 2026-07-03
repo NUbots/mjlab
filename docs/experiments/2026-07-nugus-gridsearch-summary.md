@@ -43,7 +43,7 @@ Per sim2real plan (`docs/plans/sim2real-training-regime/README.md`):
 - **`JOULE_W=1e-5`**, not default `3e-4` — v13 evidence; v12 tail −0.1 collapsed at 3e-4.
 - **Use fixed eval (E0.1) for comparisons** — reward curves are not comparable across curriculum stages or physics changes (F1).
 
-**v16-short (Phase 0 validation, 2026-07-03):** `BATCH=v16-short` → `scripts/k8s/gen_v16_short/mj-gs-v16-short-ca-hs-joule-1e5.yaml` (500 iters). **Completed** @ `a1af0d4` — gate **PASS** @ iter ~336 (see §8); W&B `gr1hb5uh`, final reward **26.75** @ iter 499.
+**v16-short (Phase 0 validation, 2026-07-03):** `BATCH=v16-short` → `scripts/k8s/gen_v16_short/mj-gs-v16-short-ca-hs-joule-1e5.yaml` (500 iters). **Completed** @ `a1af0d4` — gate **PASS** @ iter ~336 (see §8); W&B `gr1hb5uh`, final reward **26.75** @ iter 499; fixed eval **falls_per_min 0.0** overall and at `(0.5,0,0)` / `(0,0,0)` (local smoke, 1 env/cmd — see §8).
 
 **v16 (Phase 0 smoke, 2026-07-03):** `BATCH=v16` → `scripts/k8s/gen_v16/mj-gs-v16-ca-hs-joule-1e5.yaml` (2000 iters). **Running** on cluster @ `a1af0d4` (queued after v16-short gate PASS). Success criterion: walks by iter ~1000 on fixed eval (`falls_per_min < 2` at `(0.5,0,0)`); v16 metrics become the baseline for Track A/B/C. **v17/v18 not queued.**
 
@@ -69,7 +69,7 @@ Shared defaults unless overridden: `PHASE_C_FRAC=0.5`, flat task `Mjlab-Velocity
 | **v14** | `clock_anneal` base→hard single run, legacy critic | 4000 iters | `mj-gs-v14-ca-base-hard` | `jyksw3mg` | **33.43**, ep_len **913.16** | Hard regime hurt vs flat 2k anneal |
 | **v15** | v14 extended to **20k** iters, seeds 1–2 | `MAX_ITERATIONS=20000` | `mj-gs-v15-ca-base-hard-20k`, `…-s2` | `ynquy630` s1, `rntq7onj` s2 | **38–40** plateau / fell **0.5–1.1**/ep | **Stopped** per F2 — flatlined ~4k–15k; do not relaunch |
 | **v16-short** | Phase 0 validation — same as v16, shorter | `clock_anneal`, **500** iters, `JOULE_W=1e-5`, hs-critic, `TRAINING_REGIME=base` | `mj-gs-v16-short-ca-hs-joule-1e5` | `gr1hb5uh` | reward **26.75**, ep_len **851** @ iter 499 | **PASS** — completed 2026-07-03 |
-| **v16** | Phase 0 smoke — post-E0.2/A3/C1 physics base | `clock_anneal`, 2k iters, `JOULE_W=1e-5`, `CRITIC_HEIGHT_SCAN=true`, `TRAINING_REGIME=base` | `mj-gs-v16-ca-hs-joule-1e5` | (pending) | — | **Running** @ `a1af0d4` (queued post gate) |
+| **v16** | Phase 0 smoke — post-E0.2/A3/C1 physics base | `clock_anneal`, 2k iters, `JOULE_W=1e-5`, `CRITIC_HEIGHT_SCAN=true`, `TRAINING_REGIME=base` | `mj-gs-v16-ca-hs-joule-1e5` | `shhm98rd` | reward **~0.1**, ep_len **~27** @ iter ~175 (in progress) | **Running** @ `a1af0d4` |
 
 **Legacy job still on cluster:** `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` → W&B `ufk65r9v` (v3-era naming, 1250 iters, final summary reward **−0.17**). Pod logs at iter **1187/1250**: mean reward **−25.40** (in progress, not final).
 
@@ -324,6 +324,18 @@ Queue `mjlab-train`: v16 full holds **4×4090**; failed stale `mj-gs-v16-ca-hs-j
 
 **Gate status:** **PASS** — reward trending up, stable training, reasonable ep length growth.
 
+### Fixed eval (`nugus_eval`, `model_499.pt`, 2026-07-03)
+
+Local run @ git `6fa6b4c` (+ `find_sites` id unpack fix): checkpoint from W&B `gr1hb5uh`, seed 7, 30s episodes. **No CUDA locally** — used `--envs-per-command 1` (10 envs total); default 2560-env eval did not finish on CPU in reasonable time. Metrics written to `/tmp/v16-short-eval.json`; W&B summary updated.
+
+| Scope | `falls_per_min` |
+|-------|-----------------|
+| cmd `(0.5, 0, 0)` | **0.0** |
+| cmd `(0, 0, 0)` | **0.0** |
+| **overall** | **0.0** |
+
+Other overall: `lin_vel_rmse` **0.33**, `ang_vel_rmse` **0.33**, `slip_vel` **0.032**, `swing_height_err` **0.077** (n=1 env/command — high variance; re-run at 256 envs/command on GPU for production numbers).
+
 ### v16 full launch (post-gate)
 
 | Item | Value |
@@ -331,10 +343,18 @@ Queue `mjlab-train`: v16 full holds **4×4090**; failed stale `mj-gs-v16-ca-hs-j
 | vcjob | `mj-gs-v16-ca-hs-joule-1e5` — **Running** (`GIT_COMMIT=a1af0d4`) |
 | Iters | 2000 (`MAX_ITERATIONS=2000`) |
 | Experiment | `nugus_gridsearch_v16` |
+| W&B run | `shhm98rd` — https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/shhm98rd |
+
+
+### v16 full progress snapshots (kubectl)
+
+| Time (JST ~) | Iter | Mean reward | Ep length | fell_over | NaN/crash | Notes |
+|--------------|------|-------------|-----------|-----------|-----------|-------|
+| 2026-07-03 ~11:26 | **~175/2000** | **~0.1** | **~27** | ~309 | **None** | Early base phase; W&B `shhm98rd` — https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/shhm98rd |
 
 ### Next after v16 full
 
-1. `uv run python scripts/nugus_eval.py --wandb-run-path vincenttumm-the-university-of-newcastle/mjlab/gr1hb5uh --wandb-checkpoint-name model_499.pt` (local run hit `heading_command` cfg error 2026-07-03 — retry after fix or run on GPU node)
+1. ~~v16-short fixed eval on `gr1hb5uh` / `model_499.pt`~~ — done 2026-07-03 (local CPU smoke; re-run at full env count on GPU when convenient)
 2. Optional D1: `uv run python scripts/sim2sim_eval.py --onnx-file …` (ONNX on W&B run)
 3. Queue v17 (5 cells) — 1–2 cells first if capacity limited
 4. Do **not** queue v17/v18 if v16 full fails early
