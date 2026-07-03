@@ -278,7 +278,7 @@ Snapshot: `kubectl get vcjob -n mjlab` on **2026-07-03 ~11:00 JST** (orchestrati
 | `mj-gs-v14-ca-base-hard` | Completed | 0 | |
 | `mj-gs-v15-ca-base-hard-20k` | **Deleted** | 0 | Stopped ~iter 16200/20000 |
 | `mj-gs-v15-ca-base-hard-20k-s2` | **Deleted** | 0 | Stopped ~iter 16200/20000 |
-| `mj-gs-v16-short-ca-hs-joule-1e5` | **Running** | 0 | `a1af0d4` — recreated after push (prior pod pinned `8581f7e`) |
+| `mj-gs-v16-short-ca-hs-joule-1e5` | **Running** | 1 | `a1af0d4` @ iter ~90, reward −0.65, W&B `gr1hb5uh` |
 | `mj-gs-v16-ca-hs-joule-1e5` | **Failed** | 0 | Stale pre-push attempt; **not re-queued** until v16-short healthy |
 | `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` | Running | 0 | Legacy v3-era; pod Completed |
 | `mjlab-train` | Completed | 0 | Non-grid job |
@@ -304,10 +304,24 @@ Queue `mjlab-train`: **8/8 GPUs free** after v15 deletion. Prior worker queued v
 | Commit | `a1af0d4fb8aef683f80f6fec9b6d4e63613d5ac0` on `add-phase-clock` (pushed) |
 | ConfigMap | `mjlab-train-config` `GIT_COMMIT` updated + applied |
 | Volcano job | `mj-gs-v16-short-ca-hs-joule-1e5` — **Running** (recreated; first pod used stale `8581f7e`) |
-| W&B run | `clock_anneal__stand-0.15__pc-0.5__joule-1e-5__hs__s1__v16-short` / `nugus_gridsearch_v16-short` |
+| W&B run | `gr1hb5uh` — `clock_anneal__stand-0.15__pc-0.5__joule-1e-5__hs__s1__v16-short` / `nugus_gridsearch_v16-short` |
 | Local tests | 48 passed, 1 skipped (`pytest` nugus suite) |
+| Repo pin (follow-up) | `d91d439` — ConfigMap + manifest GIT_COMMIT tracked in git |
 
 **v16 full not queued** — wait for ~300 iters without NaNs before `BATCH=v16` apply.
+
+### Monitoring snapshot (2026-07-03 ~11:05 JST)
+
+| Signal | Value |
+|--------|-------|
+| vcjob / pod | **Running** (`mj-gs-v16-short-ca-hs-joule-1e5-train-0`, 4×4090) |
+| Progress | **~90/500** iters (~18% of gate window) |
+| Mean reward (log) | **−9.89 @ iter 4** → **−0.65 @ iter 90** (monotonic early climb) |
+| Mean episode length | **~14–42** steps early (short episodes while learning to stand) |
+| NaNs / crash | **None** in logs |
+| W&B | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/gr1hb5uh |
+
+**Gate status:** **OPEN** — below ~300 iter decision threshold; do not queue v16 full yet.
 
 ### Next after v16 success gate
 
