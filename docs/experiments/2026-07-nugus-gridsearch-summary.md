@@ -1,1157 +1,299 @@
-# Nugus grid-search experiment summary (v8–v15)
+# Nugus grid-search experiment summary (June–July 2026)
 
-W&B project [vincenttumm-the-university-of-newcastle/mjlab](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab). Metrics fetched 2026-07-03T00:39:59Z from run summaries and history.
+**Project:** `vincenttumm-the-university-of-newcastle/mjlab`  
+**TensorBoard:** https://mjlab.4ai.systems (experiment groups `nugus_gridsearch_v3` … `nugus_gridsearch_v15`)  
+**Document date:** 2026-07-03  
+**Data sources:** W&B API (entity `vincenttumm-the-university-of-newcastle`, project `mjlab`), `kubectl -n mjlab` vcjob/pod logs, `scripts/k8s/gen-gridsearch.sh`, agent transcript `d15bf769-d3ca-43e3-bae2-e126adb7ca6f`.
 
-Batch definitions live in `scripts/k8s/gen-gridsearch.sh`. When multiple attempts exist for the same `run_name`, this report keeps the latest W&B run by `created_at`.
+Metric values below are **final-run summaries from W&B** unless noted as **in-progress (kubectl logs)**. W&B summary key used: `Train/mean_reward`, `Train/mean_episode_length`, `Metrics/phase_delta_nominal_ratio_mean` (when present).
 
-## Overview
+---
 
-| Batch | Runs | State | Best `Train/mean_reward` | `Train/mean_episode_length` (last) | Notes |
-| --- | ---: | --- | ---: | ---: | --- |
-| v8 | 2 | finished | 100.48 | 997.29 | clock_learned CURRENT_OBS 0 vs 1 at pinned 2229f92 (strong early phase_delta_nom… |
-| v9 | 3 | finished | 63.50 | 981.91 | Extend strong phase_delta_nominal to 1000 iters (w=-5), halve upright to 0.5, pr… |
-| v10 | 2 | crashed, finished | 72.07 | 1000 | Two parallel jobs: (A) flat hard continuation from v9 cur0 with legacy critic (r… |
-| v11 | 4 | finished | 54.76 | 943.24 | Overnight base→hard single-run (no resume): 4000 iters, v9-equivalent base for 2… |
-| v12 | 2 | finished | 67.40 | 992.09 | v11-like base→hard with non-zero phase_delta_nominal tail: compare PHASE_DELTA_T… |
-| v13 | 2 | finished | 68.98 | 987.42 | Lower joule (1e-5) on v12-like clock_learned base→hard (pd-tail -0.1) plus v9-eq… |
-| v14 | 1 | finished | 33.43 | 913.16 | clock_anneal base→hard single-run (no resume), v11-style 4000 iters with legacy … |
-| v15 | 2 | running | 39.97 | 955.63 | v14 clock_anneal base→hard extended to 20k iters; hard ramp in first ~3k iters t… |
+## 1. Executive summary
 
-## Batch intentions
+The Nugus grid-search program on Kubernetes (Volcano queue `mjlab-train`) set out to:
 
-### v8
+1. **Eliminate shuffling** — use a fixed gait-clock scaffold (`clock_anneal`) or policy-owned phase (`clock_learned`) with staged reward handoff instead of a gameable clearance term alone.
+2. **Compare curriculum variants** — `clock_anneal` (teacher clock in obs/rewards, annealed out), `clock_learned` (policy accumulates phase via `phase_delta`; nominal cadence penalty), and early matrix cells (`self_paced`, `clock_persist`).
+3. **Tune standing / upright / cadence** — `STAND_W`, halved `UPRIGHT_W=0.5`, extended `PHASE_DELTA_STRONG_ITERS=1000` at weight `-5.0`, and later non-zero **phase-delta tail** weights so cadence does not collapse when the strong penalty ends.
+4. **Harder locomotion** — `TRAINING_REGIME=hard_continue` ramps command velocity, pushes, and torso freedom; tested both **resume-from-checkpoint** (v10 stage A) and **single-run base→hard** (v11–v15) with `CONT_BASE_STEP=48000` (2000 iters × 24 steps/iter).
+5. **Critic and energy ablations** — `CRITIC_HEIGHT_SCAN=true` on flat envs (v10+ learned runs), `JOULE_W=1e-5` vs default `3e-4` (v13).
 
-clock_learned CURRENT_OBS 0 vs 1 at pinned 2229f92 (strong early phase_delta_nominal). pc-0.5, STAND_W 0.15, seed 1, 2000 iters, PHASE_ITERATIONS=2000.
+**Headline outcomes (final W&B summaries):**
 
-### v9
+| Direction | Best run(s) | Mean reward | Notes |
+|-----------|-------------|-------------|-------|
+| Flat `clock_learned`, 2k iters | v8 cur1 `v21878z8` | **100.48** | Strong early penalty at commit `2229f92`; phase still collapsed early → led to v9 |
+| Flat `clock_learned`, v9 settings | v9 cur0 `ift9sd2w` | **63.50** | Chosen base for v10 continuation; `pd_ratio` 0.66 at end |
+| Flat retrain + height-scan critic | v10 hs `yz5baxda` | **72.07** | v9-equivalent fresh train; best completed v10 job |
+| Base→hard, learned + pd-tail | v12 pd-tail −0.2 `lyhwmnll` | **67.40** | Large gain vs tail −0.1 (28.92); addresses v11 cadence collapse |
+| Base→hard, low joule | v13 cl joule 1e-5 `l9wok1ss` | **68.98** | Similar to v12 −0.2 with weaker heating penalty |
+| Flat `clock_anneal`, 2k | v13 ca `ojozkbfs` | **54.99** | v9-equivalent baseline |
+| Base→hard, `clock_anneal` 4k | v14 `jyksw3mg` | **33.43** | Hard phase reduced reward vs flat 2k baseline |
+| Base→hard, `clock_anneal` 20k | v15 s2 `rntq7onj` | **41.11** (running) | ~69% through 20k iters at time of writing |
 
-Extend strong phase_delta_nominal to 1000 iters (w=-5), halve upright to 0.5, progress_backslide -0.5. Three runs: clock_learned cur0/cur1 and clock_anneal baseline.
+Resume-based hard continuation (v10 stage A) **crashed repeatedly**; the program shifted to single-run base→hard (v11+) and `clock_anneal` long runs (v14–v15).
 
-### v10
+---
 
-Two parallel jobs: (A) flat hard continuation from v9 cur0 with legacy critic (resume), (B) flat v9-equivalent retrain with critic height_scan.
+## 2. Timeline / batches
 
-### v11
+Shared defaults unless overridden: `PHASE_C_FRAC=0.5`, flat task `Mjlab-Velocity-Flat-Nubots-Nugus`, `GAIT_PERIOD=0.7`, `JOULE_W=3e-4`, seed 1, W&B project `mjlab`, experiment name `nugus_gridsearch_<batch>`.
 
-Overnight base→hard single-run (no resume): 4000 iters, v9-equivalent base for 2000 iters then hard_continue from step 48000. clock_learned, hs-critic, seeds 1–4.
+| Batch | Intention | Key hyperparams | K8s job(s) | W&B run name / ID | Final metrics (W&B) | Outcome |
+|-------|-----------|-----------------|------------|-------------------|---------------------|---------|
+| **v3** | Initial 12-cell matrix: `clock_anneal` / `self_paced` / `clock_persist` × `STAND_W` {0.1,0.3} × `pc` {0.5,0.7} | 1250 iters | (TTL expired) | e.g. `76kregdc` clock_anneal sw0.1 pc0.5 | reward **72.74**, ep_len **1000** | Best early `clock_anneal` pc-0.5; used as v4 resume sources (`7fivy5q7`, `eyiowvgo`) |
+| **v4** | Resume two v3 `clock_anneal` pc-0.5 runs to ~2000 iters | `RESUME=true`, `WANDB_RUN_PATH` from v3 | `mj-gs-v4-ca-sw01-p05-cont`, `…-sw03-…` | **No W&B runs** (failed at init) | metrics not retrieved | Failed: tyro `--agent.resume` CLI bug (see §4) |
+| **v5** | 2×2: `CURRENT_OBS` × `SILENCE_CLOCK` on `clock_anneal` | 2000 iters, `STAND_W=0.15` | (TTL expired) | `l9c9iicz` cur1 sil0 | reward **78.40**, ep_len **997.73** | Current obs + silence grid; best cell cur1/sil0 |
+| **v6** | Command resample min 3.0 vs 0.0 | `clock_anneal`, 2000 iters | Not deployed initially | **No tagged runs** | metrics not retrieved | Generator added; jobs not launched in this window |
+| **v7** | `clock_learned` vs `clock_anneal` | 2000 iters, `PHASE_ITERATIONS=2000` | (TTL expired) | `19jgdqlx` cl, `j8r4iqmi` ca | cl **93.19** / ca **63.25** | Learned variant scored higher but early asymmetry vs anneal noted |
+| **v8** | Strong early `phase_delta_nominal` at git `2229f92`; cur0 vs cur1 | 2000 iters, `-5.0` strong stage (100 iters at this commit) | (TTL expired) | `57gr0muv` cur0, `v21878z8` cur1 | **94.22** / **100.48** | High flat reward but phase step → 0 too soon → v9 |
+| **v9** | Strong penalty **1000 iters**, `UPRIGHT_W=0.5`, + `clock_anneal` baseline | 3 jobs | (TTL expired) | `ift9sd2w` cur0, `ffcdmlkz` cur1, `xm5t9ilu` ca | **63.50** / **41.51** / **14.50** | cur0 selected for v10; empty-env + curriculum-order bugs fixed mid-batch |
+| **v10** | (A) hard resume from v9 cur0; (B) flat hs-critic retrain | `TRAINING_REGIME=hard_continue`, `CRITIC_HEIGHT_SCAN` true/false | `mj-gs-v10-cl-cur0-hs` (cont jobs removed) | hs: `yz5baxda`; cont attempts: `cxl0l9d8` (finished), `ukz6aprc`, `lhlbam8a` (crashed) | hs **72.07**; cont best finished **49.55** | Stage B succeeded; stage A resume unreliable |
+| **v11** | Overnight base→hard, 4 seeds, hs-critic | 4000 iters, `CONT_BASE_STEP=48000` | (TTL expired) | `16cbg6lm` s1 … `px06ulu0` s4 | **47.31** / **38.29** / **33.02** / **54.76** | Cadence collapsed ~iter 1000 when strong pd penalty ended |
+| **v12** | v11-like + **pd-tail** −0.2 vs −0.1 | 4000 iters | `mj-gs-v12-cl-pd-tail-0.2`, `…-0.1` | `lyhwmnll`, `260z9ekp` | **67.40** / **28.92** | Tail −0.2 clearly better |
+| **v13** | Low joule 1e-5 (learned base→hard) + v9-like `clock_anneal` 2k | 4000 / 2000 iters | `mj-gs-v13-cl-joule-1e5-pd01`, `mj-gs-v13-ca` | `l9wok1ss`, `ojozkbfs` | **68.98** / **54.99** | Low joule matches v12-quality learned hard run |
+| **v14** | `clock_anneal` base→hard single run, legacy critic | 4000 iters | `mj-gs-v14-ca-base-hard` | `jyksw3mg` | **33.43**, ep_len **913.16** | Hard regime hurt vs flat 2k anneal |
+| **v15** | v14 extended to **20k** iters, seeds 1–2 | `MAX_ITERATIONS=20000` | `mj-gs-v15-ca-base-hard-20k`, `…-s2` | `ynquy630` s1, `rntq7onj` s2 | **37.99** / **41.11** (running) | ~13.9k/20k iters at snapshot; hard ramp complete, holding |
 
-### v12
-
-v11-like base→hard with non-zero phase_delta_nominal tail: compare PHASE_DELTA_TAIL_W -0.2 vs -0.1 (seed 1).
+**Legacy job still on cluster:** `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` → W&B `ufk65r9v` (v3-era naming, 1250 iters, final summary reward **−0.17**). Pod logs at iter **1187/1250**: mean reward **−25.40** (in progress, not final).
 
-### v13
+---
 
-Lower joule (1e-5) on v12-like clock_learned base→hard (pd-tail -0.1) plus v9-equivalent clock_anneal flat baseline at JOULE_W=3e-4.
+## 3. Per-run sections
 
-### v14
+### v3 — initial matrix (`nugus_gridsearch_v3`)
 
-clock_anneal base→hard single-run (no resume), v11-style 4000 iters with legacy critic (no height_scan), seed 1.
+**Intention:** Compare gait strategies and stand-weight / phase-C timing on the original 12-cell grid.
 
-### v15
+**Config:** `MJLAB_VARIANT ∈ {clock_anneal, self_paced, clock_persist}`, `STAND_W ∈ {0.1, 0.3}`, `PHASE_C_FRAC ∈ {0.5, 0.7}`, `MAX_ITERATIONS=1250`.
 
-v14 clock_anneal base→hard extended to 20k iters; hard ramp in first ~3k iters then hold. seeds 1–2.
+**Notable runs (W&B final summaries):**
 
-## Per-run metrics
-
-### Batch v8
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__s1__v8`
-
-- **W&B:** [57gr0muv](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/57gr0muv)
-- **State:** finished
-- **Created:** 2026-07-01T05:14:37
-- **Tags:** batch-v8, clock_learned, current-0, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 94.22 |
-| `Train/mean_episode_length` | 991.77 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.000 |
-| `Metrics/phase_delta_mean` | 0.000 |
-| `Metrics/phase_delta_nominal_error_mean` | 1.065 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 0.997 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.017 |
-| `Episode_Reward/upright` | 0.954 |
-| `Episode_Reward/stand_still_pose` | -0.007 |
-| `Episode_Termination/fell_over` | 0.083 |
-| `Episode_Termination/time_out` | 8.125 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=92.74 (step 1995)
-- mean_reward max=95.40 (step 1954)
-- mean_episode_length last=979.38 (step 1995)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.034 |
-| `Episode_Reward/action_rate_l2` | -0.016 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.240 |
-| `Episode_Reward/body_ang_vel` | -0.003 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.043 |
-| `Episode_Reward/feet_distance` | -0.018 |
-| `Episode_Reward/foot_clearance` | -0.009 |
-| `Episode_Reward/foot_flat` | -0.001 |
-| `Episode_Reward/foot_slip` | -0.008 |
-| `Episode_Reward/foot_swing_height` | 1.200 |
-| `Episode_Reward/gait_phase_regularity` | -0.059 |
-| `Episode_Reward/joint_acc_l2` | -0.836 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.771 |
-| `Episode_Reward/soft_landing` | -0.005 |
-| `Episode_Reward/stand_still_motion` | -0.000 |
-| `Episode_Reward/termination_penalty` | -0.000 |
-| `Episode_Reward/torque_rate` | -0.011 |
-| `Episode_Reward/track_angular_velocity` | 1.633 |
-
-</details>
-
-#### `clock_learned__stand-0.15__pc-0.5__cur1__s1__v8`
-
-- **W&B:** [v21878z8](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/v21878z8)
-- **State:** finished
-- **Created:** 2026-07-01T05:14:46
-- **Tags:** batch-v8, clock_learned, current-1, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 100.48 |
-| `Train/mean_episode_length` | 997.29 |
-| `Metrics/phase_delta_nominal_ratio_mean` | -0.000 |
-| `Metrics/phase_delta_mean` | -0.000 |
-| `Metrics/phase_delta_nominal_error_mean` | 1.056 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 1.098 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.017 |
-| `Episode_Reward/upright` | 0.972 |
-| `Episode_Reward/stand_still_pose` | -0.008 |
-| `Episode_Termination/fell_over` | 0.042 |
-| `Episode_Termination/time_out` | 5.667 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=100.93 (step 1995)
-- mean_reward max=101.41 (step 1971)
-- mean_episode_length last=995.40 (step 1995)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.032 |
-| `Episode_Reward/action_rate_l2` | -0.015 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.240 |
-| `Episode_Reward/body_ang_vel` | -0.002 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.019 |
-| `Episode_Reward/feet_distance` | -0.015 |
-| `Episode_Reward/foot_clearance` | -0.014 |
-| `Episode_Reward/foot_flat` | -0.001 |
-| `Episode_Reward/foot_slip` | -0.013 |
-| `Episode_Reward/foot_swing_height` | 1.204 |
-| `Episode_Reward/gait_phase_regularity` | -0.064 |
-| `Episode_Reward/joint_acc_l2` | -0.731 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.722 |
-| `Episode_Reward/soft_landing` | -0.008 |
-| `Episode_Reward/stand_still_motion` | -0.000 |
-| `Episode_Reward/termination_penalty` | -0.000 |
-| `Episode_Reward/torque_rate` | -0.011 |
-| `Episode_Reward/track_angular_velocity` | 1.746 |
-
-</details>
-
-### Batch v9
-
-#### `clock_anneal__stand-0.15__pc-0.5__s1__v9`
-
-- **W&B:** [xm5t9ilu](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/xm5t9ilu)
-- **State:** finished
-- **Created:** 2026-07-01T07:16:11
-- **Tags:** batch-v9, clock_anneal, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15, upright-0.5
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 14.50 |
-| `Train/mean_episode_length` | 998.56 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 1.420 |
-| `Episode_Reward/foot_swing_height_landing` | -0.052 |
-| `Episode_Reward/joule_heating` | -0.072 |
-| `Episode_Reward/upright` | 0.481 |
-| `Episode_Reward/stand_still_pose` | -0.142 |
-| `Episode_Termination/fell_over` | 0.208 |
-| `Episode_Termination/time_out` | 7.792 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=14.93 (step 1995)
-- mean_reward max=59.43 (step 941)
-- mean_episode_length last=982.42 (step 1995)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.077 |
-| `Episode_Reward/action_rate_l2` | -0.039 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0.026 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.236 |
-| `Episode_Reward/body_ang_vel` | -0.004 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.221 |
-| `Episode_Reward/feet_distance` | -0.111 |
-| `Episode_Reward/foot_clearance` | -0.030 |
-| `Episode_Reward/foot_flat` | -0.003 |
-| `Episode_Reward/foot_slip` | -0.016 |
-| `Episode_Reward/foot_swing_height` | 0 |
-| `Episode_Reward/gait_phase_regularity` | -0.086 |
-| `Episode_Reward/joint_acc_l2` | -2.131 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.003 |
-| `Episode_Reward/soft_landing` | -0.012 |
-| `Episode_Reward/stand_still_motion` | -0.002 |
-| `Episode_Reward/termination_penalty` | -0.000 |
-| `Episode_Reward/torque_rate` | -0.022 |
-| `Episode_Reward/track_angular_velocity` | 1.586 |
-
-</details>
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__s1__v9`
-
-- **W&B:** [ift9sd2w](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/ift9sd2w)
-- **State:** finished
-- **Created:** 2026-07-01T07:26:56
-- **Tags:** batch-v9, clock_learned, current-0, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15, strong-1000, upright-0.5
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 63.50 |
-| `Train/mean_episode_length` | 981.91 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.664 |
-| `Metrics/phase_delta_mean` | 0.019 |
-| `Metrics/phase_delta_nominal_error_mean` | 0.482 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 1.344 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.050 |
-| `Episode_Reward/upright` | 0.477 |
-| `Episode_Reward/stand_still_pose` | -0.041 |
-| `Episode_Termination/fell_over` | 0.250 |
-| `Episode_Termination/time_out` | 8.417 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=65.03 (step 1995)
-- mean_reward max=68.09 (step 995)
-- mean_episode_length last=994.04 (step 1995)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.062 |
-| `Episode_Reward/action_rate_l2` | -0.033 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.243 |
-| `Episode_Reward/body_ang_vel` | -0.003 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.095 |
-| `Episode_Reward/feet_distance` | -0.137 |
-| `Episode_Reward/foot_clearance` | -0.026 |
-| `Episode_Reward/foot_flat` | -0.004 |
-| `Episode_Reward/foot_slip` | -0.013 |
-| `Episode_Reward/foot_swing_height` | 1.109 |
-| `Episode_Reward/gait_phase_regularity` | -0.074 |
-| `Episode_Reward/joint_acc_l2` | -1.163 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.146 |
-| `Episode_Reward/soft_landing` | -0.009 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.000 |
-| `Episode_Reward/torque_rate` | -0.015 |
-| `Episode_Reward/track_angular_velocity` | 1.597 |
-
-</details>
-
-#### `clock_learned__stand-0.15__pc-0.5__cur1__s1__v9`
-
-- **W&B:** [ffcdmlkz](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/ffcdmlkz)
-- **State:** finished
-- **Created:** 2026-07-01T08:36:40
-- **Tags:** batch-v9, clock_learned, current-1, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15, strong-1000, upright-0.5
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 41.51 |
-| `Train/mean_episode_length` | 985.12 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.609 |
-| `Metrics/phase_delta_mean` | 0.017 |
-| `Metrics/phase_delta_nominal_error_mean` | 0.276 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 1.301 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.062 |
-| `Episode_Reward/upright` | 0.471 |
-| `Episode_Reward/stand_still_pose` | -0.094 |
-| `Episode_Termination/fell_over` | 0.250 |
-| `Episode_Termination/time_out` | 9.917 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=41.50 (step 1995)
-- mean_reward max=68.95 (step 858)
-- mean_episode_length last=980.29 (step 1995)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.089 |
-| `Episode_Reward/action_rate_l2` | -0.043 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.236 |
-| `Episode_Reward/body_ang_vel` | -0.003 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.238 |
-| `Episode_Reward/feet_distance` | -0.124 |
-| `Episode_Reward/foot_clearance` | -0.022 |
-| `Episode_Reward/foot_flat` | -0.008 |
-| `Episode_Reward/foot_slip` | -0.010 |
-| `Episode_Reward/foot_swing_height` | 1.069 |
-| `Episode_Reward/gait_phase_regularity` | -0.078 |
-| `Episode_Reward/joint_acc_l2` | -1.831 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.004 |
-| `Episode_Reward/soft_landing` | -0.008 |
-| `Episode_Reward/stand_still_motion` | -0.002 |
-| `Episode_Reward/termination_penalty` | -0.000 |
-| `Episode_Reward/torque_rate` | -0.024 |
-| `Episode_Reward/track_angular_velocity` | 1.617 |
-
-</details>
-
-### Batch v10
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__hard-cont__v10`
-
-- **W&B:** [lhlbam8a](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/lhlbam8a)
-- **State:** crashed
-- **Created:** 2026-07-01T11:35:35
-- **Tags:** batch-v10, clock_learned, continuation, gridsearch, hard-continue, joule-3e-4, pc-0.5, seed-1, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 52.98 |
-| `Train/mean_episode_length` | 1000 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.001 |
-| `Metrics/phase_delta_mean` | 0.000 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 0.522 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.046 |
-| `Episode_Reward/upright` | 0.227 |
-| `Episode_Reward/stand_still_pose` | -0.017 |
-| `Episode_Termination/fell_over` | 0.208 |
-| `Episode_Termination/time_out` | 8.250 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=52.33 (step 3819)
-- mean_reward max=58.31 (step 2994)
-- mean_episode_length last=970.23 (step 3819)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.088 |
-| `Episode_Reward/action_rate_l2` | -0.041 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.242 |
-| `Episode_Reward/body_ang_vel` | -0.001 |
-| `Episode_Reward/command_progress_backslide` | -0.001 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.079 |
-| `Episode_Reward/feet_distance` | -0.072 |
-| `Episode_Reward/foot_clearance` | -0.003 |
-| `Episode_Reward/foot_flat` | -0.001 |
-| `Episode_Reward/foot_slip` | -0.003 |
-| `Episode_Reward/foot_swing_height` | 1.211 |
-| `Episode_Reward/gait_phase_regularity` | -0.069 |
-| `Episode_Reward/joint_acc_l2` | -1.043 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.545 |
-| `Episode_Reward/soft_landing` | -0.002 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.000 |
-| `Episode_Reward/torque_rate` | -0.015 |
-| `Episode_Reward/track_angular_velocity` | 1.358 |
-
-</details>
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__hs-critic__v10`
-
-- **W&B:** [yz5baxda](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/yz5baxda)
-- **State:** finished
-- **Created:** 2026-07-01T11:36:34
-- **Tags:** batch-v10, clock_learned, critic-height-scan, flat-retrain, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 72.07 |
-| `Train/mean_episode_length` | 1000 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.167 |
-| `Metrics/phase_delta_mean` | 0.005 |
-| `Metrics/phase_delta_nominal_error_mean` | 0.742 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 0.893 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.053 |
-| `Episode_Reward/upright` | 0.473 |
-| `Episode_Reward/stand_still_pose` | -0.017 |
-| `Episode_Termination/fell_over` | 0 |
-| `Episode_Termination/time_out` | 7.875 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=70.83 (step 1995)
-- mean_reward max=75.63 (step 997)
-- mean_episode_length last=982.09 (step 1995)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.057 |
-| `Episode_Reward/action_rate_l2` | -0.025 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.243 |
-| `Episode_Reward/body_ang_vel` | -0.002 |
-| `Episode_Reward/command_progress_backslide` | -0.011 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.126 |
-| `Episode_Reward/feet_distance` | -0.100 |
-| `Episode_Reward/foot_clearance` | -0.007 |
-| `Episode_Reward/foot_flat` | -0.001 |
-| `Episode_Reward/foot_slip` | -0.005 |
-| `Episode_Reward/foot_swing_height` | 1.188 |
-| `Episode_Reward/gait_phase_regularity` | -0.091 |
-| `Episode_Reward/joint_acc_l2` | -0.819 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.548 |
-| `Episode_Reward/soft_landing` | -0.004 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | 0 |
-| `Episode_Reward/torque_rate` | -0.014 |
-| `Episode_Reward/track_angular_velocity` | 1.611 |
-
-</details>
-
-### Batch v11
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__s1__v11`
-
-- **W&B:** [16cbg6lm](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/16cbg6lm)
-- **State:** finished
-- **Created:** 2026-07-01T12:50:26
-- **Tags:** base-hard, batch-v11, clock_learned, critic-height-scan, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 47.31 |
-| `Train/mean_episode_length` | 989.22 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.045 |
-| `Metrics/phase_delta_mean` | 0.001 |
-| `Metrics/phase_delta_nominal_error_mean` | 0.661 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 0.698 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.057 |
-| `Episode_Reward/upright` | 0.225 |
-| `Episode_Reward/stand_still_pose` | -0.075 |
-| `Episode_Termination/fell_over` | 0.667 |
-| `Episode_Termination/time_out` | 7.083 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=48.58 (step 3997)
-- mean_reward max=71.74 (step 997)
-- mean_episode_length last=969.13 (step 3997)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.106 |
-| `Episode_Reward/action_rate_l2` | -0.052 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.240 |
-| `Episode_Reward/body_ang_vel` | -0.001 |
-| `Episode_Reward/command_progress_backslide` | -0.001 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.054 |
-| `Episode_Reward/feet_distance` | -0.112 |
-| `Episode_Reward/foot_clearance` | -0.003 |
-| `Episode_Reward/foot_flat` | -0.001 |
-| `Episode_Reward/foot_slip` | -0.003 |
-| `Episode_Reward/foot_swing_height` | 1.189 |
-| `Episode_Reward/gait_phase_regularity` | -0.058 |
-| `Episode_Reward/joint_acc_l2` | -1.229 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.351 |
-| `Episode_Reward/soft_landing` | -0.002 |
-| `Episode_Reward/stand_still_motion` | -0.002 |
-| `Episode_Reward/termination_penalty` | -0.001 |
-| `Episode_Reward/torque_rate` | -0.018 |
-| `Episode_Reward/track_angular_velocity` | 1.455 |
-
-</details>
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__s2__v11`
-
-- **W&B:** [u5mbohzy](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/u5mbohzy)
-- **State:** finished
-- **Created:** 2026-07-01T12:59:02
-- **Tags:** base-hard, batch-v11, clock_learned, critic-height-scan, gridsearch, joule-3e-4, pc-0.5, seed-2, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 38.29 |
-| `Train/mean_episode_length` | 938.95 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.314 |
-| `Metrics/phase_delta_mean` | 0.009 |
-| `Metrics/phase_delta_nominal_error_mean` | 0.569 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 0.937 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.062 |
-| `Episode_Reward/upright` | 0.212 |
-| `Episode_Reward/stand_still_pose` | -0.064 |
-| `Episode_Termination/fell_over` | 1.458 |
-| `Episode_Termination/time_out` | 6.833 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=33.81 (step 3997)
-- mean_reward max=68.64 (step 985)
-- mean_episode_length last=854.25 (step 3997)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.114 |
-| `Episode_Reward/action_rate_l2` | -0.057 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.221 |
-| `Episode_Reward/body_ang_vel` | -0.002 |
-| `Episode_Reward/command_progress_backslide` | -0.018 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.117 |
-| `Episode_Reward/feet_distance` | -0.124 |
-| `Episode_Reward/foot_clearance` | -0.014 |
-| `Episode_Reward/foot_flat` | -0.004 |
-| `Episode_Reward/foot_slip` | -0.011 |
-| `Episode_Reward/foot_swing_height` | 1.065 |
-| `Episode_Reward/gait_phase_regularity` | -0.071 |
-| `Episode_Reward/joint_acc_l2` | -1.384 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.115 |
-| `Episode_Reward/soft_landing` | -0.007 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.002 |
-| `Episode_Reward/torque_rate` | -0.020 |
-| `Episode_Reward/track_angular_velocity` | 1.366 |
-
-</details>
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__s3__v11`
-
-- **W&B:** [4jx3q9es](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/4jx3q9es)
-- **State:** finished
-- **Created:** 2026-07-01T15:37:58
-- **Tags:** base-hard, batch-v11, clock_learned, critic-height-scan, gridsearch, joule-3e-4, pc-0.5, seed-3, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 33.02 |
-| `Train/mean_episode_length` | 890.23 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.247 |
-| `Metrics/phase_delta_mean` | 0.007 |
-| `Metrics/phase_delta_nominal_error_mean` | 0.369 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 0.842 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.084 |
-| `Episode_Reward/upright` | 0.215 |
-| `Episode_Reward/stand_still_pose` | -0.078 |
-| `Episode_Termination/fell_over` | 2.083 |
-| `Episode_Termination/time_out` | 6.833 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=35.20 (step 3997)
-- mean_reward max=72.06 (step 997)
-- mean_episode_length last=922.34 (step 3997)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.113 |
-| `Episode_Reward/action_rate_l2` | -0.054 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.214 |
-| `Episode_Reward/body_ang_vel` | -0.002 |
-| `Episode_Reward/command_progress_backslide` | -0.014 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.204 |
-| `Episode_Reward/feet_distance` | -0.107 |
-| `Episode_Reward/foot_clearance` | -0.010 |
-| `Episode_Reward/foot_flat` | -0.002 |
-| `Episode_Reward/foot_slip` | -0.008 |
-| `Episode_Reward/foot_swing_height` | 1.040 |
-| `Episode_Reward/gait_phase_regularity` | -0.073 |
-| `Episode_Reward/joint_acc_l2` | -1.307 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.088 |
-| `Episode_Reward/soft_landing` | -0.005 |
-| `Episode_Reward/stand_still_motion` | -0.002 |
-| `Episode_Reward/termination_penalty` | -0.002 |
-| `Episode_Reward/torque_rate` | -0.020 |
-| `Episode_Reward/track_angular_velocity` | 1.394 |
-
-</details>
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__s4__v11`
-
-- **W&B:** [px06ulu0](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/px06ulu0)
-- **State:** finished
-- **Created:** 2026-07-01T15:47:05
-- **Tags:** base-hard, batch-v11, clock_learned, critic-height-scan, gridsearch, joule-3e-4, pc-0.5, seed-4, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 54.76 |
-| `Train/mean_episode_length` | 943.24 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.055 |
-| `Metrics/phase_delta_mean` | 0.002 |
-| `Metrics/phase_delta_nominal_error_mean` | 0.899 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 0.685 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.055 |
-| `Episode_Reward/upright` | 0.215 |
-| `Episode_Reward/stand_still_pose` | -0.017 |
-| `Episode_Termination/fell_over` | 0.958 |
-| `Episode_Termination/time_out` | 7.583 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=57.48 (step 3997)
-- mean_reward max=76.29 (step 2231)
-- mean_episode_length last=965.96 (step 3997)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.121 |
-| `Episode_Reward/action_rate_l2` | -0.057 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.231 |
-| `Episode_Reward/body_ang_vel` | -0.001 |
-| `Episode_Reward/command_progress_backslide` | -0.000 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.117 |
-| `Episode_Reward/feet_distance` | -0.077 |
-| `Episode_Reward/foot_clearance` | -0.002 |
-| `Episode_Reward/foot_flat` | -0.001 |
-| `Episode_Reward/foot_slip` | -0.002 |
-| `Episode_Reward/foot_swing_height` | 1.143 |
-| `Episode_Reward/gait_phase_regularity` | -0.057 |
-| `Episode_Reward/joint_acc_l2` | -0.973 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.542 |
-| `Episode_Reward/soft_landing` | -0.002 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.001 |
-| `Episode_Reward/torque_rate` | -0.015 |
-| `Episode_Reward/track_angular_velocity` | 1.468 |
-
-</details>
-
-### Batch v12
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__pd-tail-0.2__s1__v12`
-
-- **W&B:** [lyhwmnll](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/lyhwmnll)
-- **State:** finished
-- **Created:** 2026-07-02T00:31:24
-- **Tags:** base-hard, batch-v12, clock_learned, critic-height-scan, gridsearch, joule-3e-4, pc-0.5, pd-tail-0.2, seed-1, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 67.40 |
-| `Train/mean_episode_length` | 992.09 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.218 |
-| `Metrics/phase_delta_mean` | 0.006 |
-| `Metrics/phase_delta_nominal_error_mean` | 0.923 |
-| `Episode_Reward/phase_delta_nominal` | -0.146 |
-| `Episode_Reward/track_linear_velocity` | 0.834 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.014 |
-| `Episode_Reward/upright` | 0.212 |
-| `Episode_Reward/stand_still_pose` | -0.009 |
-| `Episode_Termination/fell_over` | 0.125 |
-| `Episode_Termination/time_out` | 8.500 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=67.79 (step 3997)
-- mean_reward max=82.99 (step 995)
-- mean_episode_length last=995.49 (step 3997)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.045 |
-| `Episode_Reward/action_rate_l2` | -0.020 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.239 |
-| `Episode_Reward/body_ang_vel` | -0.001 |
-| `Episode_Reward/command_progress_backslide` | -0.010 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.018 |
-| `Episode_Reward/feet_distance` | -0.026 |
-| `Episode_Reward/foot_clearance` | -0.008 |
-| `Episode_Reward/foot_flat` | -0.001 |
-| `Episode_Reward/foot_slip` | -0.006 |
-| `Episode_Reward/foot_swing_height` | 1.149 |
-| `Episode_Reward/gait_phase_regularity` | -0.071 |
-| `Episode_Reward/joint_acc_l2` | -1.040 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.794 |
-| `Episode_Reward/soft_landing` | -0.004 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.000 |
-| `Episode_Reward/torque_rate` | -0.016 |
-| `Episode_Reward/track_angular_velocity` | 1.554 |
-
-</details>
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__pd-tail-0.1__s1__v12`
-
-- **W&B:** [260z9ekp](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/260z9ekp)
-- **State:** finished
-- **Created:** 2026-07-02T00:31:28
-- **Tags:** base-hard, batch-v12, clock_learned, critic-height-scan, gridsearch, joule-3e-4, pc-0.5, pd-tail-0.1, seed-1, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 28.92 |
-| `Train/mean_episode_length` | 867.41 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.298 |
-| `Metrics/phase_delta_mean` | 0.009 |
-| `Metrics/phase_delta_nominal_error_mean` | 0.958 |
-| `Episode_Reward/phase_delta_nominal` | -0.067 |
-| `Episode_Reward/track_linear_velocity` | 0.821 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.082 |
-| `Episode_Reward/upright` | 0.197 |
-| `Episode_Reward/stand_still_pose` | -0.092 |
-| `Episode_Termination/fell_over` | 2.750 |
-| `Episode_Termination/time_out` | 6.917 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=27.89 (step 3997)
-- mean_reward max=68.75 (step 994)
-- mean_episode_length last=873.28 (step 3997)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.106 |
-| `Episode_Reward/action_rate_l2` | -0.048 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.210 |
-| `Episode_Reward/body_ang_vel` | -0.002 |
-| `Episode_Reward/command_progress_backslide` | -0.016 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.366 |
-| `Episode_Reward/feet_distance` | -0.113 |
-| `Episode_Reward/foot_clearance` | -0.012 |
-| `Episode_Reward/foot_flat` | -0.003 |
-| `Episode_Reward/foot_slip` | -0.008 |
-| `Episode_Reward/foot_swing_height` | 1.006 |
-| `Episode_Reward/gait_phase_regularity` | -0.068 |
-| `Episode_Reward/joint_acc_l2` | -1.149 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.039 |
-| `Episode_Reward/soft_landing` | -0.005 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.003 |
-| `Episode_Reward/torque_rate` | -0.021 |
-| `Episode_Reward/track_angular_velocity` | 1.294 |
-
-</details>
-
-### Batch v13
-
-#### `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__pd-tail-0.1__joule-1e-5__s1__v13`
-
-- **W&B:** [l9wok1ss](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/l9wok1ss)
-- **State:** finished
-- **Created:** 2026-07-02T05:09:43
-- **Tags:** base-hard, batch-v13, clock_learned, critic-height-scan, gridsearch, joule-1e-5, pc-0.5, pd-tail-0.1, seed-1, stand-0.15
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 68.98 |
-| `Train/mean_episode_length` | 987.42 |
-| `Metrics/phase_delta_nominal_ratio_mean` | 0.054 |
-| `Metrics/phase_delta_mean` | 0.002 |
-| `Metrics/phase_delta_nominal_error_mean` | 1.090 |
-| `Episode_Reward/phase_delta_nominal` | -0.086 |
-| `Episode_Reward/track_linear_velocity` | 0.725 |
-| `Episode_Reward/foot_swing_height_landing` | 0 |
-| `Episode_Reward/joule_heating` | -0.000 |
-| `Episode_Reward/upright` | 0.211 |
-| `Episode_Reward/stand_still_pose` | -0.008 |
-| `Episode_Termination/fell_over` | 0.250 |
-| `Episode_Termination/time_out` | 8.333 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=69.94 (step 3997)
-- mean_reward max=84.65 (step 994)
-- mean_episode_length last=1000 (step 3997)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.046 |
-| `Episode_Reward/action_rate_l2` | -0.021 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.236 |
-| `Episode_Reward/body_ang_vel` | -0.001 |
-| `Episode_Reward/command_progress_backslide` | -0.001 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.023 |
-| `Episode_Reward/feet_distance` | -0.021 |
-| `Episode_Reward/foot_clearance` | -0.003 |
-| `Episode_Reward/foot_flat` | -0.001 |
-| `Episode_Reward/foot_slip` | -0.002 |
-| `Episode_Reward/foot_swing_height` | 1.173 |
-| `Episode_Reward/gait_phase_regularity` | -0.061 |
-| `Episode_Reward/joint_acc_l2` | -0.956 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.794 |
-| `Episode_Reward/soft_landing` | -0.002 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.000 |
-| `Episode_Reward/torque_rate` | -0.015 |
-| `Episode_Reward/track_angular_velocity` | 1.492 |
-
-</details>
-
-#### `clock_anneal__stand-0.15__pc-0.5__s1__v13`
-
-- **W&B:** [ojozkbfs](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/ojozkbfs)
-- **State:** finished
-- **Created:** 2026-07-02T05:09:25
-- **Tags:** batch-v13, clock_anneal, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15, upright-0.5
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 54.99 |
-| `Train/mean_episode_length` | 984.77 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 1.505 |
-| `Episode_Reward/foot_swing_height_landing` | -0.053 |
-| `Episode_Reward/joule_heating` | -0.021 |
-| `Episode_Reward/upright` | 0.485 |
-| `Episode_Reward/stand_still_pose` | -0.033 |
-| `Episode_Termination/fell_over` | 0.167 |
-| `Episode_Termination/time_out` | 6.500 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=56.11 (step 1995)
-- mean_reward max=69.57 (step 995)
-- mean_episode_length last=1000 (step 1995)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.015 |
-| `Episode_Reward/action_rate_l2` | -0.010 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0.023 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.240 |
-| `Episode_Reward/body_ang_vel` | -0.003 |
-| `Episode_Reward/command_progress_backslide` | -0.051 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.041 |
-| `Episode_Reward/feet_distance` | -0.096 |
-| `Episode_Reward/foot_clearance` | -0.031 |
-| `Episode_Reward/foot_flat` | -0.003 |
-| `Episode_Reward/foot_slip` | -0.018 |
-| `Episode_Reward/foot_swing_height` | 0 |
-| `Episode_Reward/gait_phase_regularity` | -0.076 |
-| `Episode_Reward/joint_acc_l2` | -1.072 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.410 |
-| `Episode_Reward/soft_landing` | -0.011 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.000 |
-| `Episode_Reward/torque_rate` | -0.014 |
-| `Episode_Reward/track_angular_velocity` | 1.640 |
-
-</details>
-
-### Batch v14
-
-#### `clock_anneal__stand-0.15__pc-0.5__base-hard__s1__v14`
-
-- **W&B:** [jyksw3mg](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/jyksw3mg)
-- **State:** finished
-- **Created:** 2026-07-02T08:44:02
-- **Tags:** base-hard, batch-v14, clock_anneal, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15, upright-0.5
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 33.43 |
-| `Train/mean_episode_length` | 913.16 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 1.190 |
-| `Episode_Reward/foot_swing_height_landing` | -0.036 |
-| `Episode_Reward/joule_heating` | -0.044 |
-| `Episode_Reward/upright` | 0.201 |
-| `Episode_Reward/stand_still_pose` | -0.016 |
-| `Episode_Termination/fell_over` | 1.083 |
-| `Episode_Termination/time_out` | 7.208 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=36.11 (step 3997)
-- mean_reward max=71.79 (step 994)
-- mean_episode_length last=965.24 (step 3997)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.050 |
-| `Episode_Reward/action_rate_l2` | -0.025 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0.017 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.227 |
-| `Episode_Reward/body_ang_vel` | -0.002 |
-| `Episode_Reward/command_progress_backslide` | -0.042 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.053 |
-| `Episode_Reward/feet_distance` | -0.081 |
-| `Episode_Reward/foot_clearance` | -0.025 |
-| `Episode_Reward/foot_flat` | -0.004 |
-| `Episode_Reward/foot_slip` | -0.016 |
-| `Episode_Reward/foot_swing_height` | 0 |
-| `Episode_Reward/gait_phase_regularity` | -0.066 |
-| `Episode_Reward/joint_acc_l2` | -1.298 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.472 |
-| `Episode_Reward/soft_landing` | -0.009 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.001 |
-| `Episode_Reward/torque_rate` | -0.017 |
-| `Episode_Reward/track_angular_velocity` | 1.379 |
-
-</details>
-
-### Batch v15
-
-#### `clock_anneal__stand-0.15__pc-0.5__base-hard__20k__s1__v15`
-
-- **W&B:** [ynquy630](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/ynquy630)
-- **State:** running
-- **Created:** 2026-07-02T14:44:45
-- **Tags:** 20k, base-hard, batch-v15, clock_anneal, gridsearch, joule-3e-4, pc-0.5, seed-1, stand-0.15, upright-0.5
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 37.62 |
-| `Train/mean_episode_length` | 955.97 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 1.254 |
-| `Episode_Reward/foot_swing_height_landing` | -0.025 |
-| `Episode_Reward/joule_heating` | -0.057 |
-| `Episode_Reward/upright` | 0.212 |
-| `Episode_Reward/stand_still_pose` | -0.022 |
-| `Episode_Termination/fell_over` | 0.750 |
-| `Episode_Termination/time_out` | 7.792 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=38.09 (step 14657)
-- mean_reward max=67.77 (step 980)
-- mean_episode_length last=964.14 (step 14657)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.093 |
-| `Episode_Reward/action_rate_l2` | -0.057 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0.016 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.225 |
-| `Episode_Reward/body_ang_vel` | -0.002 |
-| `Episode_Reward/command_progress_backslide` | -0.037 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.111 |
-| `Episode_Reward/feet_distance` | -0.095 |
-| `Episode_Reward/foot_clearance` | -0.023 |
-| `Episode_Reward/foot_flat` | -0.006 |
-| `Episode_Reward/foot_slip` | -0.012 |
-| `Episode_Reward/foot_swing_height` | 0 |
-| `Episode_Reward/gait_phase_regularity` | -0.064 |
-| `Episode_Reward/joint_acc_l2` | -1.107 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.445 |
-| `Episode_Reward/soft_landing` | -0.007 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.001 |
-| `Episode_Reward/torque_rate` | -0.014 |
-| `Episode_Reward/track_angular_velocity` | 1.468 |
-
-</details>
-
-#### `clock_anneal__stand-0.15__pc-0.5__base-hard__20k__s2__v15`
-
-- **W&B:** [rntq7onj](https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/rntq7onj)
-- **State:** running
-- **Created:** 2026-07-02T14:46:14
-- **Tags:** 20k, base-hard, batch-v15, clock_anneal, gridsearch, joule-3e-4, pc-0.5, seed-2, stand-0.15, upright-0.5
-
-| Metric | Summary (last logged) |
-| --- | ---: |
-| `Train/mean_reward` | 39.97 |
-| `Train/mean_episode_length` | 955.63 |
-| `Episode_Reward/phase_delta_nominal` | 0 |
-| `Episode_Reward/track_linear_velocity` | 1.223 |
-| `Episode_Reward/foot_swing_height_landing` | -0.024 |
-| `Episode_Reward/joule_heating` | -0.046 |
-| `Episode_Reward/upright` | 0.213 |
-| `Episode_Reward/stand_still_pose` | -0.019 |
-| `Episode_Termination/fell_over` | 1.125 |
-| `Episode_Termination/time_out` | 7.167 |
-
-**Training trajectory (`Train/mean_reward`, `Train/mean_episode_length`):**
-
-- mean_reward last=40.38 (step 14657)
-- mean_reward max=70.75 (step 980)
-- mean_episode_length last=959.99 (step 14657)
-
-<details><summary>Other episode reward summaries</summary>
-
-| Metric | Value |
-| --- | ---: |
-| `Episode_Reward/action_acc_l2` | -0.056 |
-| `Episode_Reward/action_rate_l2` | -0.041 |
-| `Episode_Reward/actuation_power` | 0 |
-| `Episode_Reward/air_time` | 0.015 |
-| `Episode_Reward/angular_momentum` | -0.000 |
-| `Episode_Reward/base_height` | 0.225 |
-| `Episode_Reward/body_ang_vel` | -0.002 |
-| `Episode_Reward/command_progress_backslide` | -0.042 |
-| `Episode_Reward/cot_proxy` | 0 |
-| `Episode_Reward/dof_pos_limits` | -0.054 |
-| `Episode_Reward/feet_distance` | -0.091 |
-| `Episode_Reward/foot_clearance` | -0.021 |
-| `Episode_Reward/foot_flat` | -0.006 |
-| `Episode_Reward/foot_slip` | -0.012 |
-| `Episode_Reward/foot_swing_height` | 0 |
-| `Episode_Reward/gait_phase_regularity` | -0.065 |
-| `Episode_Reward/joint_acc_l2` | -1.139 |
-| `Episode_Reward/limb_symmetry` | 0 |
-| `Episode_Reward/pose` | 0.465 |
-| `Episode_Reward/soft_landing` | -0.007 |
-| `Episode_Reward/stand_still_motion` | -0.001 |
-| `Episode_Reward/termination_penalty` | -0.001 |
-| `Episode_Reward/torque_rate` | -0.015 |
-| `Episode_Reward/track_angular_velocity` | 1.465 |
-
-</details>
-
-## Cross-batch comparison (`Train/mean_reward`, summary last)
-
-| Batch | Run | State | mean_reward | episode_length | phase_delta_nominal_ratio |
-| --- | --- | --- | ---: | ---: | ---: |
-| v8 | `clock_learned__stand-0.15__pc-0.5__cur0__s1__v8` | finished | 94.22 | 991.77 | 0.000 |
-| v8 | `clock_learned__stand-0.15__pc-0.5__cur1__s1__v8` | finished | 100.48 | 997.29 | -0.000 |
-| v9 | `clock_anneal__stand-0.15__pc-0.5__s1__v9` | finished | 14.50 | 998.56 | — |
-| v9 | `clock_learned__stand-0.15__pc-0.5__cur0__s1__v9` | finished | 63.50 | 981.91 | 0.664 |
-| v9 | `clock_learned__stand-0.15__pc-0.5__cur1__s1__v9` | finished | 41.51 | 985.12 | 0.609 |
-| v10 | `clock_learned__stand-0.15__pc-0.5__cur0__hard-cont__v10` | crashed | 52.98 | 1000 | 0.001 |
-| v10 | `clock_learned__stand-0.15__pc-0.5__cur0__hs-critic__v10` | finished | 72.07 | 1000 | 0.167 |
-| v11 | `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__s1__v11` | finished | 47.31 | 989.22 | 0.045 |
-| v11 | `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__s2__v11` | finished | 38.29 | 938.95 | 0.314 |
-| v11 | `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__s3__v11` | finished | 33.02 | 890.23 | 0.247 |
-| v11 | `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__s4__v11` | finished | 54.76 | 943.24 | 0.055 |
-| v12 | `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__pd-tail-0.2__s1__v12` | finished | 67.40 | 992.09 | 0.218 |
-| v12 | `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__pd-tail-0.1__s1__v12` | finished | 28.92 | 867.41 | 0.298 |
-| v13 | `clock_learned__stand-0.15__pc-0.5__cur0__hs__base-hard__pd-tail-0.1__joule-1e-5__s1__v13` | finished | 68.98 | 987.42 | 0.054 |
-| v13 | `clock_anneal__stand-0.15__pc-0.5__s1__v13` | finished | 54.99 | 984.77 | — |
-| v14 | `clock_anneal__stand-0.15__pc-0.5__base-hard__s1__v14` | finished | 33.43 | 913.16 | — |
-| v15 | `clock_anneal__stand-0.15__pc-0.5__base-hard__20k__s1__v15` | running | 37.62 | 955.97 | — |
-| v15 | `clock_anneal__stand-0.15__pc-0.5__base-hard__20k__s2__v15` | running | 39.97 | 955.63 | — |
-
-## Duplicate / superseded attempts
-
-- **`clock_learned__stand-0.15__pc-0.5__cur0__hard-cont__v10`** (3 attempts): finished [cxl0l9d8], crashed [ukz6aprc], crashed [lhlbam8a]
-- **`clock_learned__stand-0.15__pc-0.5__cur0__hs-critic__v10`** (3 attempts): finished [1tdz3rjv], crashed [h8hszyrf], finished [yz5baxda]
+| Run ID | Variant | STAND_W | pc | Mean reward | Ep len |
+|--------|---------|---------|-----|-------------|--------|
+| `76kregdc` | clock_anneal | 0.1 | 0.5 | 72.74 | 1000 |
+| `7fivy5q7` | clock_anneal | 0.1 | 0.5 | 59.91 | 994.62 |
+| `eyiowvgo` | clock_anneal | 0.3 | 0.5 | 65.08 | 1000 |
+| `espatus7` | clock_anneal | 0.3 | 0.5 | 87.46 | 994.29 | state: crashed |
+
+**Outcome:** `clock_anneal` at pc-0.5 outperformed `self_paced` / `clock_persist`. pc-0.7 and higher stand weights were deprioritized in later batches.
+
+---
+
+### v4 — continuation (failed)
+
+**Intention:** Add 750 iters to the two best v3 `clock_anneal` pc-0.5 runs (`7fivy5q7`, `eyiowvgo`) with frozen phase boundaries.
+
+**Config:** `RESUME=true`, `WANDB_RUN_PATH` set per cell, `MAX_ITERATIONS=1250` (additive).
+
+**Metrics:** not retrieved — jobs failed before W&B run creation.
+
+---
+
+### v5 — current obs × clock silence
+
+**Intention:** Test actuator-current observations and silencing the gait-clock observation on `clock_anneal`.
+
+| Run ID | CURRENT_OBS | SILENCE_CLOCK | Mean reward | Ep len |
+|--------|-------------|---------------|-------------|--------|
+| `t4sv9kq2` | 0 | 0 | 69.13 | 1000 |
+| `x51sayjr` | 0 | 1 | 74.48 | 1000 |
+| `l9c9iicz` | 1 | 0 | **78.40** | 997.73 |
+| `u5sc6wum` | 1 | 1 | 77.73 | 1000 |
+
+---
+
+### v6 — rapid command resampling
+
+**Intention:** A/B `RESAMPLE_MIN` 3.0 vs 0.0 s on `clock_anneal`.
+
+**Metrics:** not retrieved — no `batch-v6` W&B runs found.
+
+---
+
+### v7 — clock_learned vs clock_anneal
+
+| Run ID | Variant | Mean reward | Ep len | pd_ratio |
+|--------|---------|-------------|--------|----------|
+| `19jgdqlx` | clock_learned | **93.19** | 992.89 | 0.00023 |
+| `j8r4iqmi` | clock_anneal | 63.25 | 995.66 | — |
+
+**Note:** High learned reward partly reflects different early obs/reward structure (policy-owned phase vs teacher clock), not apples-to-apples locomotion quality.
+
+---
+
+### v8 — strong early penalty (commit `2229f92`)
+
+**Intention:** Pin `2229f92` (−5.0 nominal penalty for first **100** iters); compare `CURRENT_OBS` 0 vs 1.
+
+| Run ID | CURRENT_OBS | Mean reward | Ep len | pd_ratio |
+|--------|-------------|-------------|--------|----------|
+| `57gr0muv` | 0 | 94.22 | 991.77 | 0.000074 |
+| `v21878z8` | 1 | **100.48** | 997.29 | −0.00012 |
+
+**Observation:** Policy still drove phase step toward zero after the short strong window → motivated v9 (1000-iter strong stage).
+
+---
+
+### v9 — extended strong penalty + upright cut
+
+**Intention:** `PHASE_DELTA_STRONG_ITERS=1000`, `UPRIGHT_W=0.5`, `PROGRESS_BACKSLIDE_W=-0.5`; three cells: learned cur0/cur1 + `clock_anneal`.
+
+| Run ID | Cell | Mean reward | Ep len | pd_ratio |
+|--------|------|-------------|--------|----------|
+| `ift9sd2w` | cl cur0 | **63.50** | 981.91 | **0.664** |
+| `ffcdmlkz` | cl cur1 | 41.51 | 985.12 | 0.609 |
+| `xm5t9ilu` | ca | 14.50 | 998.56 | — |
+
+**Trajectory (kubectl / W&B):** User-selected base for harder training: `2026-07-01_07-25-50_clock_learned__stand-0.15__pc-0.5__cur0__s1__v9`.
+
+---
+
+### v10 — hard continuation + hs-critic retrain
+
+**Intention:**
+
+- **Stage A:** `RESUME=true` from v9 cur0 (`ift9sd2w`), `TRAINING_REGIME=hard_continue`, legacy critic, +2000 iters.
+- **Stage B:** Fresh v9-equivalent train with `CRITIC_HEIGHT_SCAN=true`.
+
+| Run ID | Stage | State | Mean reward | Ep len | pd_ratio |
+|--------|-------|-------|-------------|--------|----------|
+| `cxl0l9d8` | A cont (early) | finished | 49.55 | 964.99 | 0.042 |
+| `ukz6aprc` | A cont retry | crashed | 58.73 | 989.09 | 0.376 |
+| `lhlbam8a` | A cont retry | crashed | 52.98 | 1000 | 0.0013 |
+| `yz5baxda` | B hs-critic | finished | **72.07** | 1000 | 0.167 |
+
+**K8s:** `mj-gs-v10-cl-cur0-hs` — pod **Succeeded** (2000/2000); vcjob status may still show Running until TTL.
+
+**Stage B trajectory (kubectl logs):** iter 1999/2000 — mean reward **72.07**, ep_len **1000.00**; `track_linear_velocity` episode reward **1.41** at last log block.
+
+---
+
+### v11 — overnight base→hard (4 seeds)
+
+**Intention:** Single 4000-iter run: base for 2000 iters then `hard_continue` without resume; hs-critic.
+
+| Seed | Run ID | Mean reward | Ep len | pd_ratio |
+|------|--------|-------------|--------|----------|
+| 1 | `16cbg6lm` | 47.31 | 989.22 | 0.045 |
+| 2 | `u5mbohzy` | 38.29 | 938.95 | 0.314 |
+| 3 | `4jx3q9es` | 33.02 | 890.23 | 0.247 |
+| 4 | `px06ulu0` | **54.76** | 943.24 | 0.055 |
+
+**Issue:** Performance strong until ~iter 1000, then cadence slowed when `phase_delta_nominal` strong stage ended → v12 tail penalty.
+
+---
+
+### v12 — phase-delta tail weights
+
+**Intention:** Same as v11 but `PHASE_DELTA_TAIL_W ∈ {-0.2, -0.1}` after 1000-iter strong start.
+
+| Tail | Run ID | Mean reward | Ep len | pd_ratio | K8s job |
+|------|--------|-------------|--------|----------|---------|
+| −0.2 | `lyhwmnll` | **67.40** | 992.09 | 0.218 | `mj-gs-v12-cl-pd-tail-0.2` Completed |
+| −0.1 | `260z9ekp` | 28.92 | 867.41 | 0.298 | `mj-gs-v12-cl-pd-tail-0.1` Completed |
+
+**Trajectory (kubectl, final iters):** pd-tail −0.1 iter 3999 — reward **28.92**, ep_len **867.41**; pd-tail −0.2 iter 3999 — reward **63.64**, ep_len **972.09** (log snapshot near end).
+
+---
+
+### v13 — joule 1e-5 + clock_anneal baseline
+
+| Cell | Run ID | Mean reward | Ep len | pd_ratio |
+|------|--------|-------------|--------|----------|
+| cl, joule 1e-5, pd-tail −0.1 | `l9wok1ss` | **68.98** | 987.42 | 0.054 |
+| ca, v9-like 2k | `ojozkbfs` | 54.99 | 984.77 | — |
+
+---
+
+### v14 — clock_anneal base→hard (4k)
+
+**Run:** `jyksw3mg` — mean reward **33.43**, ep_len **913.16** (final W&B).  
+**K8s:** `mj-gs-v14-ca-base-hard` Completed.
+
+**Interpretation:** Extending `clock_anneal` through hard_continue in one 4k run yielded lower total reward than flat 2k v13 ca (**54.99**), with shorter episodes.
+
+---
+
+### v15 — clock_anneal base→hard (20k, 2 seeds)
+
+**Intention:** Hold final hard parameters from ~iter 3000 through 20k for robustness / long-horizon behavior.
+
+| Seed | Run ID | W&B state | Mean reward (latest summary) | Ep len | Progress (kubectl) |
+|------|--------|-----------|-------------------------------|--------|---------------------|
+| 1 | `ynquy630` | running | 37.99 | 953.16 | iter **13885**/20000, log reward **36.24** |
+| 2 | `rntq7onj` | running | 41.11 | 966.15 | iter **13885**/20000, log reward **40.26** |
+
+**K8s:** `mj-gs-v15-ca-base-hard-20k`, `mj-gs-v15-ca-base-hard-20k-s2` — both **Running** (~9h age at snapshot).
+
+---
+
+## 4. Failures and fixes
+
+| Issue | Affected runs | Fix |
+|-------|---------------|-----|
+| **Resume CLI bug** — bare `--agent.resume` caused tyro to consume `--wandb-run-path` as the resume value | v4 (`mj-gs-v4-ca-*-cont`) | `entrypoint.sh`: `--agent.resume True`; cluster ConfigMap updated |
+| **Empty env vars** — `PHASE_DELTA_STRONG_W=""` etc. crashed import | v9 initial launch (all 3 jobs failed) | `_env_float`/`_env_int`/`_env_bool` treat `""` as unset; entrypoint skips empty exports; v9 re-queued |
+| **Curriculum stage ordering** — strong pd window to iter 1000 conflicted with short phase stages | v9 `clock_learned` jobs (2 failed, ca ok) | Curriculum ordering fix (`05bc2bd`); learned jobs re-queued |
+| **`command_progress_backslide` disabled** — `PROGRESS_BACKSLIDE_W` defaulted to 0, not wired in k8s | v3–v8 grid runs | Default **−0.5**; wired in template + v9+ generators |
+| **GIT_COMMIT pin not on remote** — shallow fetch by SHA failed | v10 early attempts (`6c77e8a` pin) | Push pin commits to `origin/add-phase-clock`; full 40-char SHA fetch in entrypoint |
+| **`actuator_torque_rate_l2` init crash** | Early grid jobs on `8caf573` | Fixed `dfcad18` / later branch tip |
+| **Resume + hard_continue unreliable** | v10 stage A (`cxl0l9d8`, `ukz6aprc`, `lhlbam8a`) | Pivoted to single-run base→hard (v11+); resume path still available but not used for mainline after v10 |
+| **Phase cadence collapse after iter 1000** | v11 all seeds | v12 `PHASE_DELTA_TAIL_W` non-zero tail; −0.2 best |
+| **v10 stage A unpushed pin / cluster apply** | First v10 cont + hs pair | Re-applied with remote SHAs; only hs job retained on cluster |
+
+---
+
+## 5. Current cluster status
+
+Snapshot: `kubectl get vcjob -n mjlab` on 2026-07-03.
+
+| vcjob | Status | Running pods | Notes |
+|-------|--------|--------------|-------|
+| `mj-gs-v10-cl-cur0-hs` | Running | 1 | Pod **Succeeded** (2000/2000 complete); vcjob may lag |
+| `mj-gs-v12-cl-pd-tail-0.1` | Completed | 0 | |
+| `mj-gs-v12-cl-pd-tail-0.2` | Completed | 0 | |
+| `mj-gs-v13-ca` | Completed | 0 | |
+| `mj-gs-v13-cl-joule-1e5-pd01` | Completed | 0 | |
+| `mj-gs-v14-ca-base-hard` | Completed | 0 | |
+| `mj-gs-v15-ca-base-hard-20k` | Running | 1 | seed 1, ~69% of 20k iters |
+| `mj-gs-v15-ca-base-hard-20k-s2` | Running | 1 | seed 2 |
+| `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` | Running | 1 | Legacy v3-era 1250-iter job (~95% complete in logs) |
+| `mjlab-train` | Completed | 0 | Non-grid job |
+
+Queue: all grid jobs on `mjlab-train`.
+
+---
+
+## 6. Data availability notes
+
+| Source | Status |
+|--------|--------|
+| W&B API | **Available** for batches v3, v5, v7–v15 (tag `batch-v*`). Final summaries used throughout §2–3. |
+| W&B API | **No runs** for v4, v6 (never completed / not launched). |
+| W&B history (per-iter curves) | **Not retrieved** — pandas unavailable in fetch environment; iteration snapshots from **kubectl logs** where cited. |
+| kubectl logs | **Available** for vcjobs still within TTL (~24h after finish) and all running pods. |
+| v8–v11 pods | **Expired** (TTL); metrics from W&B only. |
+
+---
+
+## 7. Quick reference — W&B URLs (batches v8–v15)
+
+| Batch | Run | URL |
+|-------|-----|-----|
+| v8 | cur0 `57gr0muv` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/57gr0muv |
+| v8 | cur1 `v21878z8` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/v21878z8 |
+| v9 | cur0 `ift9sd2w` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/ift9sd2w |
+| v9 | cur1 `ffcdmlkz` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/ffcdmlkz |
+| v9 | ca `xm5t9ilu` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/xm5t9ilu |
+| v10 | hs-critic `yz5baxda` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/yz5baxda |
+| v10 | hard-cont (finished) `cxl0l9d8` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/cxl0l9d8 |
+| v11 | seeds `16cbg6lm`, `u5mbohzy`, `4jx3q9es`, `px06ulu0` | /runs/16cbg6lm … /runs/px06ulu0 |
+| v12 | pd-tail −0.2 `lyhwmnll` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/lyhwmnll |
+| v12 | pd-tail −0.1 `260z9ekp` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/260z9ekp |
+| v13 | joule 1e-5 `l9wok1ss` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/l9wok1ss |
+| v13 | ca `ojozkbfs` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/ojozkbfs |
+| v14 | `jyksw3mg` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/jyksw3mg |
+| v15 | s1 `ynquy630` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/ynquy630 |
+| v15 | s2 `rntq7onj` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/rntq7onj |
