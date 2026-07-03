@@ -224,6 +224,7 @@ export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W PHASE_DELTA_TAIL_W UPRIGHT_
 export TRAINING_REGIME CONT_BASE_STEP CRITIC_HEIGHT_SCAN TASK HARD_COMPONENTS
 export SWING_TARGET_HEIGHT FLATTEN_PHASE_C PHASE_C_WARMUP ALIVE_W JOINT_ACC_W
 export FOOT_FLAT_W FOOT_FLAT_ONESIDED CLEARANCE_PER_CORNER SWING_HEIGHT_SOURCE
+export CLEARANCE_TARGET_HEIGHT CLEARANCE_TARGET_FROM_SWING PUSH_INTERVAL_SCALE
 export MIRROR_AUG TRACK_LIN_W TRACK_ANG_W AIR_TIME_W LR_CAP LR_CAP_START_ITER
 export ENTROPY_DECAY GAMMA
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
@@ -856,6 +857,47 @@ _wave1_base_exports() {
   export FOOT_FLAT_ONESIDED=""
   export CLEARANCE_PER_CORNER=""
   export SWING_HEIGHT_SOURCE="min_corner"
+  export CLEARANCE_TARGET_HEIGHT=""
+  export CLEARANCE_TARGET_FROM_SWING=""
+  export PUSH_INTERVAL_SCALE="1.0"
+}
+
+
+# Wave-1 integrator placeholder for BASE2 (R9 defaults until D1 retunes).
+_wave2_base_exports() {
+  _wave1_base_exports
+  export FOOT_FLAT_ONESIDED="1"
+  export CLEARANCE_PER_CORNER="1"
+  export SWING_HEIGHT_SOURCE="center"
+  export GAIT_PERIOD="0.85"
+  export SWING_TARGET_HEIGHT="0.065"
+  export JOINT_ACC_W="-1e-5"
+  export MAX_ITERATIONS="2000"
+  export GAMMA=""
+  export CLEARANCE_TARGET_FROM_SWING=""
+  export CLEARANCE_TARGET_HEIGHT=""
+  export PUSH_INTERVAL_SCALE="1.0"
+}
+
+
+# BASE3 placeholder: BASE2 + economy winner (ALIVE_W=0.25 until D2 retunes).
+_wave3_base_exports() {
+  _wave2_base_exports
+  export ALIVE_W="0.25"
+  export LINK_MASS_SCALE_MIN="0.90"
+  export LINK_MASS_SCALE_MAX="1.10"
+  export PAYLOAD_KG_MIN="-0.2"
+  export PAYLOAD_KG_MAX="0.2"
+}
+
+
+# FINAL placeholder for wave 4: BASE3 + wide DR (R14 winner until D3 retunes).
+_wave4_final_exports() {
+  _wave3_base_exports
+  export LINK_MASS_SCALE_MIN="0.85"
+  export LINK_MASS_SCALE_MAX="1.15"
+  export PAYLOAD_KG_MIN="-0.3"
+  export PAYLOAD_KG_MAX="0.5"
 }
 
 
@@ -911,6 +953,126 @@ gen_wave1() {
   export RUN_NAME="clock_persist__integrator__s1__${BATCH}"
   export WANDB_TAGS="clock_persist,integrator,heel-toe,gait-0.85,seed-1,gridsearch,batch-${BATCH},wave1,r9"
   emit_manifest "mj-gs-${BATCH}-r9-integrator"
+}
+
+
+# BATCH=wave2: economy + variance on BASE2 (R10–R13).
+gen_wave2() {
+  _wave2_base_exports
+
+  export SEED="1"
+  export ALIVE_W="0.5"
+  export RUN_NAME="clock_persist__base2-ref__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,base2,integrator,seed-1,gridsearch,batch-${BATCH},wave2,r10"
+  emit_manifest "mj-gs-${BATCH}-r10-base2-ref"
+
+  export SEED="2"
+  export RUN_NAME="clock_persist__base2-ref__s2__${BATCH}"
+  export WANDB_TAGS="clock_persist,base2,integrator,seed-2,gridsearch,batch-${BATCH},wave2,r11"
+  emit_manifest "mj-gs-${BATCH}-r11-base2-s2"
+
+  export SEED="1"
+  export MAX_ITERATIONS="1400"
+  export ALIVE_W="0.25"
+  export RUN_NAME="clock_persist__alive-0.25__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,alive-0.25,base2,seed-1,gridsearch,batch-${BATCH},wave2,r12"
+  emit_manifest "mj-gs-${BATCH}-r12-alive-025"
+
+  export ALIVE_W="0.5"
+  export AIR_TIME_W="0.25"
+  export CLEARANCE_TARGET_FROM_SWING="1"
+  export RUN_NAME="clock_persist__air-0.25__clearance-swing__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,air-0.25,clearance-swing,seed-1,gridsearch,batch-${BATCH},wave2,r13-airtime"
+  emit_manifest "mj-gs-${BATCH}-r13-airtime"
+
+  export AIR_TIME_W="0.15"
+  export CLEARANCE_TARGET_FROM_SWING=""
+  export GAMMA="0.97"
+  export RUN_NAME="clock_persist__gamma-0.97__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,gamma-0.97,base2,seed-1,gridsearch,batch-${BATCH},wave2,r13-gamma"
+  emit_manifest "mj-gs-${BATCH}-r13-gamma"
+}
+
+
+# BATCH=wave3: robustness + reach on BASE3 (R14–R17).
+gen_wave3() {
+  _wave3_base_exports
+
+  export SEED="1"
+  export MAX_ITERATIONS="2000"
+  export LINK_MASS_SCALE_MIN="0.85"
+  export LINK_MASS_SCALE_MAX="1.15"
+  export PAYLOAD_KG_MIN="-0.3"
+  export PAYLOAD_KG_MAX="0.5"
+  export RUN_NAME="clock_persist__wide-dr__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,wide-dr,base3,seed-1,gridsearch,batch-${BATCH},wave3,r14"
+  emit_manifest "mj-gs-${BATCH}-r14-wide-dr"
+
+  _wave3_base_exports
+  export SEED="1"
+  export MAX_ITERATIONS="2000"
+  export PUSH_INTERVAL_SCALE="1.5"
+  export RUN_NAME="clock_persist__push-interval-1.5__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,push-interval-1.5,base3,seed-1,gridsearch,batch-${BATCH},wave3,r15"
+  emit_manifest "mj-gs-${BATCH}-r15-push-interval"
+
+  _wave3_base_exports
+  export SEED="1"
+  export MAX_ITERATIONS="2000"
+  export MJLAB_VARIANT="self_paced"
+  export RUN_NAME="self_paced__base3-economy__s1__${BATCH}"
+  export WANDB_TAGS="self_paced,base3,alive-0.25,seed-1,gridsearch,batch-${BATCH},wave3,r16"
+  emit_manifest "mj-gs-${BATCH}-r16-self-paced"
+
+  _wave3_base_exports
+  export SEED="1"
+  export MAX_ITERATIONS="1400"
+  export GAMMA="0.97"
+  export RUN_NAME="clock_persist__gamma-0.97__backfill__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,gamma-0.97,backfill,seed-1,gridsearch,batch-${BATCH},wave3,r17-gamma"
+  emit_manifest "mj-gs-${BATCH}-r17-gamma"
+
+  export AIR_TIME_W="0.25"
+  export CLEARANCE_TARGET_FROM_SWING="1"
+  export GAMMA=""
+  export RUN_NAME="clock_persist__air-0.25__backfill__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,air-0.25,clearance-swing,backfill,seed-1,gridsearch,batch-${BATCH},wave3,r17-airtime"
+  emit_manifest "mj-gs-${BATCH}-r17-airtime"
+
+  export AIR_TIME_W="0.15"
+  export CLEARANCE_TARGET_FROM_SWING=""
+  export ALIVE_W="0.25"
+  export RUN_NAME="clock_persist__alive-0.25__backfill__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,alive-0.25,backfill,seed-1,gridsearch,batch-${BATCH},wave3,r17-alive"
+  emit_manifest "mj-gs-${BATCH}-r17-alive"
+}
+
+
+# BATCH=wave4: consolidation (R18–R20).
+gen_wave4() {
+  _wave4_final_exports
+
+  export SEED="1"
+  export MAX_ITERATIONS="4000"
+  export MJLAB_VARIANT="clock_persist"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export LR_CAP="3e-4"
+  export LR_CAP_START_ITER="1200"
+  export RUN_NAME="clock_persist__final__4k__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,final,4k,lr-cap,seed-1,gridsearch,batch-${BATCH},wave4,r18"
+  emit_manifest "mj-gs-${BATCH}-r18-final-4k"
+
+  export MAX_ITERATIONS="2000"
+  export SEED="3"
+  export RUN_NAME="clock_persist__final__s3__${BATCH}"
+  export WANDB_TAGS="clock_persist,final,seed-3,gridsearch,batch-${BATCH},wave4,r19"
+  emit_manifest "mj-gs-${BATCH}-r19-final-s3"
+
+  export SEED="1"
+  export TASK="Mjlab-Velocity-Rough-Nubots-Nugus"
+  export RUN_NAME="clock_persist__rough-taste__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,rough,final,seed-1,gridsearch,batch-${BATCH},wave4,r20"
+  emit_manifest "mj-gs-${BATCH}-r20-rough"
 }
 
 
@@ -1115,6 +1277,9 @@ case "$BATCH" in
   v16c) gen_v16c; expected=3 ;;
   v16d) gen_v16d; expected=3 ;;
   wave1) gen_wave1; expected=6 ;;
+  wave2) gen_wave2; expected=5 ;;
+  wave3) gen_wave3; expected=6 ;;
+  wave4) gen_wave4; expected=3 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

@@ -120,6 +120,12 @@ spec:
                   value: "${CLEARANCE_PER_CORNER}"
                 - name: SWING_HEIGHT_SOURCE
                   value: "${SWING_HEIGHT_SOURCE}"
+                - name: CLEARANCE_TARGET_HEIGHT
+                  value: "${CLEARANCE_TARGET_HEIGHT}"
+                - name: CLEARANCE_TARGET_FROM_SWING
+                  value: "${CLEARANCE_TARGET_FROM_SWING}"
+                - name: PUSH_INTERVAL_SCALE
+                  value: "${PUSH_INTERVAL_SCALE}"
                 - name: LR_CAP
                   value: "${LR_CAP}"
                 - name: LR_CAP_START_ITER

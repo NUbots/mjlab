@@ -696,6 +696,14 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "SWING_HEIGHT_SOURCE must be 'min_corner' or 'center'; "
       f"got {swing_height_source!r}"
     )
+  clearance_target_height = _env_float("CLEARANCE_TARGET_HEIGHT", 0.08)
+  if _env_bool("CLEARANCE_TARGET_FROM_SWING", default=False):
+    clearance_target_height = swing_target_height
+  push_interval_scale = _env_float("PUSH_INTERVAL_SCALE", 1.0)
+  if push_interval_scale <= 0:
+    raise ValueError(
+      f"PUSH_INTERVAL_SCALE must be positive; got {push_interval_scale!r}"
+    )
   critic_height_scan = _env_bool("CRITIC_HEIGHT_SCAN", default=False)
   training_regime = _env_str("TRAINING_REGIME", "base")
   resume_mode = _env_bool("RESUME", default=False)
@@ -1050,7 +1058,18 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # the logged reward value.
   cfg.rewards["foot_clearance"].params["power"] = 2
   cfg.rewards["foot_clearance"].params["only_below"] = True
+  cfg.rewards["foot_clearance"].params["target_height"] = clearance_target_height
   cfg.rewards["foot_clearance"].weight = -15.0  # Starting point; tune.
+
+  if push_interval_scale != 1.0 and "push_robot" in cfg.events:
+    push_event = cfg.events["push_robot"]
+    interval = push_event.interval_range_s
+    if interval is not None:
+      push_lo, push_hi = interval
+      push_event.interval_range_s = (
+        push_lo * push_interval_scale,
+        push_hi * push_interval_scale,
+      )
 
   # Independent gait-clock swing-height tracking (improved E2). A fixed-frequency
   # clock the policy does not control drives a desired per-foot swing arc, so the
