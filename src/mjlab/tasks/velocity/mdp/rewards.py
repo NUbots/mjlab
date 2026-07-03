@@ -369,85 +369,120 @@ def _swing_height_profile(
   raise ValueError(f"Unknown swing-height profile '{profile}'.")
 
 
-def feet_swing_height_clock(
-  env: ManagerBasedRlEnv,
-  height_sensor_name: str,
-  target_height: float,
-  period: float,
-  swing_ratio: float,
-  std: float,
-  foot_offsets: tuple[float, ...] = (0.0, 0.5),
-  profile: Literal["sin", "bump"] = "sin",
-  command_name: str | None = None,
-  command_threshold: float = 0.05,
-  phase_source: Literal["time", "policy"] = "time",
-  action_term_name: str = "phase_delta",
-) -> torch.Tensor:
+class feet_swing_height_clock:
   """Dense swing-height tracking against an *independent* gait clock.
 
   Unlike :class:`feet_swing_height` (sparse, scored once at landing) and unlike
   an air-time-driven phase (self-referential: the target adapts to whatever the
   foot does, so a quick low step always matches a low target), this term drives
   the desired height from a fixed-frequency clock that the policy does not
-  control. The clock advances with episode time and resets with the episode::
-
-      base_phase = (episode_time / period) mod 1
-      foot_phase = (base_phase + foot_offset) mod 1   # offsets put feet out of
-                                                      # phase, e.g. (0, 0.5)
-
-  Each foot's cycle is split into a swing window ``foot_phase < swing_ratio``
-  (desired height follows the lift-and-lower arc, see
-  :func:`_swing_height_profile`) and a stance window (desired height 0, i.e.
-  foot on the ground). The foot is scored every step by
-  ``exp(-(h - h_des)^2 / std^2)`` against its measured terrain clearance, summed
-  over feet. Because the target reaches ``target_height`` mid-swing regardless
-  of what the foot is doing, a foot that fails to lift on schedule is genuinely
-  penalized -- which is what forces a higher, slower step.
-
-  ``period`` is the full gait-cycle duration (both feet complete one
-  swing+stance); a larger ``period`` commands a slower cadence. Feed the same
-  clock to the policy as an observation (``mdp.gait_clock`` with a matching
-  ``period``) so it can act periodically.
+  control. Logs ``Metrics/peak_height_mean`` at foot landing (same as the sparse
+  landing term) when ``sensor_name`` is set.
   """
-  height_sensor = env.scene[height_sensor_name]
-  assert isinstance(height_sensor, TerrainHeightSensor), (
-    "feet_swing_height_clock requires a TerrainHeightSensor, got "
-    f"{type(height_sensor).__name__}"
-  )
 
-  foot_heights = height_sensor.data.heights  # [B, F]
-  num_feet = foot_heights.shape[1]
-  assert len(foot_offsets) == num_feet, (
-    f"foot_offsets has {len(foot_offsets)} entries but sensor reports {num_feet} feet."
-  )
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    height_sensor = env.scene[cfg.params["height_sensor_name"]]
+    assert isinstance(height_sensor, TerrainHeightSensor), (
+      "feet_swing_height_clock requires a TerrainHeightSensor, got "
+      f"{type(height_sensor).__name__}"
+    )
+    num_feet = height_sensor.num_frames
+    self.peak_heights = torch.zeros(
+      (env.num_envs, num_feet), device=env.device, dtype=torch.float32
+    )
+    self.step_dt = env.step_dt
+    sensor_name = cfg.params.get("sensor_name")
+    self._contact_sensor: ContactSensor | None = None
+    if sensor_name:
+      contact = env.scene[sensor_name]
+      assert isinstance(contact, ContactSensor), (
+        f"feet_swing_height_clock sensor_name must be a ContactSensor, got "
+        f"{type(contact).__name__}"
+      )
+      self._contact_sensor = contact
 
-  base_phase = _gait_base_phase(env, period, phase_source, action_term_name)  # [B]
-  offsets = torch.tensor(foot_offsets, device=env.device, dtype=foot_heights.dtype)
-  foot_phase = torch.remainder(base_phase[:, None] + offsets[None, :], 1.0)  # [B, F]
+  def reset(self, env_ids: torch.Tensor) -> None:
+    self.peak_heights[env_ids] = 0.0
 
-  in_swing = foot_phase < swing_ratio  # [B, F]
-  psi = torch.clamp(foot_phase / swing_ratio, 0.0, 1.0)  # [B, F]
-  arc = _swing_height_profile(psi, target_height, profile)  # [B, F]
-  desired = torch.where(in_swing, arc, torch.zeros_like(arc))  # [B, F]
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    height_sensor_name: str,
+    target_height: float,
+    period: float,
+    swing_ratio: float,
+    std: float,
+    foot_offsets: tuple[float, ...] = (0.0, 0.5),
+    profile: Literal["sin", "bump"] = "sin",
+    command_name: str | None = None,
+    command_threshold: float = 0.05,
+    phase_source: Literal["time", "policy"] = "time",
+    action_term_name: str = "phase_delta",
+    sensor_name: str | None = None,
+  ) -> torch.Tensor:
+    del sensor_name  # Resolved in __init__ from cfg.params.
+    height_sensor = env.scene[height_sensor_name]
+    assert isinstance(height_sensor, TerrainHeightSensor), (
+      "feet_swing_height_clock requires a TerrainHeightSensor, got "
+      f"{type(height_sensor).__name__}"
+    )
 
-  error = foot_heights - desired  # [B, F]
-  tracking = torch.exp(-torch.square(error) / std**2)  # [B, F]
-  reward = torch.sum(tracking, dim=1)  # [B]
+    foot_heights = height_sensor.data.heights  # [B, F]
+    num_feet = foot_heights.shape[1]
+    assert len(foot_offsets) == num_feet, (
+      f"foot_offsets has {len(foot_offsets)} entries but sensor reports {num_feet} feet."
+    )
 
-  if command_name is not None:
-    command = env.command_manager.get_command(command_name)
-    if command is not None:
-      linear_norm = torch.norm(command[:, :2], dim=1)
-      angular_norm = torch.abs(command[:, 2])
-      total_command = linear_norm + angular_norm
-      active = (total_command > command_threshold).float()
-      reward = reward * active
+    base_phase = _gait_base_phase(env, period, phase_source, action_term_name)  # [B]
+    offsets = torch.tensor(foot_offsets, device=env.device, dtype=foot_heights.dtype)
+    foot_phase = torch.remainder(base_phase[:, None] + offsets[None, :], 1.0)  # [B, F]
 
-  swing_mask = in_swing.float()
-  num_swing = torch.clamp(torch.sum(swing_mask), min=1.0)
-  mean_swing_error = torch.sum(torch.abs(error) * swing_mask) / num_swing
-  env.extras["log"]["Metrics/swing_clock_error_mean"] = mean_swing_error
-  return reward
+    in_swing = foot_phase < swing_ratio  # [B, F]
+    psi = torch.clamp(foot_phase / swing_ratio, 0.0, 1.0)  # [B, F]
+    arc = _swing_height_profile(psi, target_height, profile)  # [B, F]
+    desired = torch.where(in_swing, arc, torch.zeros_like(arc))  # [B, F]
+
+    error = foot_heights - desired  # [B, F]
+    tracking = torch.exp(-torch.square(error) / std**2)  # [B, F]
+    reward = torch.sum(tracking, dim=1)  # [B]
+
+    if command_name is not None:
+      command = env.command_manager.get_command(command_name)
+      if command is not None:
+        linear_norm = torch.norm(command[:, :2], dim=1)
+        angular_norm = torch.abs(command[:, 2])
+        total_command = linear_norm + angular_norm
+        active = (total_command > command_threshold).float()
+        reward = reward * active
+
+    swing_mask = in_swing.float()
+    num_swing = torch.clamp(torch.sum(swing_mask), min=1.0)
+    mean_swing_error = torch.sum(torch.abs(error) * swing_mask) / num_swing
+    env.extras["log"]["Metrics/swing_clock_error_mean"] = mean_swing_error
+
+    if self._contact_sensor is not None:
+      found = self._contact_sensor.data.found
+      assert found is not None
+      in_air = found.eq(0)
+      self.peak_heights = torch.where(
+        in_air,
+        torch.maximum(self.peak_heights, foot_heights),
+        self.peak_heights,
+      )
+      first_contact = self._contact_sensor.compute_first_contact(dt=self.step_dt)
+      peak_heights_at_landing = self.peak_heights * first_contact.float()
+      num_landings = torch.sum(first_contact.float())
+      mean_peak_height = torch.sum(peak_heights_at_landing) / torch.clamp(
+        num_landings, min=1
+      )
+      env.extras["log"]["Metrics/peak_height_mean"] = mean_peak_height
+      self.peak_heights = torch.where(
+        first_contact,
+        torch.zeros_like(self.peak_heights),
+        self.peak_heights,
+      )
+
+    return reward
 
 
 def phase_delta_nominal_cost(

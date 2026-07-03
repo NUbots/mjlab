@@ -206,6 +206,15 @@ def test_swing_height_profile_endpoints_and_peak():
     assert math.isclose(h[1].item(), 0.1, rel_tol=1e-6)
 
 
+def _instantiate_feet_swing_height_clock(env, **kwargs):
+  cfg = MagicMock()
+  cfg.params = {
+    "height_sensor_name": kwargs.get("height_sensor_name", "foot_height_scan"),
+    "sensor_name": kwargs.get("sensor_name"),
+  }
+  return feet_swing_height_clock(cfg=cfg, env=env)
+
+
 def _make_clock_env(heights: torch.Tensor, episode_step: int, command: torch.Tensor):
   """Mock env exposing just what feet_swing_height_clock reads."""
   height_sensor = MagicMock(spec=TerrainHeightSensor)
@@ -224,7 +233,7 @@ def _clock_reward(env):
   # period=0.8, step_dt=0.1, swing_ratio=0.5: at episode_step=2 the base phase is
   # 0.25, so foot 0 (offset 0) is mid-swing (psi=0.5, desired=target) and foot 1
   # (offset 0.5) is in stance (desired=0).
-  return feet_swing_height_clock(
+  return _instantiate_feet_swing_height_clock(env).__call__(
     env,
     height_sensor_name="foot_height_scan",
     target_height=0.1,

@@ -16,6 +16,15 @@ from mjlab.tasks.velocity.mdp.rewards import (
 )
 
 
+def _instantiate_feet_swing_height_clock(env, **kwargs):
+  cfg = MagicMock()
+  cfg.params = {
+    "height_sensor_name": kwargs.get("height_sensor_name", "foot_height_scan"),
+    "sensor_name": kwargs.get("sensor_name"),
+  }
+  return feet_swing_height_clock(cfg=cfg, env=env)
+
+
 def _make_phase_env(
   *,
   num_envs: int = 2,
@@ -132,7 +141,7 @@ def test_swing_height_clock_uses_policy_phase_not_time():
   height_sensor.data.heights = torch.zeros(1, 2)
   env.scene.__getitem__ = MagicMock(return_value=height_sensor)
 
-  reward_at_policy = feet_swing_height_clock(
+  reward_at_policy = _instantiate_feet_swing_height_clock(env).__call__(
     env,
     height_sensor_name="foot_height_scan",
     target_height=0.08,
@@ -144,7 +153,7 @@ def test_swing_height_clock_uses_policy_phase_not_time():
   )
 
   action._policy_phase[:] = 0.25
-  reward_shifted = feet_swing_height_clock(
+  reward_shifted = _instantiate_feet_swing_height_clock(env).__call__(
     env,
     height_sensor_name="foot_height_scan",
     target_height=0.08,

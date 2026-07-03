@@ -12,6 +12,7 @@ from tensordict import TensorDict
 
 from mjlab.asset_zoo.robots import NUGUS_MOTOR_JOINT_REGEX
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.sensor.raycast_sensor import GridPatternCfg, RayCastSensor
 from mjlab.tasks.velocity.config.nugus.dr_observations import DR_RATIOS_NUM_ACTUATORS
 
 if TYPE_CHECKING:
@@ -119,6 +120,23 @@ def _term_slices(
   return slices
 
 
+def _terrain_height_scan_grid_shape(env: ManagerBasedRlEnv) -> tuple[int, int] | None:
+  """Return ``(num_x, num_y)`` for the critic ``height_scan`` grid, if present."""
+  if "height_scan" not in env.observation_manager.active_terms["critic"]:
+    return None
+  sensor = env.scene["terrain_scan"]
+  if not isinstance(sensor, RayCastSensor):
+    return None
+  pattern = sensor.cfg.pattern
+  if not isinstance(pattern, GridPatternCfg):
+    return None
+  size_x, size_y = pattern.size
+  res = pattern.resolution
+  nx = int(round(size_x / res)) + 1
+  ny = int(round(size_y / res)) + 1
+  return nx, ny
+
+
 @dataclass
 class NugusMirrorMap:
   """Runtime mirror map built from live observation term ordering."""
@@ -130,6 +148,7 @@ class NugusMirrorMap:
   dr_joint_perm: torch.Tensor
   motor_joint_ids: torch.Tensor
   default_joint_pos: torch.Tensor
+  height_scan_grid: tuple[int, int] | None = None
 
   @classmethod
   def from_env(cls, env: ManagerBasedRlEnv) -> NugusMirrorMap:
@@ -163,6 +182,7 @@ class NugusMirrorMap:
       dr_joint_perm=dr_joint_perm,
       motor_joint_ids=torch.tensor(joint_ids, dtype=torch.long),
       default_joint_pos=default_joint_pos,
+      height_scan_grid=_terrain_height_scan_grid_shape(env),
     )
 
   def _mirror_base_ang_vel(self, obs: torch.Tensor, sl: slice) -> None:
@@ -262,10 +282,14 @@ class NugusMirrorMap:
         self._mirror_gait_clock(out, sl)
       elif name == "height_scan":
         width = sl.stop - sl.start
-        side = int(round(width**0.5))
-        if side * side != width:
-          raise ValueError(f"height_scan slice length {width} is not a square grid")
-        grid = out[..., sl].view(*out.shape[:-1], side, side)
+        if self.height_scan_grid is None:
+          raise ValueError("height_scan present but terrain_scan grid shape is unknown")
+        nx, ny = self.height_scan_grid
+        if nx * ny != width:
+          raise ValueError(
+            f"height_scan slice length {width} does not match grid {nx}x{ny}"
+          )
+        grid = out[..., sl].view(*out.shape[:-1], nx, ny)
         out[..., sl] = grid.flip(dims=[-1]).reshape(*out.shape[:-1], width)
       else:
         raise ValueError(f"No critic mirror rule for observation term {name!r}")

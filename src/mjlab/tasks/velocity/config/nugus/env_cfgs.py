@@ -1069,6 +1069,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   swing_height.weight = 0.75
   swing_height.params = {
     "height_sensor_name": "foot_height_scan",
+    "sensor_name": "feet_ground_contact",
     "target_height": swing_target_height,
     "period": gait_period,
     "swing_ratio": 0.45,
