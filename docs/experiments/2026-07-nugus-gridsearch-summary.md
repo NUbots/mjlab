@@ -49,7 +49,7 @@ Per sim2real plan (`docs/plans/sim2real-training-regime/README.md`):
 
 **v16b (re-baseline launch, 2026-07-03):** `BATCH=v16b` → `scripts/k8s/gen_v16b/` (2k iters, seeds 1–2). **FAILED** @ `5eccb3d` — never stood; ep_len stuck **~22–30** (~0.5 s) for **1400+** iters, both seeds identical (learned fast termination). W&B `obp8h6ol` / `zf7ad97s`; jobs **killed ~iter 1400/2000** 2026-07-03. Root cause: rated-torque effort cut + Phase-C penalties from step 0 with no alive bonus — see `08-v16b-postmortem.md`. **No eval gate run.**
 
-**v16c (planned):** restore stall effort limits, `ALIVE_W=0.5`, `PHASE_C_WARMUP=1` (penalties ramp iters 500–1000), + `joint_acc_l2` −3e-5 ablation cell — spec in doc 08. Pre-launch: `scripts/tools/nugus_stand_smoke.py` + `nugus_noise_smoke.py`.
+**v16c (launched 2026-07-03):** restore stall effort limits, `ALIVE_W=0.5`, `PHASE_C_WARMUP=1` (penalties ramp iters 500–1000), + `joint_acc_l2` −3e-5 ablation cell — spec in doc 08. Pre-launch: `scripts/tools/nugus_stand_smoke.py` + `nugus_noise_smoke.py`.
 
 ---
 
@@ -75,7 +75,7 @@ Shared defaults unless overridden: `PHASE_C_FRAC=0.5`, flat task `Mjlab-Velocity
 | **v16-short** | Phase 0 validation — same as v16, shorter | `clock_anneal`, **500** iters, `JOULE_W=1e-5`, hs-critic, `TRAINING_REGIME=base` | `mj-gs-v16-short-ca-hs-joule-1e5` | `gr1hb5uh` | reward **26.75**, ep_len **851** @ iter 499 | **Smoke only** — not authoritative gate (1-env CPU eval); completed 2026-07-03 |
 | **v16** | Phase 0 smoke — post-E0.2/A3/C1 physics base | `clock_anneal`, 2k iters, `JOULE_W=1e-5`, `CRITIC_HEIGHT_SCAN=true`, `TRAINING_REGIME=base` | `mj-gs-v16-ca-hs-joule-1e5` | `shhm98rd` | reward **3.08**, ep_len **165** @ iter 1999; peak **~53** @ iter ~960 | **Collapsed @ p3** — doc 06; completed @ `a1af0d4` |
 | **v16b** | Re-baseline after v16 collapse — actuator V5 + clock_persist | `clock_persist`, 2k iters, `JOULE_W=1e-5`, hs-critic, swing **0.05**, `GAIT_PERIOD=1.0`, trimmed DR, `FLATTEN_PHASE_C=1` | `mj-gs-v16b-cp-hs-joule-1e5`, `…-s2` | `obp8h6ol`, `zf7ad97s` | ep_len **~25** @ iter ~1400 | **FAILED** — fast-termination trap; killed ~1400/2000 |
-| **v16c** | Post-v16b fix — stall efforts, alive bonus, penalty warmup | `PHASE_C_WARMUP=1`, `ALIVE_W=0.5`, `FLATTEN_PHASE_C=0`; + jacc −3e-5 ablation | (pending) | (pending) | (pending) | **Not launched** — manifests via `BATCH=v16c` |
+| **v16c** | Post-v16b fix — stall efforts, alive bonus, penalty warmup | `PHASE_C_WARMUP=1`, `ALIVE_W=0.5`, `FLATTEN_PHASE_C=0`; + jacc −3e-5 ablation | `mj-gs-v16c-cp-hs-joule-1e5{,-s2,-jacc-3e5}` | `3mgdsxzo` s1, `pl1auixy` jacc (stopped for eval GPU), s2 pending | reward **~69**, ep_len **>950** @ iter ~600+ | **Training gate PASS** (s1); fixed eval partial @ `547c67d` — see §8 |
 | **v17** | B1 decoupling grid (5 cells) | resume from v16 @ `a1af0d4`, 4k iters | `mj-gs-v17-{all,commands,phasec,pushes,upright}` | partial W&B (`ts21daeb`, `9nzuqlnr`) | degraded pre-CONT_BASE | **Killed / invalid** — ran on collapsed v16; **not analyzed**; vcjobs deleted 2026-07-03 (stop-v17) |
 
 **Legacy job still on cluster:** `mjlab-gs-clock-anneal-joule-1e-4-pc-0-5-s1` → W&B `ufk65r9v` (v3-era naming, 1250 iters, final summary reward **−0.17**). Pod logs at iter **1187/1250**: mean reward **−25.40** (in progress, not final).
@@ -414,6 +414,39 @@ Pods: `mj-gs-v17-all-train-0` (munin), `mj-gs-v17-commands-train-0` (hugin). Bot
 | vcjobs | `mj-gs-v16b-cp-hs-joule-1e5`, `mj-gs-v16b-cp-hs-joule-1e5-s2` |
 | W&B | `nugus_gridsearch_v16b` — `clock_persist__stand-0.15__pc-flat__joule-1e-5__hs__s1__v16b`, `…__s2__v16b` |
 | Status | Training started; **killed ~iter 1400/2000** — ep_len ~25 both seeds; **no eval gate** |
+
+
+### v16c launch + gates (2026-07-03)
+
+| Item | Value |
+|------|-------|
+| Commits | `547c67d` (code), configmap `GIT_COMMIT` pinned; push `d7bdacb` |
+| Pre-launch smoke | `nugus_stand_smoke.py` **PASS**; `nugus_noise_smoke.py` **PASS** (mean **41.5** steps) |
+| Manifests | `BATCH=v16c ./scripts/k8s/gen-gridsearch.sh -o scripts/k8s/gen_v16c`; `kubectl apply -f scripts/k8s/gen_v16c/` |
+| vcjobs | `mj-gs-v16c-cp-hs-joule-1e5` (**Running**), `…-s2` (**Running**), `…-jacc-3e5` (**deleted** to free GPU for fixed eval) |
+| Experiment | `nugus_gridsearch_v16c` |
+
+**Early-kill @ iter ~200 (s1):** ep_len **918.5** — **PASS** (not v16b ~25 trap).
+
+**Training gate (s1 `3mgdsxzo`):** ep_len **>950**, mean reward **~69** by iter **~430+** — **PASS** (doc 08 target >800 @ ~600).
+
+| W&B | URL |
+|-----|-----|
+| s1 | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/3mgdsxzo |
+| jacc (stopped) | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/pl1auixy |
+| s2 | (pending run id — job started after GPU freed) |
+
+**Fixed eval (`nugus_eval`, 256 envs/cmd, git `547c67d`, GPU job `mj-nugus-eval-v16c-gate`):**
+
+Checkpoint `model_1500.pt` from `3mgdsxzo`.
+
+| Scope | `falls_per_min` | `swing_height_err` |
+|-------|----------------|---------------------|
+| cmd `(0.5, 0, 0)` | **1.14** | **0.071** |
+| **overall** | **0.82** | **0.071** |
+
+v13 baseline `l9wok1ss` on **same eval build** — **failed to load** (actor obs **72** vs eval env **71**; action dim **21** vs **20**). **2× v13 gate not computed.** **v17 not queued.**
+
 
 **Stop-v17 (2026-07-03):** All `mj-gs-v17-*` vcjobs **deleted** / absent on cluster. Batch **invalid** — launched on collapsed v16 @ `a1af0d4`. **No fixed eval, no destabilizer call.** Relaunch only after v16c passes training + eval gates (≥256 envs/command). Partial W&B (`ts21daeb`, `9nzuqlnr`) retained for forensics only.
 

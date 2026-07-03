@@ -66,7 +66,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [ ] v16 smoke batch: confirm training still converges on new physics (manifests ready; **blocked on commit+push** — Phase 0 code is local-only)
 - [x] ~~v16 base validated~~ **v16 COLLAPSED at p3 — see `06-v16-collapse-analysis.md`**: swing target infeasible on new actuators + clock_anneal→0 handoff; joule/DR largely acquitted
 - [x] ~~v16b re-baseline~~ **v16b FAILED — never stood (ep_len ~25 for 1400 iters, both seeds); jobs killed. See `08-v16b-postmortem.md`**: un-specced effort-limit cut to rated torque + Phase-C penalties from step 0 with no alive bonus = learned fast-termination
-- [ ] v16c launched (restore stall-torque effort limits, +0.5 alive bonus, penalty warm-up iters 500–1000 — spec in doc 08; plus joint_acc −3e-5 ablation cell)
+- [x] v16c launched @ `547c67d` (2026-07-03) — s1 + jacc running; s2 pending GPU; jacc vcjob stopped to run fixed eval
 - [x] Velocity limits corrected: XH540 no-load is 39–46 rpm = 4.1–4.8 rad/s (Phase 0 used 3.2 from a wrong 30 rpm figure); set from measured bus voltage; check `saturation_effort` = stall torque (doc 06 §V5). Units are rad/s — confirmed, not rpm
 - [ ] Classical-walk joint-velocity/torque log captured from the real robot (ground truth for limits + gait envelope)
 - [ ] Stage 2 gait-period-as-command (v19) — variable step timing, doc 07
