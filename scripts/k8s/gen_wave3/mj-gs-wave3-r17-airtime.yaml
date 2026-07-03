@@ -3,7 +3,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: mj-gs-wave1-r6-gait-085
+  name: mj-gs-wave3-r17-airtime
   namespace: mjlab
   labels:
     app.kubernetes.io/name: mjlab-train
@@ -64,7 +64,7 @@ spec:
                 # iterations starting from the checkpoint's iteration). Overrides
                 # the configmap default per cell.
                 - name: MAX_ITERATIONS
-                  value: "1000"
+                  value: "1400"
                 # New clock_anneal variant knobs read by the factory.
                 - name: SILENCE_CLOCK
                   value: "0"
@@ -101,7 +101,7 @@ spec:
                 - name: PHASE_C_WARMUP
                   value: "1"
                 - name: ALIVE_W
-                  value: "0.5"
+                  value: "0.25"
                 - name: JOINT_ACC_W
                   value: "-1e-5"
                 - name: TRACK_LIN_W
@@ -109,21 +109,21 @@ spec:
                 - name: TRACK_ANG_W
                   value: "2.0"
                 - name: AIR_TIME_W
-                  value: "0.15"
+                  value: "0.25"
                 - name: MIRROR_AUG
                   value: "1"
                 - name: FOOT_FLAT_W
                   value: "-0.5"
                 - name: FOOT_FLAT_ONESIDED
-                  value: ""
+                  value: "1"
                 - name: CLEARANCE_PER_CORNER
-                  value: ""
+                  value: "1"
                 - name: SWING_HEIGHT_SOURCE
-                  value: "min_corner"
+                  value: "center"
                 - name: CLEARANCE_TARGET_HEIGHT
                   value: ""
                 - name: CLEARANCE_TARGET_FROM_SWING
-                  value: ""
+                  value: "1"
                 - name: PUSH_INTERVAL_SCALE
                   value: "1.0"
                 - name: LR_CAP
@@ -151,13 +151,13 @@ spec:
                 - name: LOGGER
                   value: "wandb"
                 - name: EXPERIMENT_NAME
-                  value: "nugus_gridsearch_wave1"
+                  value: "nugus_gridsearch_wave3"
                 - name: RUN_NAME
-                  value: "clock_persist__gait-0.85__s1__wave1"
+                  value: "clock_persist__air-0.25__backfill__s1__wave3"
                 - name: WANDB_PROJECT
                   value: "mjlab"
                 - name: WANDB_TAGS
-                  value: "clock_persist,gait-0.85,seed-1,gridsearch,batch-wave1,wave1,r6"
+                  value: "clock_persist,air-0.25,clearance-swing,backfill,seed-1,gridsearch,batch-wave3,wave3,r17-airtime"
                 # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
                   value: "all"

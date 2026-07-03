@@ -120,6 +120,12 @@ spec:
                   value: ""
                 - name: SWING_HEIGHT_SOURCE
                   value: "min_corner"
+                - name: CLEARANCE_TARGET_HEIGHT
+                  value: ""
+                - name: CLEARANCE_TARGET_FROM_SWING
+                  value: ""
+                - name: PUSH_INTERVAL_SCALE
+                  value: "1.0"
                 - name: LR_CAP
                   value: "3e-4"
                 - name: LR_CAP_START_ITER
@@ -164,7 +170,7 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "8e63786247be1beafa4b2d057489a763e51b3b95"
+                  value: "ce4da03622c73d1516f656fcd16c730cc7e45690"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).

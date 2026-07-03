@@ -3,7 +3,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: mj-gs-wave1-r6-gait-085
+  name: mj-gs-wave2-r13-gamma
   namespace: mjlab
   labels:
     app.kubernetes.io/name: mjlab-train
@@ -64,7 +64,7 @@ spec:
                 # iterations starting from the checkpoint's iteration). Overrides
                 # the configmap default per cell.
                 - name: MAX_ITERATIONS
-                  value: "1000"
+                  value: "1400"
                 # New clock_anneal variant knobs read by the factory.
                 - name: SILENCE_CLOCK
                   value: "0"
@@ -115,11 +115,11 @@ spec:
                 - name: FOOT_FLAT_W
                   value: "-0.5"
                 - name: FOOT_FLAT_ONESIDED
-                  value: ""
+                  value: "1"
                 - name: CLEARANCE_PER_CORNER
-                  value: ""
+                  value: "1"
                 - name: SWING_HEIGHT_SOURCE
-                  value: "min_corner"
+                  value: "center"
                 - name: CLEARANCE_TARGET_HEIGHT
                   value: ""
                 - name: CLEARANCE_TARGET_FROM_SWING
@@ -133,7 +133,7 @@ spec:
                 - name: ENTROPY_DECAY
                   value: ""
                 - name: GAMMA
-                  value: ""
+                  value: "0.97"
                 - name: LINK_MASS_SCALE_MIN
                   value: "0.90"
                 - name: LINK_MASS_SCALE_MAX
@@ -151,13 +151,13 @@ spec:
                 - name: LOGGER
                   value: "wandb"
                 - name: EXPERIMENT_NAME
-                  value: "nugus_gridsearch_wave1"
+                  value: "nugus_gridsearch_wave2"
                 - name: RUN_NAME
-                  value: "clock_persist__gait-0.85__s1__wave1"
+                  value: "clock_persist__gamma-0.97__s1__wave2"
                 - name: WANDB_PROJECT
                   value: "mjlab"
                 - name: WANDB_TAGS
-                  value: "clock_persist,gait-0.85,seed-1,gridsearch,batch-wave1,wave1,r6"
+                  value: "clock_persist,gamma-0.97,base2,seed-1,gridsearch,batch-wave2,wave2,r13-gamma"
                 # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
                   value: "all"
