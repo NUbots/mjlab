@@ -266,7 +266,7 @@ Shared defaults unless overridden: `PHASE_C_FRAC=0.5`, flat task `Mjlab-Velocity
 
 ## 5. Current cluster status
 
-Snapshot: `kubectl get vcjob -n mjlab` on **2026-07-03 ~11:25 JST** (orchestration agent).
+Snapshot: `kubectl get vcjob -n mjlab` on **2026-07-03 ~14:22 JST** (5-min poll loop, ~90m elapsed).
 
 | vcjob | Status | Running pods | Notes |
 |-------|--------|--------------|-------|
@@ -363,35 +363,38 @@ Other overall: `lin_vel_rmse` **0.33**, `ang_vel_rmse` **0.33**, `slip_vel` **0.
 
 **Walk gate (~iter 1000):** **PASS** on training metrics (reward **>40**, ep_len **>900**, `fell_over` **<2** @ iter 630–960). Fixed-eval `nugus_eval.py` on `shhm98rd` **not run** locally (needs GPU/W&B artifact pull; prior `heading_command` cfg issue noted in §8 — retry when convenient).
 
-### v17 decoupling grid queued (2026-07-03)
+### v17 decoupling grid (B1, 2026-07-03)
 
 | Item | Value |
 |------|-------|
 | Trigger | v16 walk gate PASS @ ~630 + v16 full **Completed** 2000/2000 |
 | Manifests | `BATCH=v17 ./scripts/k8s/gen-gridsearch.sh -o scripts/k8s/gen_v17` → 5 YAMLs |
-| Applied | `kubectl apply -f scripts/k8s/gen_v17/` |
-| Cells | `commands`, `pushes`, `upright`, `phasec`, `all` |
-| Cluster | **2× Running** (`mj-gs-v17-all`, `mj-gs-v17-commands`); **3× Pending** (8 GPU cluster, 4 GPU/job) |
+| Applied | `kubectl apply -f scripts/k8s/gen_v17/` @ `a1af0d4` |
+| Cells | `commands`, `pushes`, `upright`, `phasec`, `all` — 4000 iters, `CONT_BASE_STEP=48000` (iter 2000) |
+| Cluster | **2× Running**, **3× Pending** (8 GPU cluster, 4 GPU/job) |
 
-**Progress snapshot (kubectl, 2026-07-03 ~05:22 UTC):**
+**W&B runs (live):**
 
-| vcjob | Status | Iter / reward (logs) | W&B run name | W&B link |
-|-------|--------|----------------------|--------------|----------|
-| `mj-gs-v17-all` | Running | **1956/4000**, reward **10.28**, ep_len **302.65** | `clock_anneal__stand-0.15__pc-0.5__joule-1e-5__hard-all__s1__v17` | ID not in logs (API key unavailable locally) |
-| `mj-gs-v17-commands` | Running | **2025/4000**, reward **3.07**, ep_len **141.19** | `clock_anneal__stand-0.15__pc-0.5__joule-1e-5__hard-commands__s1__v17` | ID not in logs (API key unavailable locally) |
-| `mj-gs-v17-phasec` | Pending | — | — | — |
-| `mj-gs-v17-pushes` | Pending | — | — | — |
-| `mj-gs-v17-upright` | Pending | — | — | — |
+| Cell | Run ID | URL |
+|------|--------|-----|
+| all | `ts21daeb` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/ts21daeb |
+| commands | `9nzuqlnr` | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/9nzuqlnr |
+| phasec / pushes / upright | — | Pending launch |
 
-Pods: `mj-gs-v17-all-train-0` (munin), `mj-gs-v17-commands-train-0` (hugin). Both ~halfway through 4000-iter base→hard decoupling runs; rewards well below v16 peak (~53 @ iter ~960) — expected during hard-regime ramp / post-ramp window.
+**Progress snapshots (kubectl, UTC ~):**
 
+| Time | Cell | Iter | Mean reward | ep_len | fell_over/ep | Notes |
+|------|------|------|-------------|--------|--------------|-------|
+| 04:05 | all | 266 | 0.76 | — | ~230 | Early base |
+| 04:05 | commands | 273 | 0.58 | — | ~228 | Early base |
+| 04:10 | all | 384 | **28.49** | — | — | Walk-gate region; reward climbing |
+| 04:10 | commands | 393 | **8.54** | — | — | Slower lift vs all |
+| 05:22 | all | 1956 | **10.28** | 302.65 | ~21 | Pre-CONT_BASE; degraded from peak |
+| 05:22 | commands | 2025 | **3.07** | 141.19 | ~33 | **Past CONT_BASE** (cmd widening active) |
 
-### Next after v16 full
+Pods: `mj-gs-v17-all-train-0` (munin), `mj-gs-v17-commands-train-0` (hugin). Both show the familiar base→pre-hard degradation (peak ~28 @ iter ~384, collapse to single digits by iter ~2000). `commands` crossed CONT_BASE first with **higher** falls (~33 vs ~21) and **lower** reward (~3 vs ~10) — command widening alone may already be destabilizing, but B1 requires fixed eval (`nugus_eval` @ 0.75 vs 0.3 m/s) on all 5 checkpoints. **v18 not queued.**
 
-1. ~~v16-short fixed eval on `gr1hb5uh` / `model_499.pt`~~ — done 2026-07-03 (local CPU smoke; re-run at full env count on GPU when convenient)
-2. Optional D1: `uv run python scripts/sim2sim_eval.py --onnx-file …` (ONNX on W&B run)
-3. Queue v17 (5 cells) — 1–2 cells first if capacity limited
-4. Do **not** queue v17/v18 if v16 full fails early
+**Pending:** `nugus_eval` per cell after all 5 complete; destabilizer call deferred.
 
 ---
 
