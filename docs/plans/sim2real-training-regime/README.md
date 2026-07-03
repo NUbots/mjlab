@@ -66,7 +66,9 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [ ] v16 smoke batch: confirm training still converges on new physics (manifests ready; **blocked on commit+push** — Phase 0 code is local-only)
 - [x] ~~v16 base validated~~ **v16 COLLAPSED at p3 — see `06-v16-collapse-analysis.md`**: swing target infeasible on new actuators + clock_anneal→0 handoff; joule/DR largely acquitted
 - [x] ~~v16b re-baseline~~ **v16b FAILED — never stood (ep_len ~25 for 1400 iters, both seeds); jobs killed. See `08-v16b-postmortem.md`**: un-specced effort-limit cut to rated torque + Phase-C penalties from step 0 with no alive bonus = learned fast-termination
-- [x] v16c launched @ `547c67d` (2026-07-03) — s1 + jacc running; s2 pending GPU; jacc vcjob stopped to run fixed eval
+- [x] v16c launched @ `547c67d` (2026-07-03) — **WALKS** (alive bonus fixed bootstrap) but shuffles/limps and tracking declines post-warm-up; jacc −3e-5 cell clearly better than −1e-4. Full analysis in `09-v16c-analysis-v16d.md`
+- [ ] v16d launched (jacc −1e-5, TRACK_LIN_W 3.0, swing 0.065, AIR_TIME_W 0.15, MIRROR_AUG on, LR cap from 1200; 3 cells incl. nomirror ablation — **code implemented + manifests in `scripts/k8s/gen_v16d/`; needs commit+push, configmap re-pin, manifest regen** — doc 09 launch checklist)
+- [ ] peak-swing-height metric added to clock_persist telemetry (doc 09 "known telemetry gap")
 - [x] Velocity limits corrected: XH540 no-load is 39–46 rpm = 4.1–4.8 rad/s (Phase 0 used 3.2 from a wrong 30 rpm figure); set from measured bus voltage; check `saturation_effort` = stall torque (doc 06 §V5). Units are rad/s — confirmed, not rpm
 - [ ] Classical-walk joint-velocity/torque log captured from the real robot (ground truth for limits + gait envelope)
 - [ ] Stage 2 gait-period-as-command (v19) — variable step timing, doc 07
@@ -109,6 +111,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `06-v16-collapse-analysis.md` | v16 post-mortem (infeasible swing target, anneal handoff), v16b re-baseline spec, public config sources |
 | `07-gait-timing-strategy.md` | Variable step timing done right: period-as-command (Stage 2), push-window phase freedom, unclocked endgame |
 | `08-v16b-postmortem.md` | v16b never-stands failure (effort cut + step-0 penalties, no alive bonus), v16c spec, pre-launch smoke-test pattern. Supersedes doc 06 item 5 and §V5 effort wording |
+| `09-v16c-analysis-v16d.md` | v16c walks-but-shuffles analysis (joint_acc kills tracking, no symmetry = limp, drag is incentive-limited), v16d change-set + launch checklist + success thresholds |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |

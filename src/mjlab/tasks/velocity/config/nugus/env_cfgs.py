@@ -619,7 +619,7 @@ def _add_gait_curriculum(
   elif variant == "clock_persist":
     cfg.rewards["foot_swing_height"].weight = 0.75
     cfg.rewards["foot_swing_height_landing"].weight = 0.0
-    cfg.rewards["air_time"].weight = 0.08
+    cfg.rewards["air_time"].weight = _env_float("AIR_TIME_W", 0.08)
 
 
 def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -641,6 +641,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   gait_period = _env_float("GAIT_PERIOD", _DEFAULT_GAIT_PERIOD)
   swing_target_height = _env_float("SWING_TARGET_HEIGHT", _DEFAULT_SWING_TARGET_HEIGHT)
+  track_lin_w = _env_float("TRACK_LIN_W", 2.0)
+  track_ang_w = _env_float("TRACK_ANG_W", 2.0)
   flatten_phase_c = _env_bool("FLATTEN_PHASE_C", default=False)
   phase_c_warmup = _env_bool("PHASE_C_WARMUP", default=False)
   alive_w = _env_float("ALIVE_W", 0.0)
@@ -841,6 +843,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["stand_still_pose"].weight = stand_w
   cfg.rewards["stand_still_motion"].weight = -0.003
   cfg.rewards["is_alive"] = RewardTermCfg(func=envs_mdp.is_alive, weight=alive_w)
+  cfg.rewards["track_linear_velocity"].weight = track_lin_w
+  cfg.rewards["track_angular_velocity"].weight = track_ang_w
 
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
   cfg.events["base_com"].params["asset_cfg"].body_names = ("torso",)

@@ -745,6 +745,71 @@ gen_v16c() {
 }
 
 
+# BATCH=v16d: post-v16c reward-economy fix (see plan doc 09). v16c walked but
+# shuffled: joint_acc warm-up killed velocity tracking (trkLin peaked at the
+# ramp then declined), feet dragged (air_time ~0.04-0.09 s), gait limped
+# (gait_air_cv ~0.45, no symmetry mechanism). Cells: main (jacc -1e-5, trk 3.0,
+# swing 0.065, air 0.15, mirror aug, LR cap), no-mirror ablation, jacc -3e-5
+# bridge to the best v16c cell.
+gen_v16d() {
+  local joule_label
+  export MJLAB_VARIANT="clock_persist"
+  export GAIT_PERIOD="1.0"
+  export SWING_TARGET_HEIGHT="0.065"
+  export AIR_TIME_W="0.15"
+  export TRACK_LIN_W="3.0"
+  export TRACK_ANG_W="2.0"
+  export PHASE_C_WARMUP="1"
+  export FLATTEN_PHASE_C="0"
+  export ALIVE_W="0.5"
+  export JOINT_ACC_W="-1e-5"
+  export MIRROR_AUG="1"
+  export LR_CAP="3e-4"
+  export LR_CAP_START_ITER="1200"
+  export ENTROPY_DECAY=""
+  export GAMMA=""
+  export LINK_MASS_SCALE_MIN="0.90"
+  export LINK_MASS_SCALE_MAX="1.10"
+  export PAYLOAD_KG_MIN="-0.2"
+  export PAYLOAD_KG_MAX="0.2"
+  export JOULE_W="1e-5"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export WANDB_RUN_PATH=""
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="base"
+  export CONT_BASE_STEP=""
+  export CRITIC_HEIGHT_SCAN="true"
+  export PHASE_DELTA_TAIL_W=""
+
+  export RUN_NAME="clock_persist__trk-3.0__jacc-1e-5__swing-0.065__air-0.15__mirror__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,trk-3.0,jacc-1e-5,swing-0.065,air-0.15,mirror,alive-0.5,pc-warmup,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan"
+  emit_manifest "mj-gs-${BATCH}-main"
+
+  export MIRROR_AUG=""
+  export RUN_NAME="clock_persist__trk-3.0__jacc-1e-5__swing-0.065__air-0.15__nomirror__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,trk-3.0,jacc-1e-5,swing-0.065,air-0.15,nomirror,alive-0.5,pc-warmup,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan"
+  emit_manifest "mj-gs-${BATCH}-nomirror"
+
+  export MIRROR_AUG="1"
+  export JOINT_ACC_W="-3e-5"
+  export RUN_NAME="clock_persist__trk-3.0__jacc-3e-5__swing-0.065__air-0.15__mirror__s1__${BATCH}"
+  export WANDB_TAGS="clock_persist,trk-3.0,jacc-3e-5,swing-0.065,air-0.15,mirror,alive-0.5,pc-warmup,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan"
+  emit_manifest "mj-gs-${BATCH}-jacc-3e5"
+}
+
+
 # BATCH=v16: Phase-0 smoke — clock_anneal flat base (no hard_continue), 2k iters,
 # critic height_scan, JOULE_W=1e-5. Establishes the post-E0.2/A3/C1 baseline.
 gen_v16_base() {
@@ -944,6 +1009,7 @@ case "$BATCH" in
   v16) gen_v16_base; expected=1 ;;
   v16b) gen_v16b; expected=2 ;;
   v16c) gen_v16c; expected=3 ;;
+  v16d) gen_v16d; expected=3 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
