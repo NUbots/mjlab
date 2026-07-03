@@ -309,7 +309,7 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
   robot = unwrapped.scene["robot"]
   contact_sensor = cast(ContactSensor, unwrapped.scene["feet_ground_contact"])
   height_sensor = cast(TerrainHeightSensor, unwrapped.scene["foot_height_scan"])
-  _, foot_site_ids = robot.find_sites(FOOT_SITE_NAMES)
+  foot_site_ids, _ = robot.find_sites(FOOT_SITE_NAMES)
 
   groups = env_group_ids(num_envs, envs_per_command=cfg.envs_per_command, device=device)
   metrics = EvalMetricsState()
