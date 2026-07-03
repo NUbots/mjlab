@@ -30,6 +30,7 @@ from mjlab.sensor import (
   TerrainHeightSensorCfg,
 )
 from mjlab.tasks.velocity import mdp
+from mjlab.tasks.velocity.config.nugus.dr_observations import dr_ratios
 from mjlab.tasks.velocity.config.nugus.rl_cfg import nubots_nugus_ppo_runner_cfg
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
@@ -65,6 +66,10 @@ _PHASE_C_JOINT_ACC_W = -1e-4
 _PHASE_C_TORQUE_RATE_W = -1e-3
 _PHASE_C_SOFT_LANDING_W = -0.01
 _PHASE_C_BASE_HEIGHT_W = 0.3
+_NUGUS_LINK_MASS_BODY_REGEX = (
+  r"^(torso|(?:left|right)_(?:upper_leg|lower_leg|foot|upper_arm|lower_arm|"
+  r"shoulder))$"
+)
 
 
 def _env_float(name: str, default: float) -> float:
@@ -180,6 +185,19 @@ def _coalesce_reward_curriculum_stages(
   return coalesced
 
 
+_HARD_COMPONENT_NAMES = frozenset({"commands", "pushes", "upright", "phasec"})
+_DEFAULT_HARD_COMPONENTS = _HARD_COMPONENT_NAMES
+_HARD_FINAL_VEL_RANGES: dict[str, tuple[float, float]] = {
+  "lin_vel_x": (-0.75, 0.75),
+  "lin_vel_y": (-0.45, 0.45),
+  "ang_vel_z": (-0.80, 0.80),
+}
+_HARD_FINAL_PUSH_SCALE = 2.0
+_HARD_FINAL_UPRIGHT_STD = 0.35
+_HARD_FINAL_HIP_ROLL_STD = 0.14
+_HARD_FINAL_BODY_ANG_VEL_W = -0.02
+_HARD_FINAL_ANGULAR_MOMENTUM_W = -0.005
+
 _HARD_CONTINUE_ITER_OFFSETS = (0, 250, 500, 1000)
 _PUSH_VELOCITY_RANGE_BASE: dict[str, tuple[float, float]] = {
   "x": (-0.2, 0.4),
@@ -190,6 +208,23 @@ _PUSH_VELOCITY_RANGE_BASE: dict[str, tuple[float, float]] = {
   "yaw": (-0.0, 0.0),
 }
 _PUSH_HARD_CONTINUE_SCALES = (1.0, 1.25, 1.5, 2.0)
+
+
+def _parse_hard_components() -> frozenset[str]:
+  """Parse ``HARD_COMPONENTS`` env var (comma-separated subset of hard stage)."""
+  raw = os.environ.get("HARD_COMPONENTS")
+  if raw in (None, ""):
+    return _DEFAULT_HARD_COMPONENTS
+  components = frozenset(part.strip() for part in raw.split(",") if part.strip())
+  unknown = components - _HARD_COMPONENT_NAMES
+  if unknown:
+    known = ", ".join(sorted(_HARD_COMPONENT_NAMES))
+    unknown_s = ", ".join(sorted(unknown))
+    raise ValueError(
+      f"HARD_COMPONENTS contains unknown component(s) {unknown_s!r}; "
+      f"expected comma-separated subset of {known}"
+    )
+  return components
 
 
 def _hard_continue_steps(cont_base: int) -> list[int]:
@@ -299,62 +334,108 @@ def _add_hard_continue_curriculum(
   upright_w_start: float,
   std_walking: dict[str, float],
   replace_command_vel: bool = True,
+  enabled_components: frozenset[str] | None = None,
 ) -> None:
   """Ramp command velocity, push disturbances, and balance penalties after resume."""
-  if replace_command_vel:
+  components = (
+    _DEFAULT_HARD_COMPONENTS if enabled_components is None else enabled_components
+  )
+  if "commands" in components:
+    if replace_command_vel:
+      velocity_stages = _hard_continue_velocity_stages(cont_base)
+    else:
+      base_stages = cfg.curriculum["command_vel"].params["velocity_stages"]
+      velocity_stages = [
+        *base_stages,
+        *_hard_continue_velocity_stages(cont_base),
+      ]
     cfg.curriculum["command_vel"] = CurriculumTermCfg(
       func=mdp.commands_vel,
       params={
         "command_name": "twist",
-        "velocity_stages": _hard_continue_velocity_stages(cont_base),
+        "velocity_stages": velocity_stages,
       },
     )
-  cfg.curriculum["push_robot_ramp"] = CurriculumTermCfg(
-    func=mdp.push_robot_curriculum,
+  if "pushes" in components:
+    cfg.curriculum["push_robot_ramp"] = CurriculumTermCfg(
+      func=mdp.push_robot_curriculum,
+      params={
+        "event_name": "push_robot",
+        "push_stages": _hard_continue_push_stages(cont_base),
+      },
+    )
+  if "upright" in components:
+    cfg.curriculum["upright_ramp"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "upright",
+        "stages": _hard_continue_upright_stages(cont_base, upright_w_start),
+      },
+    )
+    hip_roll_stds = (0.10, 0.11, 0.12, 0.14)
+    cfg.curriculum["pose_hip_roll_ramp"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "pose",
+        "stages": [
+          {
+            "step": step,
+            "params": {
+              "std_walking": _pose_std_walking_with_hip_roll(std_walking, hip_roll_std),
+            },
+          }
+          for step, hip_roll_std in zip(
+            _hard_continue_steps(cont_base), hip_roll_stds, strict=True
+          )
+        ],
+      },
+    )
+    cfg.curriculum["body_ang_vel_ramp"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "body_ang_vel",
+        "stages": _hard_continue_weight_stages(cont_base, -0.05, -0.02),
+      },
+    )
+    cfg.curriculum["angular_momentum_ramp"] = CurriculumTermCfg(
+      func=mdp.reward_curriculum,
+      params={
+        "reward_name": "angular_momentum",
+        "stages": _hard_continue_weight_stages(cont_base, -0.01, -0.005),
+      },
+    )
+
+
+def _apply_hard_from_start_static(
+  cfg: ManagerBasedRlEnvCfg,
+  *,
+  upright_w: float,
+  joule_w: float,
+  std_walking: dict[str, float],
+) -> None:
+  """Apply final hard-stage commands, pushes, and reward weights from iteration 0."""
+  cfg.curriculum["command_vel"] = CurriculumTermCfg(
+    func=mdp.commands_vel,
     params={
-      "event_name": "push_robot",
-      "push_stages": _hard_continue_push_stages(cont_base),
+      "command_name": "twist",
+      "velocity_stages": [{"step": 0, **_HARD_FINAL_VEL_RANGES}],
     },
   )
-  cfg.curriculum["upright_ramp"] = CurriculumTermCfg(
-    func=mdp.reward_curriculum,
-    params={
-      "reward_name": "upright",
-      "stages": _hard_continue_upright_stages(cont_base, upright_w_start),
-    },
+  cfg.events["push_robot"].params["velocity_range"] = _scale_push_velocity_range(
+    _HARD_FINAL_PUSH_SCALE
   )
-  hip_roll_stds = (0.10, 0.11, 0.12, 0.14)
-  cfg.curriculum["pose_hip_roll_ramp"] = CurriculumTermCfg(
-    func=mdp.reward_curriculum,
-    params={
-      "reward_name": "pose",
-      "stages": [
-        {
-          "step": step,
-          "params": {
-            "std_walking": _pose_std_walking_with_hip_roll(std_walking, hip_roll_std),
-          },
-        }
-        for step, hip_roll_std in zip(
-          _hard_continue_steps(cont_base), hip_roll_stds, strict=True
-        )
-      ],
-    },
+  cfg.rewards["upright"].weight = upright_w
+  cfg.rewards["upright"].params["std"] = _HARD_FINAL_UPRIGHT_STD
+  cfg.rewards["pose"].params["std_walking"] = _pose_std_walking_with_hip_roll(
+    std_walking, _HARD_FINAL_HIP_ROLL_STD
   )
-  cfg.curriculum["body_ang_vel_ramp"] = CurriculumTermCfg(
-    func=mdp.reward_curriculum,
-    params={
-      "reward_name": "body_ang_vel",
-      "stages": _hard_continue_weight_stages(cont_base, -0.05, -0.02),
-    },
-  )
-  cfg.curriculum["angular_momentum_ramp"] = CurriculumTermCfg(
-    func=mdp.reward_curriculum,
-    params={
-      "reward_name": "angular_momentum",
-      "stages": _hard_continue_weight_stages(cont_base, -0.01, -0.005),
-    },
-  )
+  cfg.rewards["body_ang_vel"].weight = _HARD_FINAL_BODY_ANG_VEL_W
+  cfg.rewards["angular_momentum"].weight = _HARD_FINAL_ANGULAR_MOMENTUM_W
+  cfg.rewards["joule_heating"].weight = joule_w
+  cfg.rewards["joint_acc_l2"].weight = _PHASE_C_JOINT_ACC_W
+  cfg.rewards["torque_rate"].weight = _PHASE_C_TORQUE_RATE_W
+  cfg.rewards["soft_landing"].weight = _PHASE_C_SOFT_LANDING_W
+  cfg.rewards["base_height"].weight = _PHASE_C_BASE_HEIGHT_W
 
 
 def _add_phase_c_curriculum(
@@ -685,6 +766,27 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
   cfg.events["base_com"].params["asset_cfg"].body_names = ("torso",)
+  cfg.events["link_mass"] = EventTermCfg(
+    mode="reset",
+    func=dr.body_mass,
+    params={
+      "asset_cfg": SceneEntityCfg(
+        "robot",
+        body_names=(_NUGUS_LINK_MASS_BODY_REGEX,),
+      ),
+      "operation": "scale",
+      "ranges": (0.85, 1.15),
+    },
+  )
+  cfg.events["payload"] = EventTermCfg(
+    mode="reset",
+    func=dr.body_mass,
+    params={
+      "asset_cfg": SceneEntityCfg("robot", body_names=("torso",)),
+      "operation": "add",
+      "ranges": (-0.3, 0.5),
+    },
+  )
 
   # Per-servo strength / stiction DR — re-sample each episode.
   cfg.events["pd_gains"].mode = "reset"
@@ -700,6 +802,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.events["joint_friction"] = EventTermCfg(
     mode="reset",
     func=dr.joint_friction,
+    params={
+      "asset_cfg": motor_cfg(),
+      "operation": "scale",
+      "ranges": (0.5, 1.5),
+    },
+  )
+  cfg.events["joint_damping"] = EventTermCfg(
+    mode="reset",
+    func=dr.joint_damping,
     params={
       "asset_cfg": motor_cfg(),
       "operation": "scale",
@@ -722,6 +833,14 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={
       "asset_cfg": motor_cfg(),
       "drift_factor": 0.995,
+    },
+  )
+  cfg.observations["critic"].terms["dr_ratios"] = ObservationTermCfg(
+    func=dr_ratios,
+    params={
+      "motor_asset_cfg": motor_cfg(),
+      "torso_body_name": "torso",
+      "foot_geom_names": geom_names,
     },
   )
 
@@ -925,9 +1044,18 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     phase_delta_strong_iters=phase_delta_strong_iters,
     phase_delta_tail_w=phase_delta_tail_w,
   )
-  _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
 
-  if training_regime in ("hard_continue", "base_then_hard"):
+  hard_components = _parse_hard_components()
+  std_walking = cfg.rewards["pose"].params["std_walking"]
+  assert isinstance(std_walking, dict)
+
+  if training_regime == "hard_from_start":
+    _apply_hard_from_start_static(
+      cfg, upright_w=upright_w, joule_w=joule_w, std_walking=std_walking
+    )
+  elif training_regime in ("hard_continue", "base_then_hard"):
+    if "phasec" in hard_components:
+      _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
     cont_base_raw = os.environ.get("CONT_BASE_STEP")
     cont_base_explicit = cont_base_raw not in (None, "")
     if cont_base_explicit:
@@ -935,8 +1063,6 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       cont_base = int(cont_base_raw)
     else:
       cont_base = phase_iterations * _NUM_STEPS_PER_ENV if resume_mode else 0
-    std_walking = cfg.rewards["pose"].params["std_walking"]
-    assert isinstance(std_walking, dict)
     # Fresh base→hard: keep the base command_vel curriculum until cont_base;
     # resume continuations replace it so stage 0 matches the checkpoint terminal.
     replace_command_vel = resume_mode or not cont_base_explicit
@@ -946,11 +1072,14 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       upright_w_start=upright_w,
       std_walking=std_walking,
       replace_command_vel=replace_command_vel,
+      enabled_components=hard_components,
     )
-  elif training_regime != "base":
+  elif training_regime == "base":
+    _add_phase_c_curriculum(cfg, p2=p2, p3=p3, joule_w=joule_w)
+  else:
     raise ValueError(
-      "TRAINING_REGIME must be 'base', 'hard_continue', or 'base_then_hard'; "
-      f"got {training_regime!r}"
+      "TRAINING_REGIME must be 'base', 'hard_continue', 'base_then_hard', or "
+      f"'hard_from_start'; got {training_regime!r}"
     )
 
   # Apply play mode overrides.
@@ -981,7 +1110,7 @@ def nubots_nugus_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   critic_height_scan = _env_bool("CRITIC_HEIGHT_SCAN", default=False)
   cfg = nubots_nugus_rough_env_cfg(play=play)
 
-  cfg.sim.njmax = 300
+  cfg.sim.njmax = 320
   cfg.sim.mujoco.ccd_iterations = 50
   cfg.sim.contact_sensor_maxmatch = 64
   cfg.sim.nconmax = None

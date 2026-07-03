@@ -8,7 +8,6 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_flat_env_cfg
 from mjlab.utils.lab_api.math import quat_apply_inverse
 
-
 FOOT_SITE_NAMES = ("left_foot", "right_foot")
 
 
@@ -49,7 +48,7 @@ def print_feet_distance(env: ManagerBasedRlEnv) -> None:
 
   print()
   print("Pairwise distances:")
-  for p, (i, j) in enumerate(zip(pair_i.tolist(), pair_j.tolist())):
+  for p, (i, j) in enumerate(zip(pair_i.tolist(), pair_j.tolist(), strict=True)):
     a, b = FOOT_SITE_NAMES[i], FOOT_SITE_NAMES[j]
     print(
       f"  {a} <-> {b}:  lateral_dist={y_dist[0, p].item():.4f} m"

@@ -6,14 +6,34 @@ concatenated actor observation vector, and the joint ordering within
 that depends on the deployment-side joint mapping).
 """
 
+from __future__ import annotations
+
 import pytest
+import torch
+from conftest import get_test_device
 
 from mjlab.asset_zoo.robots.nugus.nugus_constants import (
   NUGUS_ARTICULATION,
   get_nugus_robot_cfg,
 )
 from mjlab.entity import Entity
-from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_flat_env_cfg
+from mjlab.envs import ManagerBasedRlEnv
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.tasks.velocity.config.nugus.dr_observations import (
+  DR_RATIOS_DIM,
+  dr_ratios,
+  dr_ratios_effort_slice,
+  dr_ratios_torso_mass_index,
+)
+from mjlab.tasks.velocity.config.nugus.env_cfgs import (
+  effort_limit_drift,
+  nubots_nugus_flat_env_cfg,
+)
+
+
+@pytest.fixture
+def device() -> str:
+  return get_test_device()
 
 
 # Expected joint ordering for joint_pos / joint_vel / actions in the actor
@@ -229,3 +249,52 @@ def test_actuator_declaration_order_differs_from_joint_order() -> None:
   assert ctrl_order != EXPECTED_JOINT_ORDER
   # Both must still cover the same set of joints.
   assert set(ctrl_order) == set(EXPECTED_JOINT_ORDER)
+
+
+@pytest.fixture(scope="module")
+def nugus_flat_cfg():
+  return nubots_nugus_flat_env_cfg()
+
+
+def test_dr_ratios_in_critic_not_actor(nugus_flat_cfg) -> None:
+  assert "dr_ratios" in nugus_flat_cfg.observations["critic"].terms
+  assert "dr_ratios" not in nugus_flat_cfg.observations["actor"].terms
+
+
+def test_dr_ratios_change_across_resets(device, nugus_flat_cfg) -> None:
+  cfg = nugus_flat_cfg
+  cfg.scene.num_envs = 32
+  cfg.seed = 1
+  env = ManagerBasedRlEnv(cfg=cfg, device=device)
+  try:
+    env.reset(seed=1)
+    first = dr_ratios(env)
+    assert first.shape == (32, DR_RATIOS_DIM)
+
+    env.reset(seed=999)
+    second = dr_ratios(env)
+    torso_mass_idx = dr_ratios_torso_mass_index()
+    assert not torch.allclose(first[:, torso_mass_idx], second[:, torso_mass_idx])
+  finally:
+    env.close()
+
+
+def test_dr_ratios_effort_drift_within_episode(device, nugus_flat_cfg) -> None:
+  cfg = nugus_flat_cfg
+  cfg.scene.num_envs = 1
+  cfg.seed = 0
+  env = ManagerBasedRlEnv(cfg=cfg, device=device)
+  try:
+    env.reset(seed=0)
+    before = dr_ratios(env)[0, dr_ratios_effort_slice()]
+    effort_limit_drift(
+      env,
+      env_ids=torch.tensor([0], device=device, dtype=torch.int),
+      drift_factor=0.995,
+      asset_cfg=SceneEntityCfg("robot", joint_names=(r"^(?!.*_backlash$).*",)),
+    )
+    after = dr_ratios(env)[0, dr_ratios_effort_slice()]
+    assert torch.all(after < before)
+    assert torch.allclose(after, before * 0.995, rtol=0.0, atol=1e-5)
+  finally:
+    env.close()

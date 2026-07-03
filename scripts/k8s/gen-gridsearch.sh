@@ -118,6 +118,7 @@ PHASE_DELTA_TAIL_W="${PHASE_DELTA_TAIL_W:-}"
 UPRIGHT_W="${UPRIGHT_W:-}"
 PROGRESS_BACKSLIDE_W="${PROGRESS_BACKSLIDE_W:-}"
 TRAINING_REGIME="${TRAINING_REGIME:-}"
+HARD_COMPONENTS="${HARD_COMPONENTS:-}"
 CONT_BASE_STEP="${CONT_BASE_STEP:-}"
 CRITIC_HEIGHT_SCAN="${CRITIC_HEIGHT_SCAN:-}"
 TASK="${TASK:-Mjlab-Velocity-Flat-Nubots-Nugus}"
@@ -202,13 +203,25 @@ emit_manifest() {
   fi
 }
 
+# Resolve GIT_COMMIT for manifest pins: explicit env > configmap.yaml > HEAD.
+if [[ -z "${GIT_COMMIT:-}" ]]; then
+  CONFIGMAP="${SCRIPT_DIR}/configmap.yaml"
+  if [[ -f "$CONFIGMAP" ]]; then
+    GIT_COMMIT="$(grep '^  GIT_COMMIT:' "$CONFIGMAP" | head -1 | sed -E 's/^  GIT_COMMIT: "?([^"]*)"?/\1/')"
+  fi
+fi
+if [[ -z "${GIT_COMMIT:-}" ]]; then
+  GIT_COMMIT="$(git -C "${SCRIPT_DIR}/../.." rev-parse HEAD)"
+fi
+export GIT_COMMIT
+
 # Export the knobs that are constant across a batch once. Per-cell values are
 # exported inside each generator below just before emit_manifest.
 export GAIT_PERIOD EFFORT_LO EFFORT_HI LOGGER EXPERIMENT_NAME WANDB_PROJECT
 export MAX_ITERATIONS PHASE_ITERATIONS SILENCE_CLOCK CURRENT_OBS RESUME RESAMPLE_MIN
 export WANDB_RUN_PATH WANDB_RUN_NAME
 export PHASE_DELTA_STRONG_ITERS PHASE_DELTA_STRONG_W PHASE_DELTA_TAIL_W UPRIGHT_W PROGRESS_BACKSLIDE_W
-export TRAINING_REGIME CONT_BASE_STEP CRITIC_HEIGHT_SCAN TASK
+export TRAINING_REGIME CONT_BASE_STEP CRITIC_HEIGHT_SCAN TASK HARD_COMPONENTS
 
 gen_default_matrix() {
   for variant in "${VARIANTS[@]}"; do
@@ -599,6 +612,67 @@ gen_v14_clock_anneal_hard() {
 }
 
 
+# BATCH=v16-short: Phase-0 validation — same as v16 but 500 iters.
+gen_v16_short() {
+  local joule_label
+  export MJLAB_VARIANT="clock_anneal"
+  export JOULE_W="1e-5"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="500"
+  export PHASE_ITERATIONS="2000"
+  export WANDB_RUN_PATH=""
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="base"
+  export CONT_BASE_STEP=""
+  export CRITIC_HEIGHT_SCAN="true"
+  export PHASE_DELTA_TAIL_W=""
+  export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__joule-${joule_label}__hs__s1__v16-short"
+  export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-v16-short,critic-height-scan,v16-short"
+  emit_manifest "mj-gs-v16-short-ca-hs-joule-1e5"
+}
+
+
+# BATCH=v16: Phase-0 smoke — clock_anneal flat base (no hard_continue), 2k iters,
+# critic height_scan, JOULE_W=1e-5. Establishes the post-E0.2/A3/C1 baseline.
+gen_v16_base() {
+  local joule_label
+  export MJLAB_VARIANT="clock_anneal"
+  export JOULE_W="1e-5"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SEED="1"
+  export RESUME="false"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export WANDB_RUN_PATH=""
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="base"
+  export CONT_BASE_STEP=""
+  export CRITIC_HEIGHT_SCAN="true"
+  export PHASE_DELTA_TAIL_W=""
+  export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__joule-${joule_label}__hs__s1__${BATCH}"
+  export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan,v16-base"
+  emit_manifest "mj-gs-${BATCH}-ca-hs-joule-1e5"
+}
+
+
 # BATCH=v15: v14 clock_anneal base→hard extended to 20k iters. Hard ramp in the
 # first ~3k iters (hard_continue from CONT_BASE_STEP=48000), then holds final
 # hard parameters through 20k. PHASE_ITERATIONS=2000 freezes phase boundaries.
@@ -637,6 +711,83 @@ gen_v15_clock_anneal_hard_long() {
     emit_manifest "mj-gs-${BATCH}-ca-base-hard-20k${job_suffix}"
   done
 }
+
+
+# BATCH=v17: hard-stage decoupling on v16-style base (clock_anneal, hs-critic,
+# joule 1e-5). Each cell enables exactly one hard component at CONT_BASE_STEP.
+gen_v17_hard_decouple() {
+  local joule_label component slug
+  export MJLAB_VARIANT="clock_anneal"
+  export JOULE_W="1e-5"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export PHASE_DELTA_TAIL_W=""
+  export UPRIGHT_W="0.5"
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="hard_continue"
+  export CONT_BASE_STEP="48000"
+  export CRITIC_HEIGHT_SCAN="true"
+  export RESUME="false"
+  export WANDB_RUN_PATH=""
+  export SEED="1"
+  for component in commands pushes upright phasec all; do
+    case "$component" in
+      commands) export HARD_COMPONENTS="commands" ;;
+      pushes) export HARD_COMPONENTS="pushes" ;;
+      upright) export HARD_COMPONENTS="upright" ;;
+      phasec) export HARD_COMPONENTS="phasec" ;;
+      all) export HARD_COMPONENTS="commands,pushes,upright,phasec" ;;
+    esac
+    slug="$component"
+    export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__joule-${joule_label}__hard-${slug}__s1__${BATCH}"
+    export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan,base-hard,hard-${slug}"
+    emit_manifest "mj-gs-${BATCH}-${slug}"
+  done
+}
+
+
+# BATCH=v18: single-stage hard-from-start (no hard_continue / Phase-C ramps).
+# Two cells compare final upright weight 0.25 vs 0.5.
+gen_v18_hard_from_start() {
+  local joule_label upright_w upright_slug
+  export MJLAB_VARIANT="clock_anneal"
+  export JOULE_W="1e-5"
+  joule_label="$(joule_tag "$JOULE_W")"
+  export PHASE_C_FRAC="0.5"
+  export STAND_W="0.15"
+  export SILENCE_CLOCK="0"
+  export CURRENT_OBS="0"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export PHASE_DELTA_STRONG_ITERS="1000"
+  export PHASE_DELTA_STRONG_W="-5.0"
+  export PHASE_DELTA_TAIL_W=""
+  export PROGRESS_BACKSLIDE_W="-0.5"
+  export TASK="Mjlab-Velocity-Flat-Nubots-Nugus"
+  export TRAINING_REGIME="hard_from_start"
+  export HARD_COMPONENTS=""
+  export CONT_BASE_STEP=""
+  export CRITIC_HEIGHT_SCAN="true"
+  export RESUME="false"
+  export WANDB_RUN_PATH=""
+  export SEED="1"
+  for upright_w in 0.25 0.5; do
+    export UPRIGHT_W="$upright_w"
+    upright_slug="${upright_w//./}"
+    export RUN_NAME="clock_anneal__stand-0.15__pc-0.5__joule-${joule_label}__hard-start__upright-${upright_w}__s1__${BATCH}"
+    export WANDB_TAGS="clock_anneal,stand-0.15,pc-0.5,joule-${joule_label},seed-1,gridsearch,batch-${BATCH},critic-height-scan,hard-from-start,upright-${upright_w}"
+    emit_manifest "mj-gs-${BATCH}-upright-${upright_slug}"
+  done
+}
+
 
 # BATCH=v10b: rough hard continuation from stage B (not queued in v10 launch).
 # Run manually after stage B completes:
@@ -686,6 +837,10 @@ case "$BATCH" in
   v13) gen_v13_grid; expected=2 ;;
   v14) gen_v14_clock_anneal_hard; expected=1 ;;
   v15) gen_v15_clock_anneal_hard_long; expected=2 ;;
+  v16-short) gen_v16_short; expected=1 ;;
+  v16) gen_v16_base; expected=1 ;;
+  v17) gen_v17_hard_decouple; expected=5 ;;
+  v18) gen_v18_hard_from_start; expected=2 ;;
   *)
     gen_default_matrix
     expected=$((${#VARIANTS[@]} * ${#STAND_W_VALUES[@]} * ${#PHASE_C_FRACS[@]} * ${#SEEDS[@]}))

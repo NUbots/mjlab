@@ -132,6 +132,7 @@ GPU_IDS="${GPU_IDS:-0}"
 [[ -n "${UPRIGHT_W:-}" ]] && export UPRIGHT_W
 [[ -n "${PROGRESS_BACKSLIDE_W:-}" ]] && export PROGRESS_BACKSLIDE_W
 [[ -n "${TRAINING_REGIME:-}" ]] && export TRAINING_REGIME
+[[ -n "${HARD_COMPONENTS:-}" ]] && export HARD_COMPONENTS
 [[ -n "${CONT_BASE_STEP:-}" ]] && export CONT_BASE_STEP
 [[ -n "${CRITIC_HEIGHT_SCAN:-}" ]] && export CRITIC_HEIGHT_SCAN
 [[ -n "${TASK:-}" ]] && export TASK

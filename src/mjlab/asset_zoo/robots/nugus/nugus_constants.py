@@ -3,7 +3,7 @@ from pathlib import Path
 import mujoco
 
 from mjlab import MJLAB_SRC_PATH
-from mjlab.actuator import BuiltinPositionActuatorCfg
+from mjlab.actuator import DcMotorActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 from mjlab.utils.actuator import ElectricActuator
 from mjlab.utils.spec_config import CollisionCfg
@@ -39,11 +39,29 @@ def get_spec() -> mujoco.MjSpec:
 # Motor specs (from Nugus XML defaults).
 # Using armature values directly from the XML
 
+# BAM m1 Coulomb-viscous baselines (Rhoban/bam params/mx64/m1.json).
+FRICTIONLOSS_MX64 = 0.09038677246291783
+VISCOUS_DAMPING_MX64 = 0.011691602145974832
+
+# BAM m1 Coulomb-viscous baselines (Rhoban/bam params/mx106/m1.json).
+FRICTIONLOSS_MX106 = 0.10352026623606064
+VISCOUS_DAMPING_MX106 = 0.03520238029013507
+
+# PROVISIONAL: XH540-W270 from MX-106 scaled by gear ratio (270.4:1 vs 225:1).
+_XH540_GEAR_SCALE = 270.4 / 225.0
+FRICTIONLOSS_XH540 = FRICTIONLOSS_MX106 * _XH540_GEAR_SCALE
+VISCOUS_DAMPING_XH540 = VISCOUS_DAMPING_MX106 * _XH540_GEAR_SCALE
+
+# No-load speed @ 12 V (rad/s): 45 / 30 / 63 rpm for MX-106 / XH540 / MX-64.
+VELOCITY_LIMIT_MX106 = 4.7
+VELOCITY_LIMIT_XH540 = 3.2
+VELOCITY_LIMIT_MX64 = 6.6
+
 # MX106 motor (hip yaw joints)
 ARMATURE_MX106 = 0.0266
 ACTUATOR_MX106 = ElectricActuator(
   reflected_inertia=ARMATURE_MX106,
-  velocity_limit=30,  # TODO, not specified in XML
+  velocity_limit=VELOCITY_LIMIT_MX106,
   effort_limit=11.086,  # From forcerange in xml
 )
 
@@ -51,7 +69,7 @@ ACTUATOR_MX106 = ElectricActuator(
 ARMATURE_MX64 = 0.01195
 ACTUATOR_MX64 = ElectricActuator(
   reflected_inertia=ARMATURE_MX64,
-  velocity_limit=30,  # TODO, not specified in xml
+  velocity_limit=VELOCITY_LIMIT_MX64,
   effort_limit=6.1621,  # From forcerange in xml
 )
 
@@ -59,7 +77,7 @@ ACTUATOR_MX64 = ElectricActuator(
 ARMATURE_XH540 = 0.0266
 ACTUATOR_XH540 = ElectricActuator(
   reflected_inertia=ARMATURE_XH540,
-  velocity_limit=30,  # TODO, not specified in xml
+  velocity_limit=VELOCITY_LIMIT_XH540,
   effort_limit=11.086,  # From forcerange in xml
 )
 
@@ -75,7 +93,7 @@ STIFFNESS_XH540 = 56.052
 DAMPING_XH540 = 1.6548
 
 # Actuator configs for different joint groups
-NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
+NUGUS_ACTUATOR_ARMS = DcMotorActuatorCfg(
   target_names_expr=(
     "right_shoulder_pitch",
     "left_shoulder_pitch",
@@ -87,12 +105,16 @@ NUGUS_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
   stiffness=STIFFNESS_MX64,
   damping=DAMPING_MX64,
   effort_limit=ACTUATOR_MX64.effort_limit,
+  saturation_effort=ACTUATOR_MX64.effort_limit,
+  velocity_limit=VELOCITY_LIMIT_MX64,
   armature=ACTUATOR_MX64.reflected_inertia,
+  frictionloss=FRICTIONLOSS_MX64,
+  viscous_damping=VISCOUS_DAMPING_MX64,
   delay_min_lag=1,
   delay_max_lag=3,
 )
 
-NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
+NUGUS_ACTUATOR_HIPS = DcMotorActuatorCfg(
   target_names_expr=(
     "right_hip_yaw",
     "left_hip_yaw",
@@ -100,12 +122,16 @@ NUGUS_ACTUATOR_HIPS = BuiltinPositionActuatorCfg(
   stiffness=STIFFNESS_MX106,
   damping=DAMPING_MX106,
   effort_limit=ACTUATOR_MX106.effort_limit,
+  saturation_effort=ACTUATOR_MX106.effort_limit,
+  velocity_limit=VELOCITY_LIMIT_MX106,
   armature=ACTUATOR_MX106.reflected_inertia,
+  frictionloss=FRICTIONLOSS_MX106,
+  viscous_damping=VISCOUS_DAMPING_MX106,
   delay_min_lag=1,
   delay_max_lag=3,
 )
 
-NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
+NUGUS_ACTUATOR_LEGS = DcMotorActuatorCfg(
   target_names_expr=(
     "right_hip_roll",
     "left_hip_roll",
@@ -121,17 +147,25 @@ NUGUS_ACTUATOR_LEGS = BuiltinPositionActuatorCfg(
   stiffness=STIFFNESS_XH540,
   damping=DAMPING_XH540,
   effort_limit=ACTUATOR_XH540.effort_limit,
+  saturation_effort=ACTUATOR_XH540.effort_limit,
+  velocity_limit=VELOCITY_LIMIT_XH540,
   armature=ACTUATOR_XH540.reflected_inertia,
+  frictionloss=FRICTIONLOSS_XH540,
+  viscous_damping=VISCOUS_DAMPING_XH540,
   delay_min_lag=1,
   delay_max_lag=3,
 )
 
-NUGUS_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
+NUGUS_ACTUATOR_HEAD = DcMotorActuatorCfg(
   target_names_expr=("neck_yaw", "head_pitch"),
   stiffness=STIFFNESS_MX64,
   damping=DAMPING_MX64,
   effort_limit=ACTUATOR_MX64.effort_limit,
+  saturation_effort=ACTUATOR_MX64.effort_limit,
+  velocity_limit=VELOCITY_LIMIT_MX64,
   armature=ACTUATOR_MX64.reflected_inertia,
+  frictionloss=FRICTIONLOSS_MX64,
+  viscous_damping=VISCOUS_DAMPING_MX64,
   delay_min_lag=1,
   delay_max_lag=3,
 )
@@ -274,7 +308,7 @@ def get_nugus_robot_cfg() -> EntityCfg:
 
 NUGUS_ACTION_SCALE: dict[str, float] = {}
 for a in NUGUS_ARTICULATION.actuators:
-  assert isinstance(a, BuiltinPositionActuatorCfg)
+  assert isinstance(a, DcMotorActuatorCfg)
   e = a.effort_limit
   s = a.stiffness
   names = a.target_names_expr

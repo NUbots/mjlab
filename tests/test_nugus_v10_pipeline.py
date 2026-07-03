@@ -34,6 +34,7 @@ def _clear_nugus_env(monkeypatch: pytest.MonkeyPatch) -> None:
     "TRAINING_REGIME",
     "RESUME",
     "CONT_BASE_STEP",
+    "HARD_COMPONENTS",
     "PHASE_ITERATIONS",
     "MAX_ITERATIONS",
     "UPRIGHT_W",
@@ -106,10 +107,10 @@ def test_hard_continue_cont_base_override(monkeypatch: pytest.MonkeyPatch) -> No
   assert velocity_stages[0]["step"] == 12345
 
 
-def test_hard_continue_fresh_base_hard_keeps_base_command_vel(
+def test_hard_continue_fresh_base_hard_merges_command_ramp_at_cont_base(
   monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-  """Fresh base→hard with CONT_BASE_STEP keeps base command_vel until cont_base."""
+  """Fresh base→hard keeps base command_vel stages and appends hard ramp."""
   monkeypatch.setenv("TRAINING_REGIME", "hard_continue")
   monkeypatch.setenv("RESUME", "false")
   monkeypatch.setenv("CONT_BASE_STEP", str(_CONT_BASE))
@@ -118,7 +119,9 @@ def test_hard_continue_fresh_base_hard_keeps_base_command_vel(
   base_stages = (
     make_velocity_env_cfg().curriculum["command_vel"].params["velocity_stages"]
   )
-  assert cfg.curriculum["command_vel"].params["velocity_stages"] == base_stages
+  velocity_stages = cfg.curriculum["command_vel"].params["velocity_stages"]
+  assert velocity_stages[: len(base_stages)] == base_stages
+  assert velocity_stages[len(base_stages)]["step"] == _CONT_BASE
   assert "push_robot_ramp" in cfg.curriculum
   push_stages = cfg.curriculum["push_robot_ramp"].params["push_stages"]
   assert push_stages[0]["step"] == _CONT_BASE
@@ -241,3 +244,63 @@ def _make_command_curriculum_env(step_counter: int) -> tuple[MagicMock, MagicMoc
   env.common_step_counter = step_counter
   env.command_manager.get_term = MagicMock(return_value=term)
   return env, term
+
+
+def test_hard_components_commands_only_adds_command_ramp(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "hard_continue")
+  monkeypatch.setenv("CONT_BASE_STEP", str(_CONT_BASE))
+  monkeypatch.setenv("PHASE_ITERATIONS", str(_PHASE_ITERATIONS))
+  monkeypatch.setenv("HARD_COMPONENTS", "commands")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "push_robot_ramp" not in cfg.curriculum
+  assert "upright_ramp" not in cfg.curriculum
+  assert "joule_heating_rampup" not in cfg.curriculum
+  base_stages = (
+    make_velocity_env_cfg().curriculum["command_vel"].params["velocity_stages"]
+  )
+  velocity_stages = cfg.curriculum["command_vel"].params["velocity_stages"]
+  assert velocity_stages[: len(base_stages)] == base_stages
+  assert velocity_stages[len(base_stages)]["step"] == _CONT_BASE
+  assert velocity_stages[-1]["lin_vel_x"] == (-0.75, 0.75)
+
+
+def test_hard_components_phasec_off_skips_phase_c_ramps(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "hard_continue")
+  monkeypatch.setenv("CONT_BASE_STEP", str(_CONT_BASE))
+  monkeypatch.setenv("PHASE_ITERATIONS", str(_PHASE_ITERATIONS))
+  monkeypatch.setenv("HARD_COMPONENTS", "commands,pushes,upright")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "joule_heating_rampup" not in cfg.curriculum
+  assert cfg.rewards["joule_heating"].weight == 0.0
+
+
+def test_hard_from_start_applies_static_final_values(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  monkeypatch.setenv("TRAINING_REGIME", "hard_from_start")
+  monkeypatch.setenv("UPRIGHT_W", "0.25")
+  monkeypatch.setenv("JOULE_W", "1e-5")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "push_robot_ramp" not in cfg.curriculum
+  assert "upright_ramp" not in cfg.curriculum
+  assert "joule_heating_rampup" not in cfg.curriculum
+  velocity_stages = cfg.curriculum["command_vel"].params["velocity_stages"]
+  assert velocity_stages == [
+    {
+      "step": 0,
+      "lin_vel_x": (-0.75, 0.75),
+      "lin_vel_y": (-0.45, 0.45),
+      "ang_vel_z": (-0.80, 0.80),
+    }
+  ]
+  assert cfg.events["push_robot"].params["velocity_range"]["x"] == (-0.4, 0.8)
+  assert cfg.rewards["upright"].weight == 0.25
+  assert cfg.rewards["upright"].params["std"] == 0.35
+  assert cfg.rewards["joule_heating"].weight == -1e-5
+  assert cfg.rewards["joint_acc_l2"].weight == -1e-4
+  assert cfg.rewards["foot_swing_height"].weight == 0.75
+  assert "clock_anneal" in cfg.curriculum
