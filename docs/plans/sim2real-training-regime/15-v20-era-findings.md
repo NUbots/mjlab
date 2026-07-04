@@ -104,15 +104,40 @@ edge-of-competence curriculum is therefore a STABILITY mechanism, not
 just a speed feature: difficulty tracking competence keeps the objective
 unsaturated and the gradient informative.
 
-Open sub-question (v23 answers it): v22b's final ~400 iters AT L5 sagged
-(trkLin 1.2→0.6, fell →1.75). Candidate readings: mid-learning at the
-hardest task ever attempted (400 iters is short); exp-shaped tracking
-reward punishes absolute error harder at high commands (metric geometry,
-not regression); or population-mean attainment masks high-command failure
-so demote never fires (refinement: bin attainment by |cmd|). Remedies if
-churn appears even with a live ladder: late LR/desired_kl anneal
-("landing" phase once top level + plateau), fewer epochs late, periodic
-critic refresh, best-checkpoint selection (standing policy since v16e).
+Open sub-question — ANSWERED by v23 (2026-07-05): v22b's late L5 sag was
+the front edge of a structural failure, not mid-learning. v23 (8-GPU,
+6144/GPU, 4000 iters, same stack) climbed L0→L5+push2 by iter 1815
+(healthy plateau: ep 880, fell 1.83, full ±0.75 envelope — checkpoint
+`model_1750` in log dir `v23-prod-20260704-222010`, best policy artifact
+to date), then spiraled: ep 880→325 and fell 1.83→10.7 in ~280 iters.
+
+### R7 — The brink spiral and the demote-latency hole (v23 postmortem)
+
+Mechanism: the per-env competence EMAs (α=0.1 per EPISODE END) are nearly
+static while episodes are long — at ep~900 each env reports once per ~9
+iters, so a crash at the top of the ladder is invisible to the controller
+for ~200 iters. The demote cascade DID fire (commands walked 5→0,
+penalties retreated to zero — the machinery worked as designed), but by
+then the −10 fall terminations had dominated the gradient for 200+ iters
+and the policy was shattered: at L0, attain read −0.68 (moving AGAINST
+commands), fell_ema 1.0, ep 23 steps, with NO recovery in 1200 further
+iters. The fall-gradient spiral is absorbing once entered; σ floor did
+not help (std pinned 0.13 throughout — this is not an exploration
+failure). Run killed at 3328.
+
+Fix shipped (commit a3433bc, v24): fast windowed fall-rate channel —
+population falls/episode-ends refreshed every iteration with α=0.2 EMA;
+demote fires at rate > 0.5 (healthy L5 measured ~0.26), reacting in ~5
+iters and cascading L5→L0 in 5 more. Plus top-rung promote caution
+(streak 5 for L≥4). Feasibility tests per the R3 standing rule: crash
+demotes on the fast channel alone with stale-healthy slow EMAs; healthy
+L5 band (0.30) does not trip the 0.5 bar.
+
+Remedies still in reserve if v24 spirals anyway: lower fast bar (0.4),
+soften the fall termination penalty during demote windows, landing
+LR/desired_kl anneal at top level, per-|cmd| binned attainment (the
+population mean dilutes high-command failure), best-checkpoint selection
+(standing).
 
 ## Multi-GPU program (user-driven, latency-first)
 
