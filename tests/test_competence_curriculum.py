@@ -295,7 +295,10 @@ def test_staged_on_competence_demotes_on_instability() -> None:
   term = staged_on_competence(cfg, env)
   tracker = get_competence_tracker(env)
 
-  # Drive to stage 2 via two stable windows.
+  # Drive to stage 2 via two stable windows. The fast fall channel starts
+  # at its pessimistic init (1.0) and must be marked healthy like the slow
+  # EMAs or it vetoes every promotion.
+  tracker.fast_fall_rate = 0.05
   for it in (10, 20):
     tracker.fell_ema[:] = 0.1
     tracker.ep_len_frac_ema[:] = 0.95
@@ -379,3 +382,101 @@ def test_attainment_true_fraction_at_small_commands() -> None:
   tracker2 = CompetenceTracker(env)
   tracker2.record_step(env)
   assert tracker2._attain_weight.sum().item() == 0.0
+
+
+def test_fast_fall_rate_demotes_despite_stale_slow_emas() -> None:
+  """v23 postmortem: a top-rung crash must demote on the fast channel alone.
+
+  During the v23 collapse the slow per-env EMAs looked healthy for ~200
+  iterations (long episodes -> rare episode-end updates) while the policy
+  shattered under -10 fall gradients. The windowed fall rate must cascade
+  the level down even when every slow EMA still reads healthy.
+  """
+  ctrl = CompetenceController(l_max=5, thresholds=_thresholds())
+  ctrl.level = 5
+  step = 1000 * _NUM_STEPS_PER_ENV
+  for expected_level in (4, 3, 2, 1, 0):
+    assert (
+      ctrl.update(
+        track_err_norm=0.1,
+        fell_ema=0.1,
+        ep_len_frac=0.9,
+        common_step_counter=step,
+        attain_ema=0.9,
+        wobble_ema=0.01,
+        fast_fall_rate=0.8,
+      )
+      == "demote"
+    )
+    assert ctrl.level == expected_level
+    step += _NUM_STEPS_PER_ENV
+
+
+def test_fast_fall_rate_clears_healthy_top_rung_band() -> None:
+  """Healthy L5 operation measured ~0.26 falls/episode-end (v23 iter 1815);
+  the 0.5 bar must not demote a working hard-envelope policy."""
+  ctrl = CompetenceController(l_max=5, thresholds=_thresholds())
+  ctrl.level = 5
+  result = ctrl.update(
+    track_err_norm=0.1,
+    fell_ema=0.28,
+    ep_len_frac=0.85,
+    common_step_counter=1000 * _NUM_STEPS_PER_ENV,
+    attain_ema=0.7,
+    wobble_ema=0.08,
+    fast_fall_rate=0.30,
+  )
+  assert result is None
+  assert ctrl.level == 5
+
+
+def test_top_rung_requires_longer_streak() -> None:
+  """Promotion INTO levels >= top_level_start needs the longer streak."""
+  th = _thresholds(top_streak_required=4, top_level_start=3)
+  ctrl = CompetenceController(l_max=5, thresholds=th)
+  ctrl.level = 2
+  step = 1000 * _NUM_STEPS_PER_ENV
+
+  def healthy_update() -> str | None:
+    nonlocal step
+    step += 2 * _NUM_STEPS_PER_ENV
+    return ctrl.update(
+      track_err_norm=0.1,
+      fell_ema=0.1,
+      ep_len_frac=0.9,
+      common_step_counter=step,
+      attain_ema=0.9,
+      wobble_ema=0.01,
+    )
+
+  # Base streak (2) is NOT enough to enter level 3 (top rung starts there).
+  assert healthy_update() is None
+  assert healthy_update() is None
+  assert ctrl.level == 2
+  # The longer streak (4) is.
+  assert healthy_update() is None
+  assert healthy_update() == "promote"
+  assert ctrl.level == 3
+
+
+def test_tracker_fast_window_tracks_crash() -> None:
+  """The fast rate must fall during health and alarm within ~10 iterations
+  of a total crash (vs ~200 for the per-env EMAs)."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  assert tracker.population_means()["fast_fall_rate"] == pytest.approx(1.0)
+
+  step = 24
+  for _ in range(30):
+    env.common_step_counter = step
+    tracker.finalize_episodes(env, torch.tensor([0, 1]))
+    step += 24
+  healthy = tracker.population_means()["fast_fall_rate"]
+  assert healthy < 0.05
+
+  crash_env = _mock_tracked_env(fell=True, ep_len=200)
+  for _ in range(10):
+    crash_env.common_step_counter = step
+    tracker.finalize_episodes(crash_env, torch.tensor([0, 1]))
+    step += 24
+  assert tracker.population_means()["fast_fall_rate"] > 0.5

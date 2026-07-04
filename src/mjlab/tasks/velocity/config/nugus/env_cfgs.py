@@ -550,6 +550,8 @@ def _competence_threshold_params() -> dict[str, float | int]:
     "promote_fell": _env_float("COMPETENCE_PROMOTE_FELL", 0.3),
     "demote_fell": _env_float("COMPETENCE_DEMOTE_FELL", 0.35),
     "cooldown_iters": _env_int("COMPETENCE_COOLDOWN_ITERS", 150),
+    "demote_fast_fell": _env_float("COMPETENCE_DEMOTE_FAST_FELL", 0.5),
+    "top_streak_required": _env_int("COMPETENCE_TOP_STREAK", 5),
   }
 
 

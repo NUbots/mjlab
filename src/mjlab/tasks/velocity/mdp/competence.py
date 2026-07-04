@@ -71,6 +71,19 @@ class CompetenceThresholds:
   stability_ep_len_frac: float = 0.8
   stability_fell: float = 0.5
   stability_attain: float = 0.6
+  # Fast demote channel (v23 postmortem): the per-env EMAs update only at
+  # episode ends, so at healthy episode lengths (~900 steps) a crash at the
+  # top of the ladder is invisible for ~200 iterations — long enough for
+  # the -10 fall terminations to dominate the gradient and shatter the
+  # policy (v23: L5 -> fell 10.7 -> demoted too late -> attain -0.68,
+  # unrecoverable). The windowed population fall rate crosses this bar
+  # within ~5 iterations of a real crash. Healthy L5 operation measured
+  # ~0.26 falls/episode-end (v23 iter 1815), so 0.5 clears the working
+  # band while catching the spiral at its front edge.
+  demote_fast_fell: float = 0.5
+  # Extra promote caution on the top rungs (L4 -> L5 was v23's cliff).
+  top_streak_required: int = 5
+  top_level_start: int = 4
 
 
 class CompetenceController:
@@ -121,6 +134,7 @@ class CompetenceController:
     common_step_counter: int,
     attain_ema: float = 0.0,
     wobble_ema: float = 1.0,
+    fast_fall_rate: float = 0.0,
   ) -> str | None:
     """Return ``promote``, ``demote``, or None.
 
@@ -141,6 +155,7 @@ class CompetenceController:
       attain_ema < t.demote_attain
       or wobble_ema > t.demote_wobble
       or fell_ema > t.demote_fell
+      or fast_fall_rate > t.demote_fast_fell
     )
 
     if demote_bad and self.level > 0:
@@ -154,8 +169,13 @@ class CompetenceController:
       return None
 
     self.promote_streak += 1
+    streak_required = (
+      t.top_streak_required
+      if self.level + 1 >= t.top_level_start
+      else t.promote_streak_required
+    )
     if (
-      self.promote_streak >= self.thresholds.promote_streak_required
+      self.promote_streak >= streak_required
       and self.level < self.l_max
       and self._cooldown_elapsed(common_step_counter)
     ):
@@ -198,6 +218,15 @@ class CompetenceTracker:
     self.attain_ema = torch.zeros(n, device=self.device)
     self.wobble_ema = torch.ones(n, device=self.device)
     self._finalized_step = -1
+    # Fast population fall-rate channel: falls / episode-ends accumulated
+    # since the last refresh, smoothed with a per-iteration EMA. Pessimistic
+    # init like the slow EMAs; refreshed at most once per training iteration
+    # and only once enough episodes ended for the ratio to be meaningful.
+    self._win_fell = 0.0
+    self._win_done = 0.0
+    self._fast_next_step = 0
+    self.fast_fall_rate = 1.0
+    self.fast_alpha = 0.2
 
   def state_dict(self) -> dict[str, Any]:
     return {
@@ -206,6 +235,7 @@ class CompetenceTracker:
       "ep_len_frac_ema": self.ep_len_frac_ema.cpu(),
       "attain_ema": self.attain_ema.cpu(),
       "wobble_ema": self.wobble_ema.cpu(),
+      "fast_fall_rate": self.fast_fall_rate,
     }
 
   def load_state_dict(self, state: dict[str, Any]) -> None:
@@ -215,6 +245,8 @@ class CompetenceTracker:
     if "attain_ema" in state:
       self.attain_ema = state["attain_ema"].to(self.device)
       self.wobble_ema = state["wobble_ema"].to(self.device)
+    if "fast_fall_rate" in state:
+      self.fast_fall_rate = float(state["fast_fall_rate"])
 
   def record_step(self, env: ManagerBasedRlEnv) -> None:
     command_term = env.command_manager.get_term("twist")
@@ -311,6 +343,19 @@ class CompetenceTracker:
     self._wobble_sum[ids] = 0.0
     self._step_count[ids] = 0.0
 
+    self._win_fell += float(fell.sum().item())
+    self._win_done += float(len(ids))
+    if env.common_step_counter >= self._fast_next_step:
+      # Require ~0.2% of envs to have finished an episode before trusting
+      # the ratio; below that, keep accumulating into the next window.
+      if self._win_done >= max(4.0, 0.002 * self.num_envs):
+        rate = self._win_fell / self._win_done
+        a = self.fast_alpha
+        self.fast_fall_rate = a * rate + (1.0 - a) * self.fast_fall_rate
+        self._win_fell = 0.0
+        self._win_done = 0.0
+        self._fast_next_step = env.common_step_counter + _NUM_STEPS_PER_ENV
+
   def population_means(self) -> dict[str, float]:
     return {
       "track_err_norm": self.track_err_ema.mean().item(),
@@ -318,6 +363,7 @@ class CompetenceTracker:
       "ep_len_frac": self.ep_len_frac_ema.mean().item(),
       "attain": self.attain_ema.mean().item(),
       "wobble": self.wobble_ema.mean().item(),
+      "fast_fall_rate": self.fast_fall_rate,
     }
 
 
@@ -400,6 +446,8 @@ class adaptive_command_level:
       promote_fell=cfg.params.get("promote_fell", 0.3),
       demote_fell=cfg.params.get("demote_fell", 0.35),
       cooldown_iters=cfg.params.get("cooldown_iters", 150),
+      demote_fast_fell=cfg.params.get("demote_fast_fell", 0.5),
+      top_streak_required=cfg.params.get("top_streak_required", 5),
     )
     self._controller = CompetenceController(l_max=l_max, thresholds=thresholds)
     self._tracker = get_competence_tracker(env)
@@ -424,6 +472,8 @@ class adaptive_command_level:
     promote_fell: float = 0.3,
     demote_fell: float = 0.35,
     cooldown_iters: int = 150,
+    demote_fast_fell: float = 0.5,
+    top_streak_required: int = 5,
   ) -> dict[str, torch.Tensor]:
     del (
       command_name,
@@ -437,6 +487,8 @@ class adaptive_command_level:
       promote_fell,
       demote_fell,
       cooldown_iters,
+      demote_fast_fell,
+      top_streak_required,
     )
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
@@ -450,6 +502,7 @@ class adaptive_command_level:
         common_step_counter=env.common_step_counter,
         attain_ema=stats["attain"],
         wobble_ema=stats["wobble"],
+        fast_fall_rate=stats["fast_fall_rate"],
       )
     snapshot = _apply_command_level(env, self._command_name, self._controller.level)
     snapshot.update({f"competence_{k}": torch.tensor(v) for k, v in stats.items()})
@@ -472,6 +525,8 @@ class adaptive_push_level:
       promote_fell=cfg.params.get("promote_fell", 0.3),
       demote_fell=cfg.params.get("demote_fell", 0.35),
       cooldown_iters=cfg.params.get("cooldown_iters", 150),
+      demote_fast_fell=cfg.params.get("demote_fast_fell", 0.5),
+      top_streak_required=cfg.params.get("top_streak_required", 5),
     )
     self._controller = CompetenceController(
       l_max=l_max, thresholds=thresholds, gate_on_track_err=False
@@ -501,6 +556,8 @@ class adaptive_push_level:
     promote_fell: float = 0.3,
     demote_fell: float = 0.35,
     cooldown_iters: int = 150,
+    demote_fast_fell: float = 0.5,
+    top_streak_required: int = 5,
   ) -> dict[str, torch.Tensor]:
     del (
       event_name,
@@ -515,6 +572,8 @@ class adaptive_push_level:
       promote_fell,
       demote_fell,
       cooldown_iters,
+      demote_fast_fell,
+      top_streak_required,
     )
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
@@ -528,6 +587,7 @@ class adaptive_push_level:
         common_step_counter=env.common_step_counter,
         attain_ema=stats["attain"],
         wobble_ema=stats["wobble"],
+        fast_fall_rate=stats["fast_fall_rate"],
       )
     snapshot = _apply_push_level(env, self._event_name, self._controller.level)
     snapshot.update({f"competence_{k}": torch.tensor(v) for k, v in stats.items()})
@@ -566,6 +626,7 @@ class staged_on_competence:
         demote_fell=cfg.params.get("demote_fell", 0.35),
         demote_attain=cfg.params.get("demote_attain", 0.5),
         demote_wobble=cfg.params.get("demote_wobble", 0.25),
+        demote_fast_fell=cfg.params.get("demote_fast_fell", 0.5),
       ),
     )
     self._stage_idx = 0
@@ -591,6 +652,8 @@ class staged_on_competence:
     promote_wobble: float = 0.10,
     demote_wobble: float = 0.25,
     promote_fell: float = 0.3,
+    demote_fast_fell: float = 0.5,
+    top_streak_required: int = 5,
   ) -> dict[str, torch.Tensor]:
     # The curriculum manager passes ALL cfg params as kwargs
     # (curriculum_manager.py: ``func(env, env_ids, **term_cfg.params)``), so
@@ -610,6 +673,8 @@ class staged_on_competence:
       promote_wobble,
       demote_wobble,
       promote_fell,
+      demote_fast_fell,
+      top_streak_required,
     )
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
@@ -626,6 +691,7 @@ class staged_on_competence:
       stats["fell_ema"] > t.demote_fell
       or stats["attain"] < t.demote_attain
       or stats["wobble"] > t.demote_wobble
+      or stats["fast_fall_rate"] > t.demote_fast_fell
     )
 
     if badly_lost and self._stage_idx > 0 and cooldown_elapsed:
