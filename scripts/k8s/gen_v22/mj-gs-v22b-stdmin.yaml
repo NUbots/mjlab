@@ -3,7 +3,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: mj-gs-v22-floor
+  name: mj-gs-v22b-stdmin
   namespace: mjlab
   labels:
     app.kubernetes.io/name: mjlab-train
@@ -154,9 +154,9 @@ spec:
                 - name: ENTROPY_START
                   value: ""
                 - name: ENTROPY_END
-                  value: "0.004"
-                - name: STD_MIN
                   value: ""
+                - name: STD_MIN
+                  value: "0.13"
                 - name: GAMMA
                   value: ""
                 - name: ADAPTIVE_COMMANDS
@@ -206,11 +206,11 @@ spec:
                 - name: EXPERIMENT_NAME
                   value: "nugus_gridsearch_v22"
                 - name: RUN_NAME
-                  value: "clock_owned__v22-floor-0.004__bs2048__s1__v22"
+                  value: "clock_owned__v22b-stdmin-0.13__bs2048__s1__v22"
                 - name: WANDB_PROJECT
                   value: "mjlab"
                 - name: WANDB_TAGS
-                  value: "clock_owned,v22-floor,entropy-end-0.004,bs2048,batch-v22,gridsearch"
+                  value: "clock_owned,v22b-stdmin,std-min-0.13,bs2048,batch-v22,gridsearch"
                 # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
                   value: "all"
