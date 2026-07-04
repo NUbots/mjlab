@@ -1076,6 +1076,46 @@ gen_wave4() {
 }
 
 
+# Shared R13 stack for v16e (doc 12): BASE2 (onesided + gait 0.7) + air 0.25 +
+# clearance-from-swing + entropy decay.
+_v16e_r13_exports() {
+  _wave1_base_exports
+  export FOOT_FLAT_ONESIDED="1"
+  export CLEARANCE_PER_CORNER=""
+  export SWING_HEIGHT_SOURCE="min_corner"
+  export GAIT_PERIOD="0.7"
+  export SWING_TARGET_HEIGHT="0.05"
+  export AIR_TIME_W="0.25"
+  export CLEARANCE_TARGET_FROM_SWING="1"
+  export ENTROPY_DECAY="1"
+  export ALIVE_W="0.5"
+  export MAX_ITERATIONS="2000"
+  export EXPERIMENT_NAME="nugus_gridsearch_v16e"
+}
+
+
+# BATCH=v16e: entropy-decay fix on the R13 stack (doc 12).
+gen_v16e() {
+  _v16e_r13_exports
+
+  export SEED="1"
+  export RUN_NAME="clock_persist__r13-stack__entropy-decay__s1__2k__v16e"
+  export WANDB_TAGS="clock_persist,r13-stack,entropy-decay,gait-0.7,air-0.25,clearance-swing,seed-1,2k,gridsearch,batch-v16e"
+  emit_manifest "mj-gs-v16e-r13-s1-2k"
+
+  export SEED="2"
+  export RUN_NAME="clock_persist__r13-stack__entropy-decay__s2__2k__v16e"
+  export WANDB_TAGS="clock_persist,r13-stack,entropy-decay,gait-0.7,air-0.25,clearance-swing,seed-2,2k,gridsearch,batch-v16e"
+  emit_manifest "mj-gs-v16e-r13-s2-2k"
+
+  export SEED="1"
+  export MAX_ITERATIONS="4000"
+  export RUN_NAME="clock_persist__r13-stack__entropy-decay__s1__4k__v16e"
+  export WANDB_TAGS="clock_persist,r13-stack,entropy-decay,gait-0.7,air-0.25,clearance-swing,seed-1,4k,gridsearch,batch-v16e"
+  emit_manifest "mj-gs-v16e-r13-s1-4k"
+}
+
+
 # BATCH=v16: Phase-0 smoke — clock_anneal flat base (no hard_continue), 2k iters,
 # critic height_scan, JOULE_W=1e-5. Establishes the post-E0.2/A3/C1 baseline.
 gen_v16_base() {
@@ -1280,6 +1320,7 @@ case "$BATCH" in
   wave2) gen_wave2; expected=5 ;;
   wave3) gen_wave3; expected=6 ;;
   wave4) gen_wave4; expected=3 ;;
+  v16e) gen_v16e; expected=3 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

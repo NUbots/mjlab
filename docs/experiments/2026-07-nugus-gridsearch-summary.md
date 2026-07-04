@@ -487,9 +487,71 @@ v13 baseline `l9wok1ss` on **same eval build** — **failed to load** (actor obs
 | jacc −3e-5 | https://wandb.ai/vincenttumm-the-university-of-newcastle/mjlab/runs/n85kiuli |
 | nomirror | in progress (started after main/jacc finished) |
 
-**Overnight wave-0 status (2026-07-03 ~19:30 UTC+9):** `mj-gs-v16d-main` and `mj-gs-v16d-jacc-3e5` **Running** (~55 min elapsed, ETA ~35 min → ~iter 1200/2000 est. from timing). `mj-gs-v16d-nomirror` **Pending** (GPU). W&B: main `xexvp9eb`, jacc `n85kiuli`. **D0 / BASE1 not yet chosen.**
+**Overnight wave-0 status (2026-07-03 ~20:25 UTC+9):**
 
-**Wave-1 code ready (2026-07-03):** commits `8e63786` (heel-toe knobs + `feet_flat_orientation` one-sided pitch + unit test), `fe9ff61` (wave-1 manifests @ `8e63786`). Superseded by `ce4da03` (wave 2–4 knobs + full manifest regen). **Wave 1 not launched** — blocked on v16d D0.
+| vcjob | Status | W&B | Notes |
+|-------|--------|-----|-------|
+| `mj-gs-v16d-main` | **Completed** | `xexvp9eb` | doc-09 gate **FAIL** @ iter 1999 (see below) |
+| `mj-gs-v16d-jacc-3e5` | **Completed** | `n85kiuli` | doc-09 gate **FAIL**; better `error_vel_x`, worse `fell_over` |
+| `mj-gs-v16d-nomirror` | **Completed** | pending | @1999: `error_vel_x` **0.084**, `air_time` **0.091**, ep_len **218** (late collapse); mid-run beat mirror on twist/stability |
+
+**Cluster pin:** `kubectl apply -f scripts/k8s/configmap.yaml` → `GIT_COMMIT=ce4da03` (was `8e63786`). Wave 1–4 manifests already pin `ce4da03`.
+
+**D0 (preliminary, main vs jacc @ iter 1999 kubectl logs — Metrics only):**
+
+| Metric | main | jacc-3e5 | Better |
+|--------|------|----------|--------|
+| `twist/error_vel_x` | 0.235 | **0.065** | jacc |
+| `air_time_mean` | 0.063 | **0.067** | jacc (both FAIL ≥0.15) |
+| `gait_air_cv_mean` | 0.380 | **0.299** | jacc |
+| `fell_over`/ep | **5.4** | 45.0 | **main** |
+| `track_linear_velocity` | **0.99** | 0.23 | main |
+
+**D0 BASE1 = `v16d-main` (jacc −1e-5, mirror).** jacc −3e-5 had lower twist errors but **late collapse** (`fell_over` 45/ep @1999). **Keep JOINT_ACC_W=−1e-5.**
+
+**MIRROR_AUG:** @ iter 1999 **keep mirror** — nomirror had better mid-run twist/air_time but **late collapse** (`fell_over` 25/ep vs main 5.4). R6/R7 launched with mirror; R8/R9 unchanged. Mid-run nomirror advantage may indicate mirror-map sign issue (doc 09) — investigate if shuffle persists.
+
+**Wave-1 (2026-07-03 ~22:55 UTC+9):**
+
+| Run | Status | Final metrics @ iter 999 (Metrics) |
+|-----|--------|-------------------------------------|
+| R4 flat-onesided | **Completed** | `error_vel_x` 0.167, `air_time` **0.109**, `foot_tilt` 0.039, `fell_over` 0.96, `track_lin` 1.94 |
+| R5 heel-toe | **Completed** | `error_vel_x` **0.154**, `air_time` 0.047, `foot_tilt` 0.012 (**no rise** — H1c fail), `fell_over` **0.17** |
+| R6 gait-0.85 | **Completed** | `error_vel_x` 0.156, `air_time` 0.086, `fell_over` **0.50**, `track_lin` 2.15 |
+| R7 gait-0.7 | **Completed** | `error_vel_x` **0.134**, `air_time` **0.097**, `fell_over` 0.54, `track_lin` **2.24** |
+| R8 jacc-0 | **Completed** | `error_vel_x` 0.193, `air_time` 0.106, `fell_over` 0.92 @1399 |
+| R9 integrator (R4+R7) | **Completed** | `error_vel_x` 0.151, `air_time` 0.068, `fell_over` 0.83, `track_lin` 2.22 @1399 |
+
+**D1 BASE2 = R4 onesided + R7 cadence + `JOINT_ACC_W=−1e-5`:** R9 integrator underperforms R7 on `air_time`/`error_vel_x` but beats R4 on tracking; R8 `jacc=0` did not beat baseline on Metrics → **keep −1e-5**. Wave 2 launched with patched BASE2 (`GAIT_PERIOD=0.7`, `SWING=0.05`, onesided-only H1).
+
+**Wave-2 launched (2026-07-04 ~00:15 UTC+9):** `r10-base2-ref`, `r11-base2-s2`, `r12-alive-025`, `r13-airtime` (not gamma — all wave-1 `air_time` < 0.12).
+
+**Wave-2 results @ final iter (Metrics):**
+
+| Run | err_x | air_time | fell_over | track_lin | Notes |
+|-----|-------|----------|-----------|-----------|-------|
+| R10 s1 | 0.263 | 0.075 | 5.54 | 1.04 | late collapse |
+| R11 s2 | 0.254 | 0.071 | 4.54 | 1.05 | seed spread moderate |
+| R12 alive 0.25 | 0.188 | 0.071 | 1.25 | 1.87 | stable |
+| R13 airtime 0.25 | **0.178** | **0.115** | **1.13** | 1.82 | **D2 winner** |
+
+**D2 BASE3 = BASE2 + `AIR_TIME_W=0.25` + `CLEARANCE_TARGET_FROM_SWING=1` (R13).** R10/R11 reference runs collapsed — economy cells much more stable.
+
+**Wave-3 launched (2026-07-04 ~03:05 UTC+9):** `r14-wide-dr`, `r15-push-interval`, `r16-self-paced`, `r17-gamma` backfill (R12/R13 both ran; γ skipped in wave 2).
+
+**Wave-3 results @ final iter (Metrics):**
+
+| Run | err_x | air_time | fell_over | track_lin | Verdict |
+|-----|-------|----------|-----------|-----------|---------|
+| R14 wide DR | 0.206 | 0.068 | **7.42** | 0.88 | FAIL — DR hurt stability |
+| R15 push ×1.5 | 0.219 | 0.079 | **7.71** | 0.82 | FAIL |
+| R16 self_paced | 0.238 | 0.069 | **6.29** | 1.03 | FAIL (H7 signal: bootstraps but unstable) |
+| R17 γ=0.97 | **0.122** | 0.079 | 4.13 | 1.66 | best wave-3 cell; still worse fell than R13 |
+| R13 BASE3 ref | 0.178 | **0.115** | **1.13** | **1.82** | **still best overall** |
+
+**D3 FINAL = BASE3 (R13 airtime stack).** No wave-3 robustness/reach cell beats R13 on stability + air_time. Wide DR and push interval deferred.
+
+**Wave-4 launched (2026-07-04 ~06:30 UTC+9):** `r18-final-4k` (4000 it), `r19-final-s3`, `r20-rough` taste run.
 
 ### Ready for overnight (2026-07-03)
 
@@ -527,6 +589,37 @@ done
 **Push (after approval):** `git push origin add-phase-clock`
 
 **Stop-v17 (2026-07-03):** All `mj-gs-v17-*` vcjobs **deleted** / absent on cluster. Batch **invalid** — launched on collapsed v16 @ `a1af0d4`. **No fixed eval, no destabilizer call.** Relaunch only after v16c passes training + eval gates (≥256 envs/command). Partial W&B (`ts21daeb`, `9nzuqlnr`) retained for forensics only.
+
+---
+
+## 9. Overnight ranked table (2026-07-04, Metrics-only)
+
+Judged on `twist/error_vel_x`, `air_time_mean`, `fell_over`, `track_linear_velocity` — **not** `mean_reward`. v13 eval baseline: `ojozkbfs`.
+
+| Rank | Run / config | air_time | err_x | fell/ep | track_lin | What mattered |
+|------|--------------|----------|-------|---------|-----------|---------------|
+| 1 | **R13 BASE3** (FINAL) | **0.115** | 0.178 | **1.13** | **1.82** | `AIR_TIME_W=0.25` + clearance-from-swing |
+| 2 | R7 gait 0.7 | 0.097 | **0.134** | 0.54 | 2.24 | faster cadence helps tracking |
+| 3 | R4 onesided flat | **0.109** | 0.167 | 0.96 | 1.94 | H1 winner — full heel-toe package (R5) hurt air_time |
+| 4 | R8 jacc=0 | 0.106 | 0.193 | 0.92 | 1.83 | jacc removal neutral |
+| 5 | R9 integrator | 0.068 | 0.151 | 0.83 | 2.22 | combining R4+R7 lost air_time vs parents |
+| 6 | R17 γ=0.97 | 0.079 | **0.122** | 4.13 | 1.66 | lower twist error but unstable |
+| — | R14/R15/R16 | <0.08 | — | **6–8** | <1.0 | wide DR / push / self_paced all regressed |
+| — | v16d-main (BASE1) | 0.063 | 0.235 | 5.4 | 0.99 | doc-09 gate FAIL; shuffle baseline |
+
+**Negative results:** R5 full heel-toe (lower air_time, foot_tilt did not rise); mirror aug kept (nomirror late collapse); wide DR and push interval scale ×1.5 not ready.
+
+**Pending:** `nugus_eval` + `sim2sim_eval` on R18 `model_3999.pt` when wave-4 completes. v13 baseline `ojozkbfs` for comparison. **Note:** doc 12 voids R18/R19 wave-4 training verdicts (entropy collapse); eval on R18 checkpoint is forensics only.
+
+**v16e launched (2026-07-04 ~09:45 UTC+9, doc 12):** entropy-decay fix on R13 stack @ `ce4da03`.
+
+| vcjob | iters | seed | Status |
+|-------|-------|------|--------|
+| `mj-gs-v16e-r13-s1-2k` | 2000 | 1 | **Running** (hugin) |
+| `mj-gs-v16e-r13-s2-2k` | 2000 | 2 | **Pending** (GPU queue — R18 on munin) |
+| `mj-gs-v16e-r13-s1-4k` | 4000 | 1 | **Pending** |
+
+Config: `FOOT_FLAT_ONESIDED=1`, `GAIT_PERIOD=0.7`, `SWING=0.05`, `AIR_TIME_W=0.25`, `CLEARANCE_TARGET_FROM_SWING=1`, `ENTROPY_DECAY=1` (defaults `ENTROPY_START=0.01`, `ENTROPY_END=0.001`). Manifests: `scripts/k8s/gen_v16e/`. Experiment: `nugus_gridsearch_v16e`. Voided re-runs (wide DR, self_paced, R5 heel-toe long) deferred until cells 1–2 pass.
 
 ---
 
