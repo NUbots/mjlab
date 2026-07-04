@@ -227,6 +227,7 @@ export FOOT_FLAT_W FOOT_FLAT_ONESIDED CLEARANCE_PER_CORNER SWING_HEIGHT_SOURCE
 export CLEARANCE_TARGET_HEIGHT CLEARANCE_TARGET_FROM_SWING PUSH_INTERVAL_SCALE
 export MIRROR_AUG TRACK_LIN_W TRACK_ANG_W AIR_TIME_W LR_CAP LR_CAP_START_ITER
 export ENTROPY_DECAY GAMMA
+export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W
 export ADAPTIVE_COMMANDS ADAPTIVE_PUSHES PENALTY_GATE
 export ADAPTIVE_CMD_LMAX ADAPTIVE_PUSH_LMAX
 export COMPETENCE_PROMOTE_TRACK_ERR COMPETENCE_DEMOTE_TRACK_ERR
@@ -1085,6 +1086,12 @@ gen_wave4() {
 _v16e_r13_exports() {
   _wave1_base_exports
   export FOOT_FLAT_ONESIDED="1"
+  # Feet min-separation wall (user-calibrated 2026-07-04): 5 cm edge gap is
+  # fine, 1-3 cm is the hazard. 0.13 m center-to-center ~= 5 cm edge gap for
+  # ~8 cm feet; sharpness 20 puts a steep wall through the 3 cm -> 1 cm band.
+  export FEET_MIN_SEP="0.13"
+  export FEET_MIN_SEP_SHARPNESS="20"
+  export FEET_MIN_SEP_W="-1.0"
   export CLEARANCE_PER_CORNER=""
   export SWING_HEIGHT_SOURCE="min_corner"
   export GAIT_PERIOD="0.7"
@@ -1125,7 +1132,9 @@ _competence_defaults() {
   export ADAPTIVE_COMMANDS=""
   export ADAPTIVE_PUSHES=""
   export PENALTY_GATE="time"
-  export ADAPTIVE_CMD_LMAX="3"
+  # Climb to the brink: demote keeps the top honest (user request
+  # 2026-07-04); levels >5 need gait-period-as-command (doc 07) first.
+  export ADAPTIVE_CMD_LMAX="5"
   # Push level capped below cmd headroom: v20 attempt 1 showed pushes
   # (fell-gated only) racing to L3 while commands sat at L0.
   export ADAPTIVE_PUSH_LMAX="2"

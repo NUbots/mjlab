@@ -105,11 +105,11 @@ spec:
                 - name: JOINT_ACC_W
                   value: "-1e-5"
                 - name: FEET_MIN_SEP
-                  value: ""
+                  value: "0.13"
                 - name: FEET_MIN_SEP_W
-                  value: ""
+                  value: "-1.0"
                 - name: FEET_MIN_SEP_SHARPNESS
-                  value: ""
+                  value: "20"
                 - name: TRACK_LIN_W
                   value: "3.0"
                 - name: TRACK_ANG_W
@@ -147,7 +147,7 @@ spec:
                 - name: PENALTY_GATE
                   value: "time"
                 - name: ADAPTIVE_CMD_LMAX
-                  value: "3"
+                  value: "5"
                 - name: ADAPTIVE_PUSH_LMAX
                   value: "2"
                 - name: COMPETENCE_PROMOTE_TRACK_ERR
