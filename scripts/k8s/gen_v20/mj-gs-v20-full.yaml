@@ -153,15 +153,23 @@ spec:
                 - name: ADAPTIVE_PUSH_LMAX
                   value: "2"
                 - name: COMPETENCE_PROMOTE_TRACK_ERR
-                  value: "0.7"
+                  value: ""
                 - name: COMPETENCE_DEMOTE_TRACK_ERR
-                  value: "1.2"
+                  value: ""
+                - name: COMPETENCE_PROMOTE_ATTAIN
+                  value: ""
+                - name: COMPETENCE_DEMOTE_ATTAIN
+                  value: ""
+                - name: COMPETENCE_PROMOTE_WOBBLE
+                  value: ""
+                - name: COMPETENCE_DEMOTE_WOBBLE
+                  value: ""
                 - name: COMPETENCE_PROMOTE_FELL
                   value: ""
                 - name: COMPETENCE_DEMOTE_FELL
-                  value: "0.5"
+                  value: ""
                 - name: COMPETENCE_COOLDOWN_ITERS
-                  value: "150"
+                  value: ""
                 - name: LINK_MASS_SCALE_MIN
                   value: "0.90"
                 - name: LINK_MASS_SCALE_MAX
@@ -198,7 +206,7 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "561b234a1a3f92f1736e31cf054ba698984eb8f5"
+                  value: "757ae57844fd87db085783bd581a7e00100b68e7"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
