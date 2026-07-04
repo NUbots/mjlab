@@ -19,7 +19,15 @@ Added
   replanning around obstructions. For rewards, the command term derives a
   desired body-frame twist from the path (feedforward reference twist plus a
   proportional pull toward the reference pose), so the tuned velocity-task
-  reward structure is reused unchanged.
+  reward structure is reused unchanged. Path generation is built around the
+  robot's achievable twist envelope (``twist_limits``, approximately ±0.5 m/s
+  forward, ±0.3 m/s lateral, ±1.0 rad/s yaw for the Nugus): segments are
+  drawn from a configurable mix of gait archetypes (straight walk, arc,
+  in-place turn, strafe, stop, omnidirectional), combined twists are scaled
+  onto the feasibility ellipsoid the limits define, and the reference twist
+  blends smoothly across segment boundaries (and from rest at episode start)
+  instead of stepping. The Nugus command curriculum for this task widens to
+  finish at the full envelope rather than the velocity task's narrower caps.
 - Added a ``feet_swing_height_clock`` velocity reward and a matching
   ``gait_clock`` observation. An independent, fixed-frequency gait clock (not
   controlled by the policy) drives a desired per-foot swing-height arc, densely

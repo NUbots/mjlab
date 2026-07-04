@@ -182,8 +182,12 @@ class FakeRobot:
     self.data = FakeRobotData(num_envs)
 
 
+TWIST_LIMITS = (0.5, 0.3, 1.0)
+
+
 def make_env_and_term(
   rel_standing_envs: float = 0.0,
+  segment_mix: PathCommandCfg.SegmentMix | None = None,
 ) -> tuple[types.SimpleNamespace, FakeRobot, PathCommand]:
   robot = FakeRobot(NUM_ENVS)
   env = types.SimpleNamespace(
@@ -196,11 +200,12 @@ def make_env_and_term(
     entity_name="robot",
     resampling_time_range=(4.0, 8.0),
     rel_standing_envs=rel_standing_envs,
-    rel_standing_segments=0.1,
+    twist_limits=TWIST_LIMITS,
+    segment_mix=segment_mix or PathCommandCfg.SegmentMix(),
     ranges=PathCommandCfg.Ranges(
-      lin_vel_x=(-1.0, 1.0),
-      lin_vel_y=(-1.0, 1.0),
-      ang_vel_z=(-0.5, 0.5),
+      lin_vel_x=(-0.5, 0.5),
+      lin_vel_y=(-0.3, 0.3),
+      ang_vel_z=(-1.0, 1.0),
     ),
   )
   term = cfg.build(env)  # type: ignore[arg-type]
@@ -288,6 +293,42 @@ def test_standing_envs_give_zero_command() -> None:
   assert term.command.abs().max() < 1e-6
   assert term.waypoints_b[..., :2].abs().max() < 1e-6  # dx, dy = 0.
   assert (term.waypoints_b[..., 2] - 1.0).abs().max() < 1e-6  # cos(0) = 1.
+
+
+def test_reference_twist_within_feasibility_ellipsoid(seeded_term) -> None:
+  """Every reference twist stays on or inside the capability ellipsoid."""
+  _, _, term = seeded_term
+  limits = torch.tensor(TWIST_LIMITS)
+  norms = torch.linalg.vector_norm(term.ref_twist_b / limits, dim=-1)
+  assert norms.max() <= 1.0 + 1e-5
+
+
+def test_reference_twist_ramps_smoothly(seeded_term) -> None:
+  """The twist ramps from zero on reset and never steps discontinuously."""
+  _, _, term = seeded_term
+  # Episodes start from rest: the first reference twist is zero.
+  assert term.ref_twist_b[:, 0].abs().max() < 1e-6
+  # Per-step change is bounded by the smoothstep's peak slope (1.5 / blend
+  # time) over the largest possible segment-to-segment jump (twice the
+  # per-axis limit).
+  limits = torch.tensor(TWIST_LIMITS)
+  diffs = (term.ref_twist_b[:, 1:] - term.ref_twist_b[:, :-1]).abs()
+  bound = 2.0 * limits * 1.5 * STEP_DT / term.cfg.twist_blend_time
+  assert (diffs <= bound + 1e-5).all()
+
+
+def test_segment_mix_masks_twist_components() -> None:
+  """A straight-only mix produces forward/backward motion and nothing else."""
+  torch.manual_seed(2)
+  mix = PathCommandCfg.SegmentMix(
+    standing=0.0, straight=1.0, arc=0.0, turn_in_place=0.0, strafe=0.0, omni=0.0
+  )
+  _, _, term = make_env_and_term(segment_mix=mix)
+  term.reset(torch.arange(NUM_ENVS))
+  term.compute(0.0)
+  assert term.ref_twist_b[..., 1].abs().max() < 1e-6  # No vy.
+  assert term.ref_twist_b[..., 2].abs().max() < 1e-6  # No wz.
+  assert term.ref_twist_b[..., 0].abs().max() > 0.05  # Walks somewhere.
 
 
 def test_resample_restarts_path_from_current_pose(seeded_term) -> None:

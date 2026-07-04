@@ -19,6 +19,17 @@ from mjlab.tasks.velocity.config.nugus.env_cfgs import (
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 
+# Approximate per-axis limits of the Nugus's achievable twist. Each is
+# reachable alone; the path command scales combined demands onto the
+# ellipsoid these define.
+_MAX_LIN_VEL_X = 0.5  # m/s
+_MAX_LIN_VEL_Y = 0.3  # m/s
+_MAX_ANG_VEL_Z = 1.0  # rad/s
+
+
+def _clip_range(r: tuple[float, float], limit: float) -> tuple[float, float]:
+  return (max(r[0], -limit), min(r[1], limit))
+
 
 def _convert_to_path_tracking(cfg: ManagerBasedRlEnvCfg) -> None:
   """Swap the twist command for a path command, in place.
@@ -39,18 +50,20 @@ def _convert_to_path_tracking(cfg: ManagerBasedRlEnvCfg) -> None:
     # the robot's current pose while the episode keeps running.
     resampling_time_range=(4.0, 8.0),
     rel_standing_envs=0.1,
-    rel_standing_segments=0.1,
     segment_duration_range=(2.0, 4.0),
     lookahead_times=(0.2, 0.5, 1.0, 2.0),
     pos_gain=1.0,
     heading_gain=0.5,
+    twist_limits=(_MAX_LIN_VEL_X, _MAX_LIN_VEL_Y, _MAX_ANG_VEL_Z),
+    twist_blend_time=0.5,
     debug_vis=True,
-    # Inherit the velocity task's (possibly play-adjusted) twist ranges as
-    # the path segment sampling ranges.
+    # Inherit the velocity task's (possibly play-adjusted) twist ranges,
+    # clipped to the robot's feasible envelope: the velocity task's base
+    # ±1.0 m/s linear box exceeds what the Nugus can walk.
     ranges=PathCommandCfg.Ranges(
-      lin_vel_x=twist_cmd.ranges.lin_vel_x,
-      lin_vel_y=twist_cmd.ranges.lin_vel_y,
-      ang_vel_z=twist_cmd.ranges.ang_vel_z,
+      lin_vel_x=_clip_range(twist_cmd.ranges.lin_vel_x, _MAX_LIN_VEL_X),
+      lin_vel_y=_clip_range(twist_cmd.ranges.lin_vel_y, _MAX_LIN_VEL_Y),
+      ang_vel_z=_clip_range(twist_cmd.ranges.ang_vel_z, _MAX_ANG_VEL_Z),
     ),
   )
 
@@ -65,6 +78,31 @@ def _convert_to_path_tracking(cfg: ManagerBasedRlEnvCfg) -> None:
   for curriculum in cfg.curriculum.values():
     if curriculum.params.get("command_name") == "twist":
       curriculum.params["command_name"] = "path"
+
+  # The velocity task's command curriculum tops out below the robot's
+  # envelope (vy ±0.1, wz ±0.5). Widen the stages so training finishes at
+  # the full feasible ranges; the same easy-to-hard staging is kept.
+  if "command_vel" in cfg.curriculum:
+    cfg.curriculum["command_vel"].params["velocity_stages"] = [
+      {
+        "step": 0,
+        "lin_vel_x": (-_MAX_LIN_VEL_X, _MAX_LIN_VEL_X),
+        "lin_vel_y": (-0.1, 0.1),
+        "ang_vel_z": (-0.1, 0.1),
+      },
+      {
+        "step": 9000 * 24,
+        "lin_vel_x": (-_MAX_LIN_VEL_X, _MAX_LIN_VEL_X),
+        "lin_vel_y": (-0.2, 0.2),
+        "ang_vel_z": (-0.5, 0.5),
+      },
+      {
+        "step": 12000 * 24,
+        "lin_vel_x": (-_MAX_LIN_VEL_X, _MAX_LIN_VEL_X),
+        "lin_vel_y": (-_MAX_LIN_VEL_Y, _MAX_LIN_VEL_Y),
+        "ang_vel_z": (-_MAX_ANG_VEL_Z, _MAX_ANG_VEL_Z),
+      },
+    ]
 
   # Actor: observe the path as relative waypoints, never the twist. Noise
   # models odometry error in the planner-provided relative path; the delay

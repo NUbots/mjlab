@@ -645,10 +645,10 @@ def feet_lateral_distance_cost(
   isolating lateral spread from fore-aft offset during a stride.
 
 
-  The penalty shape is ``exp(sharpness * shortfall) - 1`` where 
-  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``. 
-  When nominal_distance == lateral_distance the cost is zero. For 
-  anything else, the cost grows exponentially with the difference. 
+  The penalty shape is ``exp(sharpness * shortfall) - 1`` where
+  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``.
+  When nominal_distance == lateral_distance the cost is zero. For
+  anything else, the cost grows exponentially with the difference.
   """
   asset: Entity = env.scene[asset_cfg.name]
   foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
