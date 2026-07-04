@@ -104,6 +104,8 @@ spec:
                   value: "${ALIVE_W}"
                 - name: JOINT_ACC_W
                   value: "${JOINT_ACC_W}"
+                - name: PHASE_DELTA_W
+                  value: "${PHASE_DELTA_W}"
                 - name: FEET_MIN_SEP
                   value: "${FEET_MIN_SEP}"
                 - name: FEET_MIN_SEP_W

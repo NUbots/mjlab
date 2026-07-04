@@ -501,6 +501,7 @@ def phase_delta_nominal_cost(
   from mjlab.envs.mdp.actions.phase_delta import get_phase_delta_action
 
   raw = get_phase_delta_action(env, action_term_name).raw_action.squeeze(-1)
+  deviation = torch.abs(raw - 1.0)
   cost = torch.square(raw - 1.0)
 
   if command_name is not None:
@@ -512,12 +513,21 @@ def phase_delta_nominal_cost(
       active = (total_command > command_threshold).float()
       cost = cost * active
       if active.any():
+        walking = active > 0
         env.extras["log"]["Metrics/phase_delta_nominal_error_mean"] = cost[
-          active > 0
+          walking
         ].mean()
+        # p95 of |rate deviation|: distinguishes "escape hatch used rarely
+        # but really" (mean ~0, p95 high — e.g. push recovery) from "never
+        # deviates at all" (both ~0). The F3 collapse verdict rested on the
+        # MEAN alone, which cannot see tail usage.
+        env.extras["log"]["Metrics/phase_delta_dev_p95"] = torch.quantile(
+          deviation[walking], 0.95
+        )
       return cost
 
   env.extras["log"]["Metrics/phase_delta_nominal_error_mean"] = cost.mean()
+  env.extras["log"]["Metrics/phase_delta_dev_p95"] = torch.quantile(deviation, 0.95)
   return cost
 
 

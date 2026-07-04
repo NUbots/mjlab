@@ -609,7 +609,9 @@ def _add_competence_penalty_gating(
 def _add_gait_curriculum(
   cfg: ManagerBasedRlEnvCfg,
   *,
-  variant: Literal["clock_anneal", "self_paced", "clock_persist", "clock_learned"],
+  variant: Literal[
+    "clock_anneal", "self_paced", "clock_persist", "clock_learned", "clock_owned"
+  ],
   p1: int,
   p2: int,
   p3: int,
@@ -694,7 +696,11 @@ def _add_gait_curriculum(
         ],
       },
     )
-  elif variant == "clock_persist":
+  elif variant in ("clock_persist", "clock_owned"):
+    # clock_owned (user proposal 2026-07-04): persist economy + policy-owned
+    # phase with a CONSTANT nominal-rate tether (no staged anneal) — the
+    # fixed clock as soft attractor, deviation as an escape hatch. Removes
+    # the realignment debt of an external metronome after perturbations.
     cfg.rewards["foot_swing_height"].weight = 0.75
     cfg.rewards["foot_swing_height_landing"].weight = 0.0
     cfg.rewards["air_time"].weight = _env_float("AIR_TIME_W", 0.08)
@@ -708,14 +714,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "self_paced",
     "clock_persist",
     "clock_learned",
+    "clock_owned",
   ):
     raise ValueError(
-      "MJLAB_VARIANT must be clock_anneal, self_paced, clock_persist, or "
-      f"clock_learned; got {variant_raw!r}"
+      "MJLAB_VARIANT must be clock_anneal, self_paced, clock_persist, "
+      f"clock_learned, or clock_owned; got {variant_raw!r}"
     )
-  variant: Literal["clock_anneal", "self_paced", "clock_persist", "clock_learned"] = (
-    variant_raw  # type: ignore[assignment]
-  )
+  variant: Literal[
+    "clock_anneal", "self_paced", "clock_persist", "clock_learned", "clock_owned"
+  ] = variant_raw  # type: ignore[assignment]
 
   gait_period = _env_float("GAIT_PERIOD", _DEFAULT_GAIT_PERIOD)
   swing_target_height = _env_float("SWING_TARGET_HEIGHT", _DEFAULT_SWING_TARGET_HEIGHT)
@@ -952,7 +959,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   assert isinstance(joint_pos_action, JointPositionActionCfg)
   joint_pos_action.scale = NUGUS_ACTION_SCALE  # ~0.245 rad (0.25 * e/s * 5).
 
-  if variant == "clock_learned":
+  if variant in ("clock_learned", "clock_owned"):
     cfg.actions["phase_delta"] = PhaseDeltaActionCfg(
       entity_name="robot",
       period=gait_period,
@@ -1171,7 +1178,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "command_name": "twist",
     "command_threshold": 0.05,
   }
-  if variant == "clock_learned":
+  if variant in ("clock_learned", "clock_owned"):
     clock_params["phase_source"] = "policy"
   # Clock-silencing variant: fade the gait-clock OBSERVATION out to zero on the
   # same staged schedule as the clock REWARD anneal (foot_swing_height: 0.75 ->
@@ -1232,9 +1239,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "command_name": "twist",
     "command_threshold": 0.05,
   }
-  if variant == "clock_learned":
+  if variant in ("clock_learned", "clock_owned"):
     swing_height.params["phase_source"] = "policy"
+  if variant == "clock_learned":
     cfg.rewards["phase_delta_nominal"].weight = phase_delta_strong_w
+  elif variant == "clock_owned":
+    phase_delta_w = _env_float("PHASE_DELTA_W", 0.2)
+    if phase_delta_w > 0:
+      phase_delta_w = -phase_delta_w
+    cfg.rewards["phase_delta_nominal"].weight = phase_delta_w
 
   # Self-paced sparse swing-height (peak-at-landing) handoff target.
   landing_height = cfg.rewards["foot_swing_height_landing"]

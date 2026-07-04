@@ -227,7 +227,7 @@ export FOOT_FLAT_W FOOT_FLAT_ONESIDED CLEARANCE_PER_CORNER SWING_HEIGHT_SOURCE
 export CLEARANCE_TARGET_HEIGHT CLEARANCE_TARGET_FROM_SWING PUSH_INTERVAL_SCALE
 export MIRROR_AUG TRACK_LIN_W TRACK_ANG_W AIR_TIME_W LR_CAP LR_CAP_START_ITER
 export ENTROPY_DECAY GAMMA
-export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W
+export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W PHASE_DELTA_W
 export ADAPTIVE_COMMANDS ADAPTIVE_PUSHES PENALTY_GATE
 export ADAPTIVE_CMD_LMAX ADAPTIVE_PUSH_LMAX
 export COMPETENCE_PROMOTE_TRACK_ERR COMPETENCE_DEMOTE_TRACK_ERR
@@ -1159,7 +1159,7 @@ gen_v20() {
   export EXPERIMENT_NAME="nugus_gridsearch_v20"
 
   local cell slug seed job_suffix
-  for cell in control const cmd full hard; do
+  for cell in control const cmd full hard owned; do
     _v16e_r13_exports
     _competence_defaults
     export MAX_ITERATIONS="2000"
@@ -1194,6 +1194,18 @@ gen_v20() {
         export PENALTY_GATE="competence"
         export ADAPTIVE_CMD_LMAX="5"
         export ADAPTIVE_PUSH_LMAX="5"
+        ;;
+      owned)
+        # v20-full + policy-owned phase with constant nominal tether
+        # (clock_owned, user proposal 2026-07-04): fixed clock as soft
+        # attractor, deviation as escape hatch — no realignment debt after
+        # perturbations. Watch Metrics/phase_delta_dev_p95 for tail usage.
+        slug="owned"
+        export MJLAB_VARIANT="clock_owned"
+        export PHASE_DELTA_W="-0.2"
+        export ADAPTIVE_COMMANDS="1"
+        export ADAPTIVE_PUSHES="1"
+        export PENALTY_GATE="competence"
         ;;
     esac
     for seed in 1 2; do
@@ -1416,7 +1428,7 @@ case "$BATCH" in
   wave3) gen_wave3; expected=6 ;;
   wave4) gen_wave4; expected=3 ;;
   v16e) gen_v16e; expected=3 ;;
-  v20) gen_v20; expected=10 ;;
+  v20) gen_v20; expected=12 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
