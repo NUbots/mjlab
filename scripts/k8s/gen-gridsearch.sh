@@ -1249,8 +1249,12 @@ gen_v20() {
 # each gang-takes all 8 GPUs -> Volcano runs them sequentially. Read
 # Perf/collection_time + learning_time + total_fps per cell from W&B.
 gen_mn_bench() {
+  # 512..8192/GPU: the low points locate the sim-overhead knee (below it,
+  # sec/iter flatlines and envs are free — which also bounds how many GPUs
+  # a single run can productively use at a given total batch). 512 x 8 =
+  # 4096 total = the legged_gym-lineage default.
   local envs
-  for envs in 2048 4096 6144 8192; do
+  for envs in 512 1024 2048 4096 6144 8192; do
     _v16e_r13_exports
     _competence_defaults
     export ADAPTIVE_COMMANDS="1"
@@ -1533,7 +1537,7 @@ case "$BATCH" in
   v16e) gen_v16e; expected=3 ;;
   v20) gen_v20; expected=12 ;;
   mn-smoke) gen_mn_smoke; expected=1 ;;
-  mn-bench) gen_mn_bench; expected=4 ;;
+  mn-bench) gen_mn_bench; expected=6 ;;
   v21) gen_v21; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;

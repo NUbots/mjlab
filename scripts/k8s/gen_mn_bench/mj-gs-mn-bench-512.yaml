@@ -3,7 +3,7 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: mj-gs-mn-bench-8192
+  name: mj-gs-mn-bench-512
   namespace: mjlab
   labels:
     app.kubernetes.io/name: mjlab-train
@@ -48,13 +48,13 @@ spec:
                 - name: MUJOCO_GL
                   value: egl
                 - name: NUM_ENVS
-                  value: "8192"
+                  value: "512"
                 - name: MULTINODE
                   value: "1"
                 - name: NNODES
                   value: "2"
                 - name: MJLAB_LOG_STAMP
-                  value: "mn-bench-8192-20260704-164830"
+                  value: "mn-bench-512-20260704-164830"
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
@@ -200,11 +200,11 @@ spec:
                 - name: EXPERIMENT_NAME
                   value: "nugus_mn_bench"
                 - name: RUN_NAME
-                  value: "mn-bench__envs-8192__8gpu__mn-bench"
+                  value: "mn-bench__envs-512__8gpu__mn-bench"
                 - name: WANDB_PROJECT
                   value: "mjlab"
                 - name: WANDB_TAGS
-                  value: "mn-bench,8gpu,envs-8192,batch-mn-bench"
+                  value: "mn-bench,8gpu,envs-512,batch-mn-bench"
                 # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
                   value: "all"

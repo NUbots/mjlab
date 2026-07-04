@@ -54,7 +54,7 @@ spec:
                 - name: NNODES
                   value: "2"
                 - name: MJLAB_LOG_STAMP
-                  value: "mn-bench-4096-20260704-163050"
+                  value: "mn-bench-4096-20260704-164830"
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
