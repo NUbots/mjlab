@@ -1146,8 +1146,15 @@ _competence_defaults() {
   export COMPETENCE_PROMOTE_TRACK_ERR="0.7"
   export COMPETENCE_DEMOTE_TRACK_ERR="1.2"
   export COMPETENCE_PROMOTE_FELL=""
-  export COMPETENCE_DEMOTE_FELL=""
-  export COMPETENCE_COOLDOWN_ITERS=""
+  # fell_ema is a RATE (<=1.0): the code default demote bar of 1.0 is
+  # unreachable, making push/penalty demotion dead code (v20 attempt 3:
+  # falls climbed at the brink with no demote). 0.5 = half of episodes
+  # ending in falls is decisively past competence.
+  export COMPETENCE_DEMOTE_FELL="0.5"
+  # Cooldown must exceed the EMA refresh time (~10 episodes ~ 200 iters at
+  # alpha 0.1) or promotions cascade on stale competence (v20 attempt 3:
+  # cmd chained L1->L5 in 240 iters).
+  export COMPETENCE_COOLDOWN_ITERS="150"
 }
 
 

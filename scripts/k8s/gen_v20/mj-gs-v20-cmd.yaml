@@ -159,9 +159,9 @@ spec:
                 - name: COMPETENCE_PROMOTE_FELL
                   value: ""
                 - name: COMPETENCE_DEMOTE_FELL
-                  value: ""
+                  value: "0.5"
                 - name: COMPETENCE_COOLDOWN_ITERS
-                  value: ""
+                  value: "150"
                 - name: LINK_MASS_SCALE_MIN
                   value: "0.90"
                 - name: LINK_MASS_SCALE_MAX
