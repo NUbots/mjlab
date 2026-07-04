@@ -1386,6 +1386,39 @@ gen_v23() {
 }
 
 
+# BATCH=v24: v23 relaunch with the crash-reflex fixes. v23 climbed L0->L5
+# cleanly then spiraled at the brink (ep 880->23, fell -> saturation, attain
+# -0.68 with NO recovery in 1200 iters at L0): the EMA-lagged demote reacted
+# ~200 iters late and the -10 fall gradients shattered the policy first.
+# v24 adds the fast windowed fall-rate demote (bar 0.5, ~5-iter reaction,
+# cascades L5->L0 in 5 iters) and top-rung promote caution (streak 5 at
+# L>=4). Same 8-GPU shape and stack otherwise. Verdict metric: either the
+# run holds a healthy L4/L5 bounce to 4000, or the fast demote catches a
+# crash in-flight and the policy RECOVERS (both are wins for the reflex;
+# a v23-style shatter is the failure case).
+gen_v24() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export MJLAB_LOG_STAMP="v24-prod-$(date +%Y%m%d-%H%M%S)"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="4000"
+  export SEED="1"
+  export EXPERIMENT_NAME="nugus_gridsearch_v24"
+  export RUN_NAME="clock_owned__v24-fastdemote__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v24-fastdemote,std-min-0.13,8gpu,multinode,batch-v24,gridsearch"
+  emit_manifest "mj-gs-v24-prod"
+}
+
+
 # BATCH=mn-smoke: 8-GPU multi-node smoke (backlog 15c -> active). v20-full
 # config at 300 iters across 2x4 GPUs via torchrun env-rendezvous. PASS =
 # one W&B run (not two -> rank gating bug), iterating, collection_time
@@ -1621,6 +1654,7 @@ case "$BATCH" in
   v21) gen_v21; expected=2 ;;
   v22) gen_v22; expected=2 ;;
   v23) gen_v23; expected=1 ;;
+  v24) gen_v24; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
