@@ -11,4 +11,5 @@ def nubots_nugus_path_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   return replace(
     nubots_nugus_ppo_runner_cfg(),
     experiment_name="nugus_path_tracking",
+    wandb_project="nugus_path_tracking",
   )

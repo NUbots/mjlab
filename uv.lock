@@ -1719,7 +1719,7 @@ requires-dist = [
     { name = "mediapy", specifier = ">=1.2.6" },
     { name = "mjviser", specifier = ">=0.0.11" },
     { name = "mujoco", specifier = ">=3.7.0", index = "https://py.mujoco.org/" },
-    { name = "mujoco-warp", git = "https://github.com/google-deepmind/mujoco_warp?rev=e65a72e49a978a3051e7942bc5591df355ba0b5c" },
+    { name = "mujoco-warp", git = "https://github.com/google-deepmind/mujoco_warp?rev=9263ca9" },
     { name = "onnxscript", specifier = ">=0.5.4" },
     { name = "prettytable" },
     { name = "rsl-rl-lib", specifier = "==5.0.1" },
@@ -1964,8 +1964,8 @@ wheels = [
 
 [[package]]
 name = "mujoco-warp"
-version = "3.9.0.1"
-source = { git = "https://github.com/google-deepmind/mujoco_warp?rev=e65a72e49a978a3051e7942bc5591df355ba0b5c#e65a72e49a978a3051e7942bc5591df355ba0b5c" }
+version = "3.10.0.1"
+source = { git = "https://github.com/google-deepmind/mujoco_warp?rev=9263ca9#9263ca9c3b7f66b9fe4f7924b02cfad232e201d6" }
 dependencies = [
     { name = "absl-py" },
     { name = "etils", extra = ["epath"] },

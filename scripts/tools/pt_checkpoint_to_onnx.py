@@ -6,7 +6,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.rl.runner import MjlabOnPolicyRunner
 
 TASK_ID = "Mjlab-Velocity-Flat-Nubots-Nugus"  # your task
-CHECKPOINT = "logs/rsl_rl/nugus_velocity/2026-05-13_17-56-22/model_8500.pt"
+CHECKPOINT = "logs/rsl_rl/nugus_velocity/model_1000.pt"
 
 env_cfg = load_env_cfg(TASK_ID)
 agent_cfg = load_rl_cfg(TASK_ID)
