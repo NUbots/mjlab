@@ -37,9 +37,9 @@ Calibration final: min 0.13 m center-to-center (~5 cm edge gap free),
 sharpness 20 (steep wall through the 3→1 cm hazard band). Gate metric:
 `min_foot_lateral_distance_mean ≥ 0.13`; monitor trigger < 0.115.
 
-### R3 — The controller-gating bug chronicle (one species, three instances)
+### R3 — The controller-gating bug chronicle (one species, four instances)
 
-All three were **thresholds outside the feasible range of their metric**:
+All four were **thresholds outside the feasible range of their metric**:
 
 1. Demote bar 1.0 on a fall RATE bounded ≤ 1.0 → demotion dead code.
 2. Cooldown 50 iters ≪ EMA refresh (~200 iters at α=0.1/episode) →
@@ -47,6 +47,11 @@ All three were **thresholds outside the feasible range of their metric**:
 3. Attainment floor SQUARED: perfect tracking of a 0.1 m/s command scored
    0.25 vs a 0.75 promote bar → level-0 promotion unreachable (measured
    0.17–0.25 on runs passing every other gate).
+4. Promote bar 0.75 above the feasible ceiling: with uniform command
+   sampling, population-mean attainment for a GOOD policy tops out ~0.71
+   (small-command steps dilute the mean). Healthy runs plateaued 0.55–0.63
+   and never promoted. Fixed: promote 0.60 / demote 0.40 (generator env
+   `COMPETENCE_PROMOTE_ATTAIN` / `COMPETENCE_DEMOTE_ATTAIN`).
 
 **Standing rule:** every gating threshold ships with a feasibility test —
 a construction proving a plausibly-good policy crosses it (see
@@ -57,23 +62,57 @@ a construction proving a plausibly-good policy crosses it (see
 User-driven redesign (their observation: the policy prefers a stable stand
 to risking falls, so fall-gated demotion never fires until terminal
 collapse — pair 1 `full` ended ep 204/fell 28.9 after a quiet mid-run).
-Current predicate, all axes unified: promote = attain > 0.75 AND wobble
-< 0.10 AND fell < 0.3; demote = attain < 0.5 OR wobble > 0.25 OR fell
-> 0.35. Attainment = (v·c)/|c|² on steps with |c| ≥ 0.15 (sway-immune,
+Current predicate, all axes unified: promote = attain > 0.60 AND wobble
+< 0.10 AND fell < 0.3; demote = attain < 0.40 OR wobble > 0.25 OR fell
+> 0.35 (bars corrected per R3 instance 4). Attainment = (v·c)/|c|² on steps with |c| ≥ 0.15 (sway-immune,
 sandbag-visible). Penalties additionally refuse to ramp while attainment
 < 0.6.
 
-### R5 — Open: the late-run destabilizer correlates with std < ~0.15
+### R5 — Resolved: σ level is an amplifier; the v22 two-arm verdict
 
-Pair 3 degraded late with penalties OFF (attainment bug kept the stability
-gate closed), commands at L0, feet healthy — none of the previous suspects.
-Every degrading run on corrected physics crossed into trouble as std sank:
-full 0.138→0.106 (catastrophe), owned 0.171→0.13 (mild), v16e 0.103, the
-4k run 0.08 (dead). Old physics tolerated 0.046 (v13) — the corrected
-physics plausibly needs dither for robust recovery. Hypothesis under test:
-`ENTROPY_END=0.001` over-sharpens; **v22-floor holds 0.004**. If v22's
-late-run fell stays < 1 while std holds ~0.15+, the floor becomes a
-standing default.
+v22-floor (ENTROPY_END=0.004) completed all 2000 iters — first
+corrected-physics run to finish without catastrophe. σ equilibrated ~0.22
+throughout; end state ep 689 / fell 1.38 vs pair-3 owned (no floor) ep
+336 / fell 15.8 and v20-full ep 46 / fell 148. clock_owned (~10×) and the
+σ floor (~10×) stack to ~100× late-run failure reduction. v22b-stdmin
+(hard `STD_MIN=0.13` via `std_range`, entropy schedule unchanged) also
+completed with σ pinned 0.143–0.146: both mechanisms work; the hard clamp
+is the tighter guarantee and is the standing default (`STD_MIN=0.13`).
+
+BUT: v22-floor still *drifted* late (fell 0.29→1.38 over the final 500
+iters, trkLin reward 2.2→1.6-1.9, value loss 0.07→0.17, stance widening
+0.20→0.28) with σ flat — σ-collapse was the amplifier, not the driver.
+
+### R6 — The driver: policy churn under a saturated objective (hypothesis,
+strong support)
+
+Every corrected-physics collapse happened in a run whose curriculum was
+FROZEN at level 0 by an R3 gating bug. The frozen task saturates by ~iter
+1000 (v22-floor: trkLin 2.07 by 796, reward plateau 85–94); PPO then keeps
+taking 20 constant-KL updates/iter (surrogate stays ~0.004–0.005 — the
+adaptive-KL schedule maintains step SIZE, not step VALUE) on advantages
+that are now noise → random walk in policy space → drift out of the good
+basin, with falls injecting −10 spikes that accelerate the exit. Onset
+~1400–1600 in every config because saturation time was identical.
+Explains: v13/old-physics stability (±0.5 commands never saturated), late
+value-loss rise (critic chasing a wandering policy), σ's amplifier role.
+
+Discriminating evidence: **v22b climbed cmd L0→L5 (full envelope) + push
+L2 — first full ladder in project history** — with no flat-then-wander
+phase; its sibling v22-floor, frozen at L0 by the old bars, drifted. The
+edge-of-competence curriculum is therefore a STABILITY mechanism, not
+just a speed feature: difficulty tracking competence keeps the objective
+unsaturated and the gradient informative.
+
+Open sub-question (v23 answers it): v22b's final ~400 iters AT L5 sagged
+(trkLin 1.2→0.6, fell →1.75). Candidate readings: mid-learning at the
+hardest task ever attempted (400 iters is short); exp-shaped tracking
+reward punishes absolute error harder at high commands (metric geometry,
+not regression); or population-mean attainment masks high-command failure
+so demote never fires (refinement: bin attainment by |cmd|). Remedies if
+churn appears even with a live ladder: late LR/desired_kl anneal
+("landing" phase once top level + plateau), fewer epochs late, periodic
+critic refresh, best-checkpoint selection (standing policy since v16e).
 
 ## Multi-GPU program (user-driven, latency-first)
 
@@ -96,13 +135,34 @@ beats A/B throughput. Built in-session:
   entropy decay, warm-ups) makes wall-time ∝ sec/iter matter doubly.
   First measured point: 4×2048 runs 1.21 s/iter vs ~2.8 at 4×8192 —
   2.3× iteration rate at 58% fps.
-- **In flight:** v21 race (8k vs 32k total envs, milestone-crossing
-  verdict), mn-smoke (2×4 validation; pass = ONE W&B run + sane Perf),
-  mn-bench ×6 (512–8192/GPU: sim-overhead knee + straggler cost under the
-  gang). Launch config for the 8-GPU era =
-  argmin(sec/iter × iters-to-milestone), both factors measured.
-  The sim knee also bounds how many GPUs one run can productively use at a
-  given total batch.
+- **v21 race verdict: sample-limited.** At equal wall time, 8192/GPU hit
+  attain 0.625 at iter 748 vs 2048/GPU's 0.488 at iter 1932. Samples/sec
+  is the binding resource; iteration rate is secondary.
+- **The entrypoint ConfigMap split-brain.** First "8-GPU" wave was fake:
+  pods run `entrypoint.sh` from the kustomize-generated `mjlab-entrypoint`
+  ConfigMap, which still held the pre-multinode script (`kubectl apply -f
+  configmap.yaml` does NOT update it — needs `apply -k`). No rendezvous →
+  each pod of the gang silently trained an independent 4-GPU job with the
+  same run name → 2× duplicate W&B runs per job, fps identical to 4-GPU
+  baselines (the tell). Even post-fix, a pod starting <60 s after the
+  apply still mounted the stale file (kubelet propagation). Third
+  config-delivery split-brain of the era (git pin / generator env /
+  ConfigMap): launch preflight should hash repo entrypoint vs cluster
+  ConfigMap. Fake duplicate runs deleted from W&B.
+- **mn-smoke + mn-bench (real, verified single-run, ranks 0–7 across both
+  nodes):** scaling is 2.02× at 8192/GPU (563k vs 278k fps) — 10G
+  Ethernet cost invisible, as predicted. Curve (envs/GPU → s/iter, total
+  fps): 512→0.85/116k, 1024→1.03/191k, 2048→1.32/299k, 4096→1.70/463k,
+  6144→2.20/536k, 8192→2.92/539k. **fps saturates at 6144**, which
+  strictly dominates 8192 (same fps, 25% cheaper iterations). With the
+  v21 sample-limited verdict, production config = **6144/GPU (49,152
+  total), ~2.2 s/iter, ~536k fps**; fallback 4096 (the elbow) if a run
+  ever looks iteration/cooldown-limited rather than sample-limited.
+- **v23 (in flight):** first production 8-GPU run — clock_owned,
+  STD_MIN 0.13, corrected 0.60/0.40 bars, feet fix, competence-gated
+  penalties/commands/pushes, 6144/GPU, 4000 iters (~2.5 h). Primary
+  question: does v22b's late L5 sag consolidate (mid-learning) or persist
+  (structural — see R6 remedies).
 
 ## Corrections to earlier docs
 
