@@ -188,6 +188,7 @@ TWIST_LIMITS = (0.5, 0.3, 1.0)
 def make_env_and_term(
   rel_standing_envs: float = 0.0,
   segment_mix: PathCommandCfg.SegmentMix | None = None,
+  max_travel_angle: float = math.pi,
 ) -> tuple[types.SimpleNamespace, FakeRobot, PathCommand]:
   robot = FakeRobot(NUM_ENVS)
   env = types.SimpleNamespace(
@@ -202,6 +203,7 @@ def make_env_and_term(
     rel_standing_envs=rel_standing_envs,
     twist_limits=TWIST_LIMITS,
     segment_mix=segment_mix or PathCommandCfg.SegmentMix(),
+    max_travel_angle=max_travel_angle,
     ranges=PathCommandCfg.Ranges(
       lin_vel_x=(-0.5, 0.5),
       lin_vel_y=(-0.3, 0.3),
@@ -329,6 +331,43 @@ def test_segment_mix_masks_twist_components() -> None:
   assert term.ref_twist_b[..., 1].abs().max() < 1e-6  # No vy.
   assert term.ref_twist_b[..., 2].abs().max() < 1e-6  # No wz.
   assert term.ref_twist_b[..., 0].abs().max() > 0.05  # Walks somewhere.
+
+
+def test_travel_direction_cone_limits_bearing() -> None:
+  """With a cone, every moving reference twist travels roughly forward."""
+  torch.manual_seed(3)
+  cone = math.radians(30.0)
+  _, robot, term = make_env_and_term(max_travel_angle=cone)
+  robot.data._heading = (torch.rand(NUM_ENVS) - 0.5) * 2 * math.pi
+  term.reset(torch.arange(NUM_ENVS))
+  term.compute(0.0)
+
+  v = term.ref_twist_b[..., :2]
+  speed = torch.linalg.vector_norm(v, dim=-1)
+  moving = speed > 1e-3
+  assert moving.any()
+  bearing = torch.atan2(v[..., 1], v[..., 0])
+  # Blended steps interpolate between in-cone twists; for a half-angle
+  # below 90 degrees the cone is convex, so blends stay inside it too.
+  assert bearing[moving].abs().max() <= cone + 1e-4
+  # The cone rotates twists rather than zeroing them: lateral motion
+  # within the cone survives.
+  assert v[..., 1].abs().max() > 1e-3
+
+
+def test_travel_direction_cone_rejects_invalid_angle() -> None:
+  with pytest.raises(ValueError, match="max_travel_angle"):
+    PathCommandCfg(
+      entity_name="robot",
+      resampling_time_range=(4.0, 8.0),
+      twist_limits=TWIST_LIMITS,
+      max_travel_angle=-0.1,
+      ranges=PathCommandCfg.Ranges(
+        lin_vel_x=(-0.5, 0.5),
+        lin_vel_y=(-0.3, 0.3),
+        ang_vel_z=(-1.0, 1.0),
+      ),
+    )
 
 
 def test_resample_restarts_path_from_current_pose(seeded_term) -> None:

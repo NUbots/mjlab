@@ -28,6 +28,26 @@ Added
   blends smoothly across segment boundaries (and from rest at episode start)
   instead of stepping. The Nugus command curriculum for this task widens to
   finish at the full envelope rather than the velocity task's narrower caps.
+- Added a ``max_travel_angle`` option to the path tracking command that keeps
+  each path segment's direction of travel within a cone about the commanded
+  heading: sampled linear velocities whose body-frame bearing falls outside
+  the cone are rotated onto its edge with speed preserved. This keeps the
+  robot's yaw roughly aligned with where the path goes so a fresh path can be
+  followed by mostly walking forward. Enabled at ±30° for the NUbots Nugus
+  path tracking configurations; the default (``pi``) leaves paths unchanged.
+- Added support for warm-starting path tracking training from a velocity
+  task checkpoint despite the mismatched observation layouts. The path
+  tracking runner's ``load()`` detects a velocity checkpoint by its actor
+  input width and splices it onto the path-tracking layout: first-layer
+  weight columns and observation-normalizer statistics of shared terms are
+  copied, and the new waypoint command (actor) and ``target_twist`` (critic)
+  columns are zero-initialized, so the warm-started policy initially walks
+  off proprioception and the gait clock and relearns the command's
+  influence. This makes ``train Mjlab-PathTracking-... --agent.resume True
+  --wandb-run-path <velocity run>`` work directly; for velocity checkpoints
+  on local disk, ``scripts/tools/warmstart_nugus_path_from_velocity.py``
+  converts one into a resumable path-tracking checkpoint. The generic
+  splicing utilities live in ``mjlab.rl.warmstart``.
 - Added a ``feet_swing_height_clock`` velocity reward and a matching
   ``gait_clock`` observation. An independent, fixed-frequency gait clock (not
   controlled by the policy) drives a desired per-foot swing-height arc, densely

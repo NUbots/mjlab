@@ -19,11 +19,15 @@ turn, strafe, stop, omnidirectional), its twist is capped to the robot's
 feasibility ellipsoid (per-axis maxima are achievable alone but not
 jointly), and the reference twist blends smoothly across segment
 boundaries instead of stepping, so the path never demands an
-instantaneous velocity change.
+instantaneous velocity change. Optionally, the direction of travel is
+kept within a cone about the commanded heading
+(:attr:`PathCommandCfg.max_travel_angle`), so the robot mostly walks the
+way it faces and can start following a fresh path immediately.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -196,6 +200,20 @@ class PathCommand(CommandTerm):
       max=self._segment_type_mask.shape[0] - 1
     )
     twists = twists * self._segment_type_mask[seg_type]
+
+    # Keep the direction of travel within a cone about the commanded
+    # heading: linear velocities whose body-frame bearing atan2(vy, vx)
+    # falls outside the cone are rotated onto its edge, preserving speed.
+    # This keeps the robot's yaw roughly aligned with where the path goes,
+    # so it can follow a fresh path by mostly walking forward. Segments
+    # with zero linear speed (standing, turn in place) are unaffected.
+    if self.cfg.max_travel_angle < math.pi:
+      speed = torch.linalg.vector_norm(twists[..., :2], dim=-1)
+      bearing = torch.atan2(twists[..., 1], twists[..., 0])
+      clamped = bearing.clamp(-self.cfg.max_travel_angle, self.cfg.max_travel_angle)
+      rotate = (speed > 1e-6) & (bearing != clamped)
+      twists[..., 0] = torch.where(rotate, speed * torch.cos(clamped), twists[..., 0])
+      twists[..., 1] = torch.where(rotate, speed * torch.sin(clamped), twists[..., 1])
 
     # Some environments stand in place for the whole path.
     self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
@@ -433,6 +451,16 @@ class PathCommandCfg(CommandTermCfg):
   segment boundaries and in from the twist active at resample time. Zero
   disables blending and restores stepwise twist changes."""
 
+  max_travel_angle: float = math.pi
+  """Half-angle in radians of the cone about the robot's +x axis that
+  segment linear velocities are kept within.
+
+  Sampled twists whose body-frame velocity bearing ``atan2(vy, vx)`` falls
+  outside the cone are rotated onto its edge with speed preserved, keeping
+  the commanded heading roughly aligned with the direction of travel.
+  ``math.pi`` (the default) disables the cap; smaller values progressively
+  suppress strafing and backward walking (0 forces pure forward travel)."""
+
   @dataclass
   class SegmentMix:
     """Relative frequencies of path segment archetypes.
@@ -499,6 +527,8 @@ class PathCommandCfg(CommandTermCfg):
       raise ValueError("twist_limits must be positive.")
     if self.twist_blend_time < 0.0:
       raise ValueError("twist_blend_time must be non-negative.")
+    if not 0.0 <= self.max_travel_angle <= math.pi:
+      raise ValueError("max_travel_angle must be in [0, pi].")
     mix = self.segment_mix
     weights = (
       mix.standing,

@@ -8,6 +8,8 @@ waypoints instead of the twist — matching what the deployed walk path
 planner can provide from odometry).
 """
 
+import math
+
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.tasks.path_tracking import mdp
@@ -56,6 +58,10 @@ def _convert_to_path_tracking(cfg: ManagerBasedRlEnvCfg) -> None:
     heading_gain=0.5,
     twist_limits=(_MAX_LIN_VEL_X, _MAX_LIN_VEL_Y, _MAX_ANG_VEL_Z),
     twist_blend_time=0.5,
+    # Keep the direction of travel within ±30° of the commanded heading so
+    # the robot's yaw stays roughly aligned with where the path goes and it
+    # can follow a fresh path by mostly walking forward.
+    max_travel_angle=math.radians(30.0),
     debug_vis=True,
     # Inherit the velocity task's (possibly play-adjusted) twist ranges,
     # clipped to the robot's feasible envelope: the velocity task's base
