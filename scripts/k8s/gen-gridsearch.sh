@@ -833,7 +833,7 @@ _wave1_base_exports() {
   export MIRROR_AUG="1"
   export LR_CAP="3e-4"
   export LR_CAP_START_ITER="1200"
-  export ENTROPY_DECAY=""
+  export ENTROPY_DECAY="1"
   export GAMMA=""
   export LINK_MASS_SCALE_MIN="0.90"
   export LINK_MASS_SCALE_MAX="1.10"
