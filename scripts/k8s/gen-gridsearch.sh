@@ -1354,6 +1354,38 @@ gen_v22() {
 }
 
 
+# BATCH=v23: first production 8-GPU run — the full validated stack: clock_owned
+# constant tether (pair-3 R1), STD_MIN sigma floor (v22b: held 0.143, climbed
+# L0->L5 without catastrophe), corrected attainment bars 0.60/0.40 via
+# _competence_defaults (feasibility-bug instance 4 fix), feet_min_sep,
+# adaptive commands+pushes, competence penalty gate. 6144 envs/GPU x 8 GPUs:
+# the mn-bench knee (536k fps == 8192's within 0.5%, at 25% cheaper
+# iterations); sample-limited verdict (v21 race) puts fps first. 4000 iters
+# (~2.5 h at 2.2 s/iter) answers whether v22b's late L5 sag was mid-learning
+# (consolidates) or something structural (keeps sagging).
+gen_v23() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export MJLAB_LOG_STAMP="v23-prod-$(date +%Y%m%d-%H%M%S)"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="4000"
+  export SEED="1"
+  export EXPERIMENT_NAME="nugus_gridsearch_v23"
+  export RUN_NAME="clock_owned__v23-prod__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v23-prod,std-min-0.13,8gpu,multinode,batch-v23,gridsearch"
+  emit_manifest "mj-gs-v23-prod"
+}
+
+
 # BATCH=mn-smoke: 8-GPU multi-node smoke (backlog 15c -> active). v20-full
 # config at 300 iters across 2x4 GPUs via torchrun env-rendezvous. PASS =
 # one W&B run (not two -> rank gating bug), iterating, collection_time
@@ -1588,6 +1620,7 @@ case "$BATCH" in
   mn-bench) gen_mn_bench; expected=6 ;;
   v21) gen_v21; expected=2 ;;
   v22) gen_v22; expected=2 ;;
+  v23) gen_v23; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
