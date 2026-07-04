@@ -67,7 +67,8 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [x] ~~v16 base validated~~ **v16 COLLAPSED at p3 — see `06-v16-collapse-analysis.md`**: swing target infeasible on new actuators + clock_anneal→0 handoff; joule/DR largely acquitted
 - [x] ~~v16b re-baseline~~ **v16b FAILED — never stood (ep_len ~25 for 1400 iters, both seeds); jobs killed. See `08-v16b-postmortem.md`**: un-specced effort-limit cut to rated torque + Phase-C penalties from step 0 with no alive bonus = learned fast-termination
 - [x] v16c launched @ `547c67d` (2026-07-03) — **WALKS** (alive bonus fixed bootstrap) but shuffles/limps and tracking declines post-warm-up; jacc −3e-5 cell clearly better than −1e-4. Full analysis in `09-v16c-analysis-v16d.md`
-- [x] v16d launched @ `94dae96` (2026-07-03) — main + jacc **Completed** 2000 iters; nomirror **Running** (GPU queue). Doc 09 gate: **main FAIL** (tracking decline, shuffle metrics); **no eval**. See summary §v16d.
+- [x] v16d wave-0 **Completed** (2026-07-03) — D0 BASE1=`v16d-main`; keep `JOINT_ACC_W=−1e-5`, keep `MIRROR_AUG`; doc 09 gate FAIL (no eval yet)
+- [x] Wave-1 R4–R5 **Completed**; R6–R7 **Running**; R8–R9 pending (doc 10)
 - [x] peak-swing-height metric added to clock_persist telemetry (`Metrics/peak_height_mean` on `feet_swing_height_clock`, `94dae96`)
 - [x] Velocity limits corrected: XH540 no-load is 39–46 rpm = 4.1–4.8 rad/s (Phase 0 used 3.2 from a wrong 30 rpm figure); set from measured bus voltage; check `saturation_effort` = stall torque (doc 06 §V5). Units are rad/s — confirmed, not rpm
 - [ ] Classical-walk joint-velocity/torque log captured from the real robot (ground truth for limits + gait envelope)
@@ -82,8 +83,20 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [x] C2 Mirror augmentation (`mirror_map.py`, `MIRROR_AUG=1`; `tests/test_mirror_map.py`)
 - [x] C3 Entropy decay / LR cap / γ=0.97 cells (`NugusOnPolicyRunner`; `ENTROPY_DECAY`, `LR_CAP`, `GAMMA` env vars)
 - [x] Overnight plan doc 10 + idea backlog doc 11 added; wave 1–4 manifests @ `ce4da03` (config-audit green; **push + launch pending approval**)
+- [x] Overnight waves ran 2026-07-03/04 — **every ≥1500-iter run collapsed from entropy-driven std regrowth (`ENTROPY_DECAY` was off in all cells); wave-2/3/4 verdicts VOID, wave-1 short-run results valid. Full post-mortem + corrected verdicts: `12-overnight-postmortem.md`**
+- [ ] v16e launched: R13 stack (onesided + period 0.7/swing 0.05 + air 0.25 + clearance-from-swing) + `ENTROPY_DECAY=1`, seeds 1–2 × 2000 it + 1 × 4000 it (spec in doc 12) — **Running 2026-07-04** (`mj-gs-v16e-r13-s1-2k` active; s2-2k + s1-4k queued behind R18)
+- [ ] Voided experiments re-run on entropy-fixed base: wide DR, self_paced, heel-toe long (check per-corner clearance ÷4 rescale first)
 
 ## Standing recommendations (not tasks)
+
+- **`ENTROPY_DECAY=1` in every future run** (`ENTROPY_START=0.01`,
+  `ENTROPY_END=0.001`). The overnight collapse disease (doc 12): fixed
+  entropy 0.01 regrows policy std after convergence (~iter 1000) and
+  destabilizes every long run. Monitor `Policy/mean_std`; alarm if it rises
+  >30% off its post-convergence minimum.
+- **Baseline guard:** a new base must beat the previous batch's best at the
+  SAME iteration count and comparable health — never promote a config whose
+  fell_over is a multiple of the incumbent's.
 
 - **Retire `clock_learned` for now** (B4). Every run shows the learned phase
   delta collapsing back to the nominal clock; the best "clock_learned" run
@@ -114,6 +127,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `09-v16c-analysis-v16d.md` | v16c walks-but-shuffles analysis (joint_acc kills tracking, no symmetry = limp, drag is incentive-limited), v16d change-set + launch checklist + success thresholds |
 | `10-overnight-20run-plan.md` | Autonomous 10 h / 20-run adaptive plan: heel-toe reward fixes (per-corner clearance, center swing height, one-sided foot_flat), cadence/stride grid, economy ablations, seed variance, DR/push restoration, self_paced stretch |
 | `11-idea-backlog.md` | Ranked backlog: adaptive command/push curricula (ADR-lite), single-support & stride rewards, IMU/incline DR, base-height & lean tweaks, AMP-from-classical-walk; ⭐ items are overnight-backfill eligible |
+| `12-overnight-postmortem.md` | Overnight collapse root cause (entropy-driven std regrowth; ENTROPY_DECAY was off), corrected hypothesis verdicts, recalibrated gate, v16e spec, new process rules |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |
