@@ -174,9 +174,9 @@ spec:
                 - name: COMPETENCE_DEMOTE_TRACK_ERR
                   value: ""
                 - name: COMPETENCE_PROMOTE_ATTAIN
-                  value: ""
+                  value: "0.60"
                 - name: COMPETENCE_DEMOTE_ATTAIN
-                  value: ""
+                  value: "0.40"
                 - name: COMPETENCE_PROMOTE_WOBBLE
                   value: ""
                 - name: COMPETENCE_DEMOTE_WOBBLE

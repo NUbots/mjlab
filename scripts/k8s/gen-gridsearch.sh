@@ -1158,8 +1158,12 @@ _competence_defaults() {
   # higher levels where commands dominate sway.
   export COMPETENCE_PROMOTE_TRACK_ERR=""
   export COMPETENCE_DEMOTE_TRACK_ERR=""
-  export COMPETENCE_PROMOTE_ATTAIN=""
-  export COMPETENCE_DEMOTE_ATTAIN=""
+  # 0.60/0.40, not the code-default 0.75/0.5: the best-ever policy (v16e
+  # gate-passer, err 0.147 at 0.5 m/s) scores attain ~0.71 — a 0.75 promote
+  # bar sits above the feasible ceiling (bug species #4; bs8192 plateaued
+  # at 0.62 for 700 iters against it).
+  export COMPETENCE_PROMOTE_ATTAIN="0.60"
+  export COMPETENCE_DEMOTE_ATTAIN="0.40"
   export COMPETENCE_PROMOTE_WOBBLE=""
   export COMPETENCE_DEMOTE_WOBBLE=""
   export COMPETENCE_PROMOTE_FELL=""
