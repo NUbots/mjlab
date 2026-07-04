@@ -230,6 +230,8 @@ export ENTROPY_DECAY GAMMA
 export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W PHASE_DELTA_W
 export JOB_REPLICAS MULTINODE MJLAB_LOG_STAMP
 JOB_REPLICAS="${JOB_REPLICAS:-1}"
+export NUM_ENVS
+NUM_ENVS="${NUM_ENVS:-8192}"
 MULTINODE="${MULTINODE:-}"
 MJLAB_LOG_STAMP="${MJLAB_LOG_STAMP:-}"
 export ADAPTIVE_COMMANDS ADAPTIVE_PUSHES PENALTY_GATE
@@ -1240,6 +1242,35 @@ gen_v20() {
 }
 
 
+# BATCH=mn-bench: env-count sweet-spot sweep UNDER the multi-node setup.
+# The 8192/GPU sweet spot was measured on 1-GPU synthetic jobs; with 8 GPUs
+# there are 20 sync barriers/iter and gang iteration time is the max over
+# ranks, so the latency-optimal env count may shift. 4 cells x 300 iters,
+# each gang-takes all 8 GPUs -> Volcano runs them sequentially. Read
+# Perf/collection_time + learning_time + total_fps per cell from W&B.
+gen_mn_bench() {
+  local envs
+  for envs in 2048 4096 6144 8192; do
+    _v16e_r13_exports
+    _competence_defaults
+    export ADAPTIVE_COMMANDS="1"
+    export ADAPTIVE_PUSHES="1"
+    export PENALTY_GATE="competence"
+    export MAX_ITERATIONS="300"
+    export PHASE_ITERATIONS="2000"
+    export SEED="1"
+    export JOB_REPLICAS="2"
+    export MULTINODE="1"
+    export NUM_ENVS="${envs}"
+    export MJLAB_LOG_STAMP="mn-bench-${envs}-$(date +%Y%m%d-%H%M%S)"
+    export EXPERIMENT_NAME="nugus_mn_bench"
+    export RUN_NAME="mn-bench__envs-${envs}__8gpu__${BATCH}"
+    export WANDB_TAGS="mn-bench,8gpu,envs-${envs},batch-mn-bench"
+    emit_manifest "mj-gs-mn-bench-${envs}"
+  done
+}
+
+
 # BATCH=mn-smoke: 8-GPU multi-node smoke (backlog 15c -> active). v20-full
 # config at 300 iters across 2x4 GPUs via torchrun env-rendezvous. PASS =
 # one W&B run (not two -> rank gating bug), iterating, collection_time
@@ -1471,6 +1502,7 @@ case "$BATCH" in
   v16e) gen_v16e; expected=3 ;;
   v20) gen_v20; expected=12 ;;
   mn-smoke) gen_mn_smoke; expected=1 ;;
+  mn-bench) gen_mn_bench; expected=4 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
