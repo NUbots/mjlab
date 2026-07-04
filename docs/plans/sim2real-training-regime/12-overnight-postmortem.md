@@ -79,6 +79,32 @@ plus fixed eval.
 4. Standing change: `ENTROPY_DECAY=1` becomes a default in every future
    generator (add to the standing recommendations in README).
 
+## Addendum: contamination scope, and clock_learned re-examined (2026-07-04)
+
+Two follow-up checks against old-physics runs:
+
+1. **The disease is new-physics-specific.** v13-era runs (old physics,
+   same fixed entropy 0.01) show std monotonically DECREASING to ~0.05 with
+   no regrowth (v13 baseline: std 0.046, fell 0.04 at iter 1979; v13
+   clock_learned 4k: std 0.05–0.06, fell 0.1–0.25 throughout). Mechanism:
+   the disease is an equilibrium between the entropy bonus and the
+   task-reward gradient — the corrected physics (friction, velocity limits,
+   thinner stability margins) flattens the reward landscape near
+   convergence, so entropy wins the tug and std regrows. Consequence:
+   ENTROPY_DECAY is a permanent requirement of the post-Phase-0 physics,
+   not a one-off patch, and pre-Phase-0 conclusions are NOT contaminated by
+   this disease.
+2. **The clock_learned phase collapse (F3) is confirmed genuine, not
+   disease.** The healthiest clock_learned run (v13 base→hard 4k: std
+   falling, fell ≤0.25 all run) still decayed its phase-delta usage
+   1.01 → 0.64 → 0.32 → 0.06. Under ideal optimizer health, the policy
+   abandoned the phase freedom — the always-on nominal penalty prices
+   deviation, and flat-ground fixed-period walking offers no payoff for it.
+   Retirement stands. Conditions for a future fair retrial (doc 07 Stage 3):
+   a payoff channel (push-recovery windows / commanded cadence changes /
+   terrain), a steady-state-only tether instead of always-on, and entropy
+   decay so the phase channel isn't noise-flooded.
+
 ## New process rules (add to all future autonomous sessions)
 
 - **Baseline guard:** a new base must beat the previous batch's best at the
