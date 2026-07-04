@@ -529,6 +529,83 @@ def _add_phase_c_warmup_curriculum(
     )
 
 
+def _competence_penalty_stages(
+  final_weight: float, *, n_steps: int = 4
+) -> list[dict[str, float]]:
+  """Build competence-gated penalty ramp stages (0 → full in ``n_steps``)."""
+  stages: list[dict[str, float]] = [{"step": 0, "weight": 0.0}]
+  for i in range(1, n_steps + 1):
+    stages.append({"step": i, "weight": final_weight * i / n_steps})
+  return stages
+
+
+def _competence_threshold_params() -> dict[str, float | int]:
+  return {
+    "promote_track_err": _env_float("COMPETENCE_PROMOTE_TRACK_ERR", 0.25),
+    "demote_track_err": _env_float("COMPETENCE_DEMOTE_TRACK_ERR", 0.45),
+    "promote_fell": _env_float("COMPETENCE_PROMOTE_FELL", 0.3),
+    "demote_fell": _env_float("COMPETENCE_DEMOTE_FELL", 1.0),
+    "cooldown_iters": _env_int("COMPETENCE_COOLDOWN_ITERS", 50),
+  }
+
+
+def _add_competence_tracker_event(cfg: ManagerBasedRlEnvCfg) -> None:
+  cfg.events["competence_tracker"] = EventTermCfg(
+    mode="step",
+    func=mdp.competence_tracker_step,
+    params={},
+  )
+
+
+def _add_adaptive_command_curriculum(cfg: ManagerBasedRlEnvCfg, *, l_max: int) -> None:
+  cfg.curriculum["adaptive_command_level"] = CurriculumTermCfg(
+    func=mdp.adaptive_command_level,
+    params={
+      "command_name": "twist",
+      "l_max": l_max,
+      **_competence_threshold_params(),
+    },
+  )
+  if "command_vel" in cfg.curriculum:
+    del cfg.curriculum["command_vel"]
+
+
+def _add_adaptive_push_curriculum(cfg: ManagerBasedRlEnvCfg, *, l_max: int) -> None:
+  cfg.curriculum["adaptive_push_level"] = CurriculumTermCfg(
+    func=mdp.adaptive_push_level,
+    params={
+      "event_name": "push_robot",
+      "l_max": l_max,
+      "start_level": 1,
+      **_competence_threshold_params(),
+    },
+  )
+
+
+def _add_competence_penalty_gating(
+  cfg: ManagerBasedRlEnvCfg,
+  *,
+  joule_w: float,
+  joint_acc_w: float,
+) -> None:
+  """Ramp movement penalties when stability competence holds (doc 13 axis 3)."""
+  cfg.rewards["base_height"].weight = _PHASE_C_BASE_HEIGHT_W
+  for reward_name, peak_weight in (
+    ("joule_heating", joule_w),
+    ("joint_acc_l2", joint_acc_w),
+    ("torque_rate", _PHASE_C_TORQUE_RATE_W),
+    ("soft_landing", _PHASE_C_SOFT_LANDING_W),
+  ):
+    cfg.curriculum[f"{reward_name}_competence"] = CurriculumTermCfg(
+      func=mdp.staged_on_competence,
+      params={
+        "reward_name": reward_name,
+        "stages": _competence_penalty_stages(peak_weight),
+        **_competence_threshold_params(),
+      },
+    )
+
+
 def _add_gait_curriculum(
   cfg: ManagerBasedRlEnvCfg,
   *,
@@ -704,6 +781,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     raise ValueError(
       f"PUSH_INTERVAL_SCALE must be positive; got {push_interval_scale!r}"
     )
+  adaptive_commands = _env_bool("ADAPTIVE_COMMANDS", default=False)
+  adaptive_pushes = _env_bool("ADAPTIVE_PUSHES", default=False)
+  penalty_gate = _env_str("PENALTY_GATE", "time")
+  if penalty_gate not in ("time", "competence"):
+    raise ValueError(
+      f"PENALTY_GATE must be 'time' or 'competence'; got {penalty_gate!r}"
+    )
+  adaptive_cmd_lmax = _env_int("ADAPTIVE_CMD_LMAX", 3)
+  adaptive_push_lmax = _env_int("ADAPTIVE_PUSH_LMAX", 3)
   critic_height_scan = _env_bool("CRITIC_HEIGHT_SCAN", default=False)
   training_regime = _env_str("TRAINING_REGIME", "base")
   resume_mode = _env_bool("RESUME", default=False)
@@ -1238,7 +1324,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       enabled_components=hard_components,
     )
   elif training_regime == "base":
-    if phase_c_warmup:
+    if penalty_gate == "competence":
+      _add_competence_penalty_gating(cfg, joule_w=joule_w, joint_acc_w=joint_acc_w)
+    elif phase_c_warmup:
       _add_phase_c_warmup_curriculum(cfg, joule_w=joule_w, joint_acc_w=joint_acc_w)
     elif flatten_phase_c:
       _apply_flat_phase_c_weights(cfg, joule_w=joule_w, joint_acc_w=joint_acc_w)
@@ -1251,6 +1339,13 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "TRAINING_REGIME must be 'base', 'hard_continue', 'base_then_hard', or "
       f"'hard_from_start'; got {training_regime!r}"
     )
+
+  if adaptive_commands or adaptive_pushes or penalty_gate == "competence":
+    _add_competence_tracker_event(cfg)
+  if adaptive_commands:
+    _add_adaptive_command_curriculum(cfg, l_max=adaptive_cmd_lmax)
+  if adaptive_pushes:
+    _add_adaptive_push_curriculum(cfg, l_max=adaptive_push_lmax)
 
   # Apply play mode overrides.
   if play:

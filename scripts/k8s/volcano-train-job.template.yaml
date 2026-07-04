@@ -134,6 +134,26 @@ spec:
                   value: "${ENTROPY_DECAY}"
                 - name: GAMMA
                   value: "${GAMMA}"
+                - name: ADAPTIVE_COMMANDS
+                  value: "${ADAPTIVE_COMMANDS}"
+                - name: ADAPTIVE_PUSHES
+                  value: "${ADAPTIVE_PUSHES}"
+                - name: PENALTY_GATE
+                  value: "${PENALTY_GATE}"
+                - name: ADAPTIVE_CMD_LMAX
+                  value: "${ADAPTIVE_CMD_LMAX}"
+                - name: ADAPTIVE_PUSH_LMAX
+                  value: "${ADAPTIVE_PUSH_LMAX}"
+                - name: COMPETENCE_PROMOTE_TRACK_ERR
+                  value: "${COMPETENCE_PROMOTE_TRACK_ERR}"
+                - name: COMPETENCE_DEMOTE_TRACK_ERR
+                  value: "${COMPETENCE_DEMOTE_TRACK_ERR}"
+                - name: COMPETENCE_PROMOTE_FELL
+                  value: "${COMPETENCE_PROMOTE_FELL}"
+                - name: COMPETENCE_DEMOTE_FELL
+                  value: "${COMPETENCE_DEMOTE_FELL}"
+                - name: COMPETENCE_COOLDOWN_ITERS
+                  value: "${COMPETENCE_COOLDOWN_ITERS}"
                 - name: LINK_MASS_SCALE_MIN
                   value: "${LINK_MASS_SCALE_MIN}"
                 - name: LINK_MASS_SCALE_MAX

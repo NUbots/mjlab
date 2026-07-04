@@ -227,6 +227,10 @@ export FOOT_FLAT_W FOOT_FLAT_ONESIDED CLEARANCE_PER_CORNER SWING_HEIGHT_SOURCE
 export CLEARANCE_TARGET_HEIGHT CLEARANCE_TARGET_FROM_SWING PUSH_INTERVAL_SCALE
 export MIRROR_AUG TRACK_LIN_W TRACK_ANG_W AIR_TIME_W LR_CAP LR_CAP_START_ITER
 export ENTROPY_DECAY GAMMA
+export ADAPTIVE_COMMANDS ADAPTIVE_PUSHES PENALTY_GATE
+export ADAPTIVE_CMD_LMAX ADAPTIVE_PUSH_LMAX
+export COMPETENCE_PROMOTE_TRACK_ERR COMPETENCE_DEMOTE_TRACK_ERR
+export COMPETENCE_PROMOTE_FELL COMPETENCE_DEMOTE_FELL COMPETENCE_COOLDOWN_ITERS
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
@@ -1116,6 +1120,72 @@ gen_v16e() {
 }
 
 
+# Shared competence-curriculum defaults (doc 13).
+_competence_defaults() {
+  export ADAPTIVE_COMMANDS=""
+  export ADAPTIVE_PUSHES=""
+  export PENALTY_GATE="time"
+  export ADAPTIVE_CMD_LMAX="3"
+  export ADAPTIVE_PUSH_LMAX="3"
+  export COMPETENCE_PROMOTE_TRACK_ERR=""
+  export COMPETENCE_DEMOTE_TRACK_ERR=""
+  export COMPETENCE_PROMOTE_FELL=""
+  export COMPETENCE_DEMOTE_FELL=""
+  export COMPETENCE_COOLDOWN_ITERS=""
+}
+
+
+# BATCH=v20: competence-curriculum A/B (doc 13) on the v16e R13 stack.
+gen_v20() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MAX_ITERATIONS="2000"
+  export EXPERIMENT_NAME="nugus_gridsearch_v20"
+
+  local cell slug seed job_suffix
+  for cell in control cmd full hard; do
+    _v16e_r13_exports
+    _competence_defaults
+    export MAX_ITERATIONS="2000"
+    export EXPERIMENT_NAME="nugus_gridsearch_v20"
+    case "$cell" in
+      control)
+        slug="control"
+        ;;
+      cmd)
+        slug="cmd"
+        export ADAPTIVE_COMMANDS="1"
+        ;;
+      full)
+        slug="full"
+        export ADAPTIVE_COMMANDS="1"
+        export ADAPTIVE_PUSHES="1"
+        export PENALTY_GATE="competence"
+        ;;
+      hard)
+        slug="hard"
+        export ADAPTIVE_COMMANDS="1"
+        export ADAPTIVE_PUSHES="1"
+        export PENALTY_GATE="competence"
+        export ADAPTIVE_CMD_LMAX="5"
+        export ADAPTIVE_PUSH_LMAX="5"
+        ;;
+    esac
+    for seed in 1 2; do
+      export SEED="$seed"
+      if [[ "$seed" == "1" ]]; then
+        job_suffix=""
+      else
+        job_suffix="-s${seed}"
+      fi
+      export RUN_NAME="clock_persist__r13__v20-${slug}__entropy-decay__s${seed}__${BATCH}"
+      export WANDB_TAGS="clock_persist,r13-stack,v20-${slug},entropy-decay,seed-${seed},2k,gridsearch,batch-v20"
+      emit_manifest "mj-gs-v20-${slug}${job_suffix}"
+    done
+  done
+}
+
+
 # BATCH=v16: Phase-0 smoke — clock_anneal flat base (no hard_continue), 2k iters,
 # critic height_scan, JOULE_W=1e-5. Establishes the post-E0.2/A3/C1 baseline.
 gen_v16_base() {
@@ -1321,6 +1391,7 @@ case "$BATCH" in
   wave3) gen_wave3; expected=6 ;;
   wave4) gen_wave4; expected=3 ;;
   v16e) gen_v16e; expected=3 ;;
+  v20) gen_v20; expected=8 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

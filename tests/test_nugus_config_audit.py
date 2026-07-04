@@ -57,6 +57,16 @@ def _clear_nugus_env(monkeypatch: pytest.MonkeyPatch) -> None:
     "FOOT_FLAT_ONESIDED",
     "CLEARANCE_PER_CORNER",
     "SWING_HEIGHT_SOURCE",
+    "ADAPTIVE_COMMANDS",
+    "ADAPTIVE_PUSHES",
+    "PENALTY_GATE",
+    "ADAPTIVE_CMD_LMAX",
+    "ADAPTIVE_PUSH_LMAX",
+    "COMPETENCE_PROMOTE_TRACK_ERR",
+    "COMPETENCE_DEMOTE_TRACK_ERR",
+    "COMPETENCE_PROMOTE_FELL",
+    "COMPETENCE_DEMOTE_FELL",
+    "COMPETENCE_COOLDOWN_ITERS",
   ):
     monkeypatch.delenv(key, raising=False)
 
