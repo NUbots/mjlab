@@ -135,6 +135,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `12-overnight-postmortem.md` | Overnight collapse root cause (entropy-driven std regrowth; ENTROPY_DECAY was off), corrected hypothesis verdicts, recalibrated gate, v16e spec, new process rules |
 | `13-competence-curriculum.md` | Edge-of-competence curriculum: CompetenceController design (hysteresis/cooldown/levels), adaptive command/push/penalty axes, v20 A/B spec, replaces hard_continue |
 | `14-v16e-analysis-v16f.md` | v16e: entropy fix confirmed, disease #2 isolated (nonstationary-objective height ratchet), probable first gate-pass checkpoint (`0hlgni3s` @750–1000), v16f stationarity cells + decision rules |
+| `15-v20-era-findings.md` | v20-era chronicle: clock_owned promoted (10x resilience, p95 usage under stress), feet fix validated, controller bug chronicle + threshold-feasibility rule, attainment/wobble gating, std<0.15 destabilizer hypothesis (v22), multi-GPU program + batch-size economics |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |
