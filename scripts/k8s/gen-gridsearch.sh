@@ -1435,6 +1435,45 @@ gen_v24() {
 # (v22b, v23, v24) all ignited the burn at L5 (±0.75), consistent with the
 # XH540 velocity-margin analysis; sample L5 again only after a full-length
 # healthy L4 run exists.
+# BATCH=v24c: v24b died WITHOUT ever promoting — bar-infeasibility instance
+# 5. Its L0 attainment ceiling converged at 0.543 (run-to-run gait variance;
+# v22b/v23/v24 crossed 0.60 at iters 1050-1300) and it sat saturated under
+# the unreachable bar until R6 churn killed it at ~2100: the cleanest pure
+# demonstration of saturation death (ep 1000 / wobble 0.011 / fell_ema 0.09
+# at iter 1200 — an excellent L0 policy — then attain slip, fast rate
+# 0.02->0.67, entropy VALUE rising, spiral). Unified law: too-hard and
+# too-easy both end in the same absorbing fall-spiral; the ladder must keep
+# moving. Changes vs v24b: PROMOTE_ATTAIN 0.50 (below the worst observed
+# ceiling), DEMOTE_ATTAIN 0.35 (hysteresis width kept), PHASE_ITERATIONS
+# 2000 (entropy decay completes on the v22b-proven profile instead of
+# hovering mid-decay through the churn window; sigma floor rules after).
+gen_v24c() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export ADAPTIVE_CMD_LMAX="4"
+  export COMPETENCE_PROMOTE_ATTAIN="0.50"
+  export COMPETENCE_DEMOTE_ATTAIN="0.35"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v24c-prod-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v24"
+  export RUN_NAME="clock_owned__v24c-attain050-ph2k__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v24c,attain-0.50,phase-2k,lmax4,std-min-0.13,8gpu,multinode,batch-v24,gridsearch"
+  emit_manifest "mj-gs-v24c-prod"
+}
+
+
 gen_v24b() {
   _v16e_r13_exports
   _competence_defaults
@@ -1697,6 +1736,7 @@ case "$BATCH" in
   v23) gen_v23; expected=1 ;;
   v24) gen_v24; expected=1 ;;
   v24b) gen_v24b; expected=1 ;;
+  v24c) gen_v24c; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
