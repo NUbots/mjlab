@@ -621,6 +621,8 @@ Judged on `twist/error_vel_x`, `air_time_mean`, `fell_over`, `track_linear_veloc
 
 Config: `FOOT_FLAT_ONESIDED=1`, `GAIT_PERIOD=0.7`, `SWING=0.05`, `AIR_TIME_W=0.25`, `CLEARANCE_TARGET_FROM_SWING=1`, `ENTROPY_DECAY=1` (defaults `ENTROPY_START=0.01`, `ENTROPY_END=0.001`). Manifests: `scripts/k8s/gen_v16e/`. Experiment: `nugus_gridsearch_v16e`. Voided re-runs (wide DR, self_paced, R5 heel-toe long) deferred until cells 1–2 pass.
 
+**v20 code ready (2026-07-04, doc 13):** competence curriculum (`CompetenceTracker` + `CompetenceController`, adaptive command/push/penalty axes) wired behind `ADAPTIVE_COMMANDS`, `ADAPTIVE_PUSHES`, `PENALTY_GATE=competence|time`. Manifests: `scripts/k8s/gen_v20/` (8 cells: control/cmd/full/hard × seeds 1–2). **Launch pending** — wait for v16e gate; do not apply while v16e jobs hold GPUs.
+
 ---
 
 ## 6. Data availability notes

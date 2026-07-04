@@ -86,6 +86,8 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [x] Overnight waves ran 2026-07-03/04 — **every ≥1500-iter run collapsed from entropy-driven std regrowth (`ENTROPY_DECAY` was off in all cells); wave-2/3/4 verdicts VOID, wave-1 short-run results valid. Full post-mortem + corrected verdicts: `12-overnight-postmortem.md`**
 - [ ] v16e launched: R13 stack (onesided + period 0.7/swing 0.05 + air 0.25 + clearance-from-swing) + `ENTROPY_DECAY=1`, seeds 1–2 × 2000 it + 1 × 4000 it (spec in doc 12) — **Running 2026-07-04** (`mj-gs-v16e-r13-s1-2k` active; s2-2k + s1-4k queued behind R18)
 - [ ] Voided experiments re-run on entropy-fixed base: wide DR, self_paced, heel-toe long (check per-corner clearance ÷4 rescale first)
+- [x] Competence-based curriculum implemented — v20 A/B manifests ready (doc 13: adaptive commands/pushes/penalty-gating vs time-scheduled control; **launch pending v16e gate + push**)
+- [ ] v20 A/B launched (primary metric = time-to-competence)
 
 ## Standing recommendations (not tasks)
 
@@ -128,6 +130,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `10-overnight-20run-plan.md` | Autonomous 10 h / 20-run adaptive plan: heel-toe reward fixes (per-corner clearance, center swing height, one-sided foot_flat), cadence/stride grid, economy ablations, seed variance, DR/push restoration, self_paced stretch |
 | `11-idea-backlog.md` | Ranked backlog: adaptive command/push curricula (ADR-lite), single-support & stride rewards, IMU/incline DR, base-height & lean tweaks, AMP-from-classical-walk; ⭐ items are overnight-backfill eligible |
 | `12-overnight-postmortem.md` | Overnight collapse root cause (entropy-driven std regrowth; ENTROPY_DECAY was off), corrected hypothesis verdicts, recalibrated gate, v16e spec, new process rules |
+| `13-competence-curriculum.md` | Edge-of-competence curriculum: CompetenceController design (hysteresis/cooldown/levels), adaptive command/push/penalty axes, v20 A/B spec, replaces hard_continue |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |
