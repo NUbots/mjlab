@@ -227,6 +227,9 @@ export FOOT_FLAT_W FOOT_FLAT_ONESIDED CLEARANCE_PER_CORNER SWING_HEIGHT_SOURCE
 export CLEARANCE_TARGET_HEIGHT CLEARANCE_TARGET_FROM_SWING PUSH_INTERVAL_SCALE
 export MIRROR_AUG TRACK_LIN_W TRACK_ANG_W AIR_TIME_W LR_CAP LR_CAP_START_ITER
 export ENTROPY_DECAY GAMMA
+export ENTROPY_START ENTROPY_END
+ENTROPY_START="${ENTROPY_START:-}"
+ENTROPY_END="${ENTROPY_END:-}"
 export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W PHASE_DELTA_W
 export JOB_REPLICAS MULTINODE MJLAB_LOG_STAMP
 JOB_REPLICAS="${JOB_REPLICAS:-1}"
@@ -1306,6 +1309,35 @@ gen_v21() {
 }
 
 
+# BATCH=v22: entropy-floor test on the promoted clock_owned base.
+# Every degrading run on the corrected physics crossed into trouble as std
+# sank below ~0.15 (full 0.138->0.106 through catastrophe, owned 0.171->0.13
+# through its milder failure, v16e 0.103, the dead 4k run 0.08) while
+# penalties/commands were flat - the 0.001 entropy floor over-sharpens the
+# policy into brittleness. Hold ENTROPY_END=0.004 (std ~0.15-0.18).
+# clock_owned (pair-3 verdict: ~10x more resilient than fixed clock, p95
+# phase usage peaked exactly under stress), 2048 envs (bs-race fast point),
+# attainment-fixed gating.
+gen_v22() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export NUM_ENVS="2048"
+  export ENTROPY_END="0.004"
+  export MAX_ITERATIONS="2000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export EXPERIMENT_NAME="nugus_gridsearch_v22"
+  export RUN_NAME="clock_owned__v22-floor-0.004__bs2048__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v22-floor,entropy-end-0.004,bs2048,batch-v22,gridsearch"
+  emit_manifest "mj-gs-v22-floor"
+}
+
+
 # BATCH=mn-smoke: 8-GPU multi-node smoke (backlog 15c -> active). v20-full
 # config at 300 iters across 2x4 GPUs via torchrun env-rendezvous. PASS =
 # one W&B run (not two -> rank gating bug), iterating, collection_time
@@ -1539,6 +1571,7 @@ case "$BATCH" in
   mn-smoke) gen_mn_smoke; expected=1 ;;
   mn-bench) gen_mn_bench; expected=6 ;;
   v21) gen_v21; expected=2 ;;
+  v22) gen_v22; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

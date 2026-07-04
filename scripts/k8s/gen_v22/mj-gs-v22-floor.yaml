@@ -3,17 +3,17 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: ${JOB_NAME}
+  name: mj-gs-v22-floor
   namespace: mjlab
   labels:
     app.kubernetes.io/name: mjlab-train
     app.kubernetes.io/component: gridsearch
     mjlab/gridsearch: "true"
-    mjlab/variant: ${MJLAB_VARIANT}
+    mjlab/variant: clock_owned
 spec:
   schedulerName: volcano
   queue: mjlab-train
-  minAvailable: ${JOB_REPLICAS}
+  minAvailable: 1
   plugins:
     env: []
     svc: []
@@ -21,15 +21,15 @@ spec:
   ttlSecondsAfterFinished: 86400
   tasks:
     - name: train
-      replicas: ${JOB_REPLICAS}
-      minAvailable: ${JOB_REPLICAS}
+      replicas: 1
+      minAvailable: 1
       template:
         metadata:
           labels:
             app.kubernetes.io/name: mjlab-train
             app.kubernetes.io/component: gridsearch
             mjlab/gridsearch: "true"
-            mjlab/variant: ${MJLAB_VARIANT}
+            mjlab/variant: clock_owned
         spec:
           restartPolicy: Never
           runtimeClassName: nvidia
@@ -48,167 +48,167 @@ spec:
                 - name: MUJOCO_GL
                   value: egl
                 - name: NUM_ENVS
-                  value: "${NUM_ENVS}"
+                  value: "2048"
                 - name: MULTINODE
-                  value: "${MULTINODE}"
+                  value: ""
                 - name: NNODES
-                  value: "${JOB_REPLICAS}"
+                  value: "1"
                 - name: MJLAB_LOG_STAMP
-                  value: "${MJLAB_LOG_STAMP}"
+                  value: ""
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
-                  value: "${MJLAB_VARIANT}"
+                  value: "clock_owned"
                 - name: JOULE_W
-                  value: "${JOULE_W}"
+                  value: "1e-5"
                 - name: STAND_W
-                  value: "${STAND_W}"
+                  value: "0.15"
                 - name: PHASE_C_FRAC
-                  value: "${PHASE_C_FRAC}"
+                  value: "0.5"
                 # Curriculum phase boundaries are derived from PHASE_ITERATIONS,
                 # decoupled from MAX_ITERATIONS (which only drives the training
                 # length). Freeze at 1250 so resumed/extended runs keep the same
                 # absolute phase timing.
                 - name: PHASE_ITERATIONS
-                  value: "${PHASE_ITERATIONS}"
+                  value: "2000"
                 # Training length (additive on resume: rsl-rl runs this many more
                 # iterations starting from the checkpoint's iteration). Overrides
                 # the configmap default per cell.
                 - name: MAX_ITERATIONS
-                  value: "${MAX_ITERATIONS}"
+                  value: "2000"
                 # New clock_anneal variant knobs read by the factory.
                 - name: SILENCE_CLOCK
-                  value: "${SILENCE_CLOCK}"
+                  value: "0"
                 - name: CURRENT_OBS
-                  value: "${CURRENT_OBS}"
+                  value: "0"
                 - name: PHASE_DELTA_STRONG_ITERS
-                  value: "${PHASE_DELTA_STRONG_ITERS}"
+                  value: "1000"
                 - name: PHASE_DELTA_STRONG_W
-                  value: "${PHASE_DELTA_STRONG_W}"
+                  value: "-5.0"
                 - name: PHASE_DELTA_TAIL_W
-                  value: "${PHASE_DELTA_TAIL_W}"
+                  value: ""
                 - name: UPRIGHT_W
-                  value: "${UPRIGHT_W}"
+                  value: "0.5"
                 - name: PROGRESS_BACKSLIDE_W
-                  value: "${PROGRESS_BACKSLIDE_W}"
+                  value: "-0.5"
                 - name: TRAINING_REGIME
-                  value: "${TRAINING_REGIME}"
+                  value: "base"
                 - name: HARD_COMPONENTS
-                  value: "${HARD_COMPONENTS}"
+                  value: ""
                 - name: CONT_BASE_STEP
-                  value: "${CONT_BASE_STEP}"
+                  value: ""
                 - name: CRITIC_HEIGHT_SCAN
-                  value: "${CRITIC_HEIGHT_SCAN}"
+                  value: "true"
                 - name: TASK
-                  value: "${TASK}"
+                  value: "Mjlab-Velocity-Flat-Nubots-Nugus"
                 - name: RESAMPLE_MIN
-                  value: "${RESAMPLE_MIN}"
+                  value: "3.0"
                 - name: GAIT_PERIOD
-                  value: "${GAIT_PERIOD}"
+                  value: "0.7"
                 - name: SWING_TARGET_HEIGHT
-                  value: "${SWING_TARGET_HEIGHT}"
+                  value: "0.05"
                 - name: FLATTEN_PHASE_C
-                  value: "${FLATTEN_PHASE_C}"
+                  value: "0"
                 - name: PHASE_C_WARMUP
-                  value: "${PHASE_C_WARMUP}"
+                  value: "1"
                 - name: ALIVE_W
-                  value: "${ALIVE_W}"
+                  value: "0.5"
                 - name: JOINT_ACC_W
-                  value: "${JOINT_ACC_W}"
+                  value: "-1e-5"
                 - name: PHASE_DELTA_W
-                  value: "${PHASE_DELTA_W}"
+                  value: "-0.2"
                 - name: FEET_MIN_SEP
-                  value: "${FEET_MIN_SEP}"
+                  value: "0.13"
                 - name: FEET_MIN_SEP_W
-                  value: "${FEET_MIN_SEP_W}"
+                  value: "-1.0"
                 - name: FEET_MIN_SEP_SHARPNESS
-                  value: "${FEET_MIN_SEP_SHARPNESS}"
+                  value: "20"
                 - name: TRACK_LIN_W
-                  value: "${TRACK_LIN_W}"
+                  value: "3.0"
                 - name: TRACK_ANG_W
-                  value: "${TRACK_ANG_W}"
+                  value: "2.0"
                 - name: AIR_TIME_W
-                  value: "${AIR_TIME_W}"
+                  value: "0.25"
                 - name: MIRROR_AUG
-                  value: "${MIRROR_AUG}"
+                  value: "1"
                 - name: FOOT_FLAT_W
-                  value: "${FOOT_FLAT_W}"
+                  value: "-0.5"
                 - name: FOOT_FLAT_ONESIDED
-                  value: "${FOOT_FLAT_ONESIDED}"
+                  value: "1"
                 - name: CLEARANCE_PER_CORNER
-                  value: "${CLEARANCE_PER_CORNER}"
+                  value: ""
                 - name: SWING_HEIGHT_SOURCE
-                  value: "${SWING_HEIGHT_SOURCE}"
+                  value: "min_corner"
                 - name: CLEARANCE_TARGET_HEIGHT
-                  value: "${CLEARANCE_TARGET_HEIGHT}"
+                  value: ""
                 - name: CLEARANCE_TARGET_FROM_SWING
-                  value: "${CLEARANCE_TARGET_FROM_SWING}"
+                  value: "1"
                 - name: PUSH_INTERVAL_SCALE
-                  value: "${PUSH_INTERVAL_SCALE}"
+                  value: "1.0"
                 - name: LR_CAP
-                  value: "${LR_CAP}"
+                  value: "3e-4"
                 - name: LR_CAP_START_ITER
-                  value: "${LR_CAP_START_ITER}"
+                  value: "1200"
                 - name: ENTROPY_DECAY
-                  value: "${ENTROPY_DECAY}"
+                  value: "1"
                 - name: ENTROPY_START
-                  value: "${ENTROPY_START}"
+                  value: ""
                 - name: ENTROPY_END
-                  value: "${ENTROPY_END}"
+                  value: "0.004"
                 - name: GAMMA
-                  value: "${GAMMA}"
+                  value: ""
                 - name: ADAPTIVE_COMMANDS
-                  value: "${ADAPTIVE_COMMANDS}"
+                  value: "1"
                 - name: ADAPTIVE_PUSHES
-                  value: "${ADAPTIVE_PUSHES}"
+                  value: "1"
                 - name: PENALTY_GATE
-                  value: "${PENALTY_GATE}"
+                  value: "competence"
                 - name: ADAPTIVE_CMD_LMAX
-                  value: "${ADAPTIVE_CMD_LMAX}"
+                  value: "5"
                 - name: ADAPTIVE_PUSH_LMAX
-                  value: "${ADAPTIVE_PUSH_LMAX}"
+                  value: "2"
                 - name: COMPETENCE_PROMOTE_TRACK_ERR
-                  value: "${COMPETENCE_PROMOTE_TRACK_ERR}"
+                  value: ""
                 - name: COMPETENCE_DEMOTE_TRACK_ERR
-                  value: "${COMPETENCE_DEMOTE_TRACK_ERR}"
+                  value: ""
                 - name: COMPETENCE_PROMOTE_ATTAIN
-                  value: "${COMPETENCE_PROMOTE_ATTAIN}"
+                  value: ""
                 - name: COMPETENCE_DEMOTE_ATTAIN
-                  value: "${COMPETENCE_DEMOTE_ATTAIN}"
+                  value: ""
                 - name: COMPETENCE_PROMOTE_WOBBLE
-                  value: "${COMPETENCE_PROMOTE_WOBBLE}"
+                  value: ""
                 - name: COMPETENCE_DEMOTE_WOBBLE
-                  value: "${COMPETENCE_DEMOTE_WOBBLE}"
+                  value: ""
                 - name: COMPETENCE_PROMOTE_FELL
-                  value: "${COMPETENCE_PROMOTE_FELL}"
+                  value: ""
                 - name: COMPETENCE_DEMOTE_FELL
-                  value: "${COMPETENCE_DEMOTE_FELL}"
+                  value: ""
                 - name: COMPETENCE_COOLDOWN_ITERS
-                  value: "${COMPETENCE_COOLDOWN_ITERS}"
+                  value: ""
                 - name: LINK_MASS_SCALE_MIN
-                  value: "${LINK_MASS_SCALE_MIN}"
+                  value: "0.90"
                 - name: LINK_MASS_SCALE_MAX
-                  value: "${LINK_MASS_SCALE_MAX}"
+                  value: "1.10"
                 - name: PAYLOAD_KG_MIN
-                  value: "${PAYLOAD_KG_MIN}"
+                  value: "-0.2"
                 - name: PAYLOAD_KG_MAX
-                  value: "${PAYLOAD_KG_MAX}"
+                  value: "0.2"
                 - name: EFFORT_LO
-                  value: "${EFFORT_LO}"
+                  value: "0.7"
                 - name: EFFORT_HI
-                  value: "${EFFORT_HI}"
+                  value: "1.2"
                 - name: SEED
-                  value: "${SEED}"
+                  value: "1"
                 - name: LOGGER
-                  value: "${LOGGER}"
+                  value: "wandb"
                 - name: EXPERIMENT_NAME
-                  value: "${EXPERIMENT_NAME}"
+                  value: "nugus_gridsearch_v22"
                 - name: RUN_NAME
-                  value: "${RUN_NAME}"
+                  value: "clock_owned__v22-floor-0.004__bs2048__s1__v22"
                 - name: WANDB_PROJECT
-                  value: "${WANDB_PROJECT}"
+                  value: "mjlab"
                 - name: WANDB_TAGS
-                  value: "${WANDB_TAGS}"
+                  value: "clock_owned,v22-floor,entropy-end-0.004,bs2048,batch-v22,gridsearch"
                 # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
                   value: "all"
@@ -221,16 +221,16 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "${GIT_COMMIT}"
+                  value: "66617b3b7721d09f1837f6b44cbfb6fd230df3e2"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
                 - name: RESUME
-                  value: "${RESUME}"
+                  value: "false"
                 - name: WANDB_RUN_PATH
-                  value: "${WANDB_RUN_PATH}"
+                  value: ""
                 - name: WANDB_RUN_NAME
-                  value: "${WANDB_RUN_NAME}"
+                  value: ""
               envFrom:
                 - configMapRef:
                     name: mjlab-train-config
