@@ -1280,8 +1280,11 @@ gen_mn_bench() {
 # optimum for any GPU count. Also doubles as the first validation of the
 # fixed attainment gating.
 gen_v21() {
+  # First split is a 4x spread: 8k total (~field standard; legged_gym-lineage
+  # default is 4096 TOTAL and the original NUgus training used 2048) vs the
+  # 32k incumbent. Binary-search the knee from whichever side wins.
   local envs
-  for envs in 4096 8192; do
+  for envs in 2048 8192; do
     _v16e_r13_exports
     _competence_defaults
     export ADAPTIVE_COMMANDS="1"
