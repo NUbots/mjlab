@@ -1126,9 +1126,16 @@ _competence_defaults() {
   export ADAPTIVE_PUSHES=""
   export PENALTY_GATE="time"
   export ADAPTIVE_CMD_LMAX="3"
-  export ADAPTIVE_PUSH_LMAX="3"
-  export COMPETENCE_PROMOTE_TRACK_ERR=""
-  export COMPETENCE_DEMOTE_TRACK_ERR=""
+  # Push level capped below cmd headroom: v20 attempt 1 showed pushes
+  # (fell-gated only) racing to L3 while commands sat at L0.
+  export ADAPTIVE_PUSH_LMAX="2"
+  # Normalized track error has an intrinsic sway floor ~0.6 at level-0
+  # commands (v20 attempt 1: err_norm floored at 0.64 with ep_len 966 and
+  # fell 0.58 -> the 0.25 code default could NEVER promote). 0.7 makes
+  # low-level promotion effectively stability-gated; the err bar binds at
+  # higher levels where commands dominate sway.
+  export COMPETENCE_PROMOTE_TRACK_ERR="0.7"
+  export COMPETENCE_DEMOTE_TRACK_ERR="1.2"
   export COMPETENCE_PROMOTE_FELL=""
   export COMPETENCE_DEMOTE_FELL=""
   export COMPETENCE_COOLDOWN_ITERS=""

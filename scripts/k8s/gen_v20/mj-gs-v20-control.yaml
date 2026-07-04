@@ -149,11 +149,11 @@ spec:
                 - name: ADAPTIVE_CMD_LMAX
                   value: "3"
                 - name: ADAPTIVE_PUSH_LMAX
-                  value: "3"
+                  value: "2"
                 - name: COMPETENCE_PROMOTE_TRACK_ERR
-                  value: ""
+                  value: "0.7"
                 - name: COMPETENCE_DEMOTE_TRACK_ERR
-                  value: ""
+                  value: "1.2"
                 - name: COMPETENCE_PROMOTE_FELL
                   value: ""
                 - name: COMPETENCE_DEMOTE_FELL
