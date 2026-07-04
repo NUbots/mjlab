@@ -166,12 +166,35 @@ analysis that ±0.75 m/s sits at the actuator's physical edge. v24b:
 fast bar 0.35 (healthy-L5 band measured 0.26) + ladder capped at L4
 (±0.6) until a healthy full-length L4 run exists.
 
-Remedies still in reserve if v24b burns at L4 too: checkpoint rollback
-on crash (restore last healthy model instead of healing a poisoned one —
-the only structural cure for an absorbing spiral), soften the fall
-termination penalty during demote windows, landing LR/desired_kl anneal
-at top level, per-|cmd| binned attainment (the population mean dilutes
-high-command failure), best-checkpoint selection (standing).
+v24b/v24c verdicts (2026-07-05, overnight): v24b never promoted (bar
+instance 5) and died of pure saturation churn at 2115. v24c — bar 0.50,
+lmax 4 — proved the corridor: L0→L4 by iter 1157, **attainment record
+0.701 at iter 1424**, ~800 healthy iterations at L4. Then the law, a
+third time: saturation at the capped top rung lit the fuse at ~1424
+(attain slide, fast rate 0.20→0.33), the fast demote fired CORRECTLY at
+1959, cascaded to L0 — and the spiral completed straight through the
+cascade (fell 21.6, ep 255 at 2133). Demotion is NOT an antidote to
+churn damage: once the gait is broken, the −10s continue at any
+difficulty. Five deaths at iter 2100±40 = saturation time (~1200-1500,
+whatever rung) + the ~700-900-iter churn fuse; nothing is scheduled
+there (PHASE 2000 vs 4000 made no difference).
+
+**Era conclusion: the current ladder holds ~1400-1500 iterations of
+genuine curriculum content. Running past the top rung's mastery point is
+what kills — every time.** v24d (the landing run) stops at 1600, inside
+the attainment peak, and its final checkpoint is the era's artifact.
+
+Structural exits for the next code cycle (in order):
+1. Landing anneal: at top level + reward plateau, decay LR/desired_kl to
+   ~0 — turn the plateau into convergence instead of churn fuel.
+2. More rungs: ADR-style continuous DR widening (friction, mass, IMU
+   tilt, incline — doc 11 items 12/13), push escalation beyond L2, and
+   terrain — so the ladder keeps moving for the full 4000 iterations
+   and the policy banks robustness instead of churning.
+3. Checkpoint rollback on crash (restore last healthy model; the only
+   cure once a spiral starts — demotion demonstrably is not).
+4. Per-|cmd| binned attainment (population mean dilutes high-command
+   failure; would also make L5 gate honest before re-attempting ±0.75).
 
 ## Multi-GPU program (user-driven, latency-first)
 
