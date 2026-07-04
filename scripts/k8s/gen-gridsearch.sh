@@ -1271,6 +1271,34 @@ gen_mn_bench() {
 }
 
 
+# BATCH=v21: batch-size (env-count) learning A/B, single-node 4-GPU pair.
+# Env count x 24 steps IS the PPO batch (786k samples/update at 4x8192 for a
+# 0.5M-param policy — plausibly far past critical batch). Two simultaneous
+# runs, 16k vs 32k total envs, identical corrected-controller config:
+# whichever crosses command-level milestones first in WALL CLOCK wins the
+# latency mode. Combined with mn-bench sec/iter this pins the wall-time
+# optimum for any GPU count. Also doubles as the first validation of the
+# fixed attainment gating.
+gen_v21() {
+  local envs
+  for envs in 4096 8192; do
+    _v16e_r13_exports
+    _competence_defaults
+    export ADAPTIVE_COMMANDS="1"
+    export ADAPTIVE_PUSHES="1"
+    export PENALTY_GATE="competence"
+    export MAX_ITERATIONS="2000"
+    export PHASE_ITERATIONS="2000"
+    export SEED="1"
+    export NUM_ENVS="${envs}"
+    export EXPERIMENT_NAME="nugus_gridsearch_v21"
+    export RUN_NAME="clock_persist__v21-bs${envs}__attain-fixed__s1__${BATCH}"
+    export WANDB_TAGS="clock_persist,v21-bs${envs},attain-fixed,batch-v21,gridsearch"
+    emit_manifest "mj-gs-v21-bs${envs}"
+  done
+}
+
+
 # BATCH=mn-smoke: 8-GPU multi-node smoke (backlog 15c -> active). v20-full
 # config at 300 iters across 2x4 GPUs via torchrun env-rendezvous. PASS =
 # one W&B run (not two -> rank gating bug), iterating, collection_time
@@ -1503,6 +1531,7 @@ case "$BATCH" in
   v20) gen_v20; expected=12 ;;
   mn-smoke) gen_mn_smoke; expected=1 ;;
   mn-bench) gen_mn_bench; expected=4 ;;
+  v21) gen_v21; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
