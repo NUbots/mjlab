@@ -226,3 +226,18 @@ def test_physics_consistency_under_mirror(mirror_env, mirror_map, device):
     torch.testing.assert_close(lin_b, lin_exp[0], rtol=1e-4, atol=1e-3)
     torch.testing.assert_close(ang_b, ang_exp[0], rtol=1e-4, atol=1e-3)
     torch.testing.assert_close(j_b, j_exp, rtol=1e-4, atol=1e-3)
+
+
+def test_mirror_actions_with_phase_delta_dim(mirror_map) -> None:
+  """clock_owned's 21st action (phase delta) maps to itself; joints still
+  mirror. Regression for the v20-owned launch crash (20-wide map vs 21
+  actions)."""
+  import torch
+
+  n = mirror_map.joint_perm.numel()
+  actions = torch.randn(4, n + 1)
+  mirrored = mirror_map.mirror_actions(actions)
+  assert mirrored.shape == actions.shape
+  assert torch.allclose(mirrored[..., -1], actions[..., -1])
+  twice = mirror_map.mirror_actions(mirrored)
+  assert torch.allclose(twice, actions, atol=1e-6)

@@ -202,6 +202,16 @@ class NugusMirrorMap:
 
   def _mirror_joint_block(self, obs: torch.Tensor, sl: slice) -> None:
     block = obs[..., sl]
+    n = self.joint_perm.numel()
+    if block.shape[-1] == n + 1:
+      # clock_owned appends a phase_delta action: cadence rate is
+      # left-right symmetric (mirroring swaps feet, which is the clock
+      # observation's half-period shift, not a rate change), so the extra
+      # channel maps to itself.
+      obs[..., sl.start : sl.start + n] = mirror_joint_vector(
+        block[..., :n], self.joint_perm, self.joint_sign
+      )
+      return
     obs[..., sl] = mirror_joint_vector(block, self.joint_perm, self.joint_sign)
 
   def _mirror_dr_ratios(self, obs: torch.Tensor, sl: slice) -> None:
@@ -296,6 +306,13 @@ class NugusMirrorMap:
     return out
 
   def mirror_actions(self, actions: torch.Tensor) -> torch.Tensor:
+    n = self.joint_perm.numel()
+    if actions.shape[-1] == n + 1:
+      out = actions.clone()
+      out[..., :n] = mirror_joint_vector(
+        actions[..., :n], self.joint_perm, self.joint_sign
+      )
+      return out
     return mirror_joint_vector(actions, self.joint_perm, self.joint_sign)
 
 
