@@ -609,7 +609,30 @@ Judged on `twist/error_vel_x`, `air_time_mean`, `fell_over`, `track_linear_veloc
 
 **Negative results:** R5 full heel-toe (lower air_time, foot_tilt did not rise); mirror aug kept (nomirror late collapse); wide DR and push interval scale ×1.5 not ready.
 
-**Pending:** `nugus_eval` + `sim2sim_eval` on R18 `model_3999.pt` when wave-4 completes. v13 baseline `ojozkbfs` for comparison. **Note:** doc 12 voids R18/R19 wave-4 training verdicts (entropy collapse); eval on R18 checkpoint is forensics only.
+### Wave-4 results (2026-07-04, FINAL = R13 BASE3)
+
+| Run | W&B | Status | Metrics @ final iter (TensorBoard) | Notes |
+|-----|-----|--------|----------------------------------|-------|
+| **R18** s1 4k | `4p9ei2i1` | **Stopped ~3953/4000** | @3953: air **0.047**, err_x **0.026**, fell **386/ep**, track **0.001**, ep_len **21** | Kill-early @510 **PASS** (ep_len 928). Peak @999: air 0.056, err_x 0.155, fell 0.63, track **2.22**. Collapse onset ~iter 2000 (fell 8.7 @1999; ep_len 557). **`model_3999.pt` not on PVC** — last ckpt `model_3750.pt`. Preempted by v16e GPU reclaim. |
+| **R19** s3 2k | `fb1rr4w9` | **Completed** | @1999: air **0.037**, err_x **0.294**, fell **8.54/ep**, track **0.58**, ep_len **488** | @999 healthier: air 0.082, fell 0.33, track 1.98. Seed-3 late drift — same failure mode as R18. |
+| **R20** rough | — | **Failed (OOM)** | — | `Mjlab-Velocity-Rough-Nubots-Nugus`, 8192 envs: Warp CUDA OOM at graph creation. No metrics. |
+
+**Checkpoint paths (PVC `mjlab-logs`):**
+
+- R18: `/logs/nugus_gridsearch_wave4/2026-07-03_21-28-15_clock_persist__final__4k__s1__wave4/model_3750.pt` (+ ONNX sibling)
+- R19: `/logs/nugus_gridsearch_wave4/2026-07-03_21-28-30_clock_persist__final__s3__wave4/model_1999.pt`
+- v13 baseline: `/logs/nugus_gridsearch_v13/2026-07-02_05-08-21_clock_anneal__stand-0.15__pc-0.5__s1__v13/model_1999.pt` (W&B `ojozkbfs`)
+
+**Fixed eval (`nugus_eval`, 256 envs/cmd, git `ce4da03`, collapsed R18 ckpt):**
+
+| Policy | `falls_per_min` | `lin_vel_rmse` | `mean_ep_len_s` | `swing_height_err` | doc-09 gate |
+|--------|-----------------|----------------|-----------------|-------------------|-------------|
+| R18 `model_3750` (`4p9ei2i1`) | **67.89** | **1.06** | **0.88** | 0.069 | **FAIL** (collapsed policy) |
+| v13 `ojozkbfs` (prior run) | **1.09** | **0.30** | **20.7** | 0.076 | reference only (clock_anneal, pre-Phase-0 stack) |
+
+**`sim2sim_eval`:** `nugus_eval` completed on collapsed ckpt. `sim2sim_eval` **blocked** — container lacks `onnxruntime` after `uv sync`; manual install succeeded but run crashed `IndexError: action dim 20 vs joint index 20` in `runtime_obs.py` (pre-Phase-0 ONNX / clock_persist obs mismatch). D1 gate **not computed**.
+
+**Verdict:** Wave-4 consolidation **does not beat R13 BASE3**. Extended training (R18 4k) reproduced v15/v16c late collapse — doc-09 training gate **FAIL** at all checkpoints after ~iter 1500. **FINAL config remains R13 BASE3** (2k iters); v16e/v16f address entropy + objective-stationarity (doc 12–14).
 
 **v16e launched (2026-07-04 ~09:45 UTC+9, doc 12):** entropy-decay fix on R13 stack @ `ce4da03`.
 

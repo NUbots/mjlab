@@ -49,11 +49,23 @@ un-starred items overnight — they need design attention.
    oscillation and encourages crouch-shuffle. Try std ×2 or weight 0.3→0.1
    while walking (keep for standing). Cost: trivial. When: wave-1 backfill
    if the gait looks crouched in the viewer.
+8b. ⭐ **Loosen the upright orientation gradient.** Current
+   `0.5·exp(−sin²θ/0.2)` has a small-tilt gradient equivalent to L2 weight
+   −2.5 — ~2.5× the in-repo G1 reference (−1.0) — pinning the torso at
+   ~8–10° and taxing hip-strategy balance and forward lean. Cells:
+   (a) `UPRIGHT_STD2` 0.2→0.4 at weight 0.5 (matches G1-scale gradient);
+   (b) plus weight 0.5→0.35. Keep/strengthen `body_ang_vel` as the actual
+   torso-STABILITY term (orientation ≠ stability). Judge on fixed-eval
+   falls at wide commands + tracking error. Notes: 50° termination is the
+   backstop; upright is also ~10% of the shuffle-income cocktail so this
+   may help tracking too; the v9 "upright cut destabilizes" precedent is
+   unreliable (pre-entropy-fix, and hard_continue's schedule tightened std
+   while cutting weight — self-cancelling). Cost: trivial (one knob).
 9. **Torso pitch offset command.** Small commanded forward lean while
    walking (kid-size robots walk better with 3–8° lean; most RoboCup teams
-   do this). Implement as a pose-target offset on hip_pitch/torso rather
-   than a new term. Cost: low. When: hardware-prep phase; visual assessment
-   first.
+   do this). Implement as a pose-target offset on hip_pitch/torso, or as a
+   lean-target in the upright term (`exp(−‖g_xy − g_lean‖²)`) — the natural
+   follow-on to 8b. Cost: low. When: after 8b; visual assessment first.
 10. **Mechanical-power energy term.** Replace `joule_heating` (τ²) with the
     existing disabled `actuation_power` (|τ·qd|) once gait is stable —
     better battery-life correlate for hardware. Keep weight ~1e-5-scale.
@@ -79,6 +91,22 @@ un-starred items overnight — they need design attention.
     RoboCup turf/tiles). Cost: zero (range change). When: robustness wave
     after the winner; watch slip metrics.
 15. **Restore full-width mass/payload DR** — already doc 10 R14.
+
+## Hygiene
+
+15b. ⭐ **Randomize initial episode clocks.** All envs start at
+    `episode_length_buf = 0` simultaneously and timeout preserves cohort
+    phase, so envs stay synchronized (frozen at whatever distribution
+    existed when the policy stopped falling) — this is why
+    `Episode_Termination/time_out` oscillates as a ~41.7-iteration
+    (1000/24) sine instead of sitting flat at num_envs/1000 ≈ 8.2/step.
+    Fix: on the FIRST reset only, initialize `episode_length_buf` uniformly
+    over [0, max_episode_length). Benefits: flat/legible timeout metric,
+    and decorrelates PPO batches by episode phase (post-reset transients
+    and truncation bootstraps stop arriving in synchronized bursts). Cost:
+    ~one line + a test that steady-state timeout counts are ~uniform.
+    Caveat: partial-length first episodes slightly perturb the first few
+    iterations' stats — irrelevant beyond iter ~50.
 
 ## Learning / architecture (log only — not overnight material)
 

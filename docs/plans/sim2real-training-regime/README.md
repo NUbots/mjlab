@@ -83,11 +83,13 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 - [x] C2 Mirror augmentation (`mirror_map.py`, `MIRROR_AUG=1`; `tests/test_mirror_map.py`)
 - [x] C3 Entropy decay / LR cap / γ=0.97 cells (`NugusOnPolicyRunner`; `ENTROPY_DECAY`, `LR_CAP`, `GAMMA` env vars)
 - [x] Overnight plan doc 10 + idea backlog doc 11 added; wave 1–4 manifests @ `ce4da03` (config-audit green; **push + launch pending approval**)
-- [x] Overnight waves ran 2026-07-03/04 — **every ≥1500-iter run collapsed from entropy-driven std regrowth (`ENTROPY_DECAY` was off in all cells); wave-2/3/4 verdicts VOID, wave-1 short-run results valid. Full post-mortem + corrected verdicts: `12-overnight-postmortem.md`**
-- [ ] v16e launched: R13 stack (onesided + period 0.7/swing 0.05 + air 0.25 + clearance-from-swing) + `ENTROPY_DECAY=1`, seeds 1–2 × 2000 it + 1 × 4000 it (spec in doc 12) — **Running 2026-07-04** (`mj-gs-v16e-r13-s1-2k` active; s2-2k + s1-4k queued behind R18)
+- [x] Overnight waves ran 2026-07-03/04 — wave 1 short-run results valid; **wave-4 R18/R19 collapsed late (entropy, doc 12); R20 rough OOM**. FINAL remains **R13 BASE3**. R18 `nugus_eval` on collapsed `model_3750`: **FAIL** (falls 68/min vs v13 1.1/min). Post-mortem: `12-overnight-postmortem.md`
+- [x] v16e ran + killed mid-run 2026-07-04 — **entropy fix WORKED (std 0.097, no regrowth) but a second disease was exposed: objective-nonstationarity drift** (penalty warm-up moves the optimum → policy ratchets swing height 2.1→1.4 cm → trips → falls; value loss ×2 at warm-up end; suppressed exploration can't escape). Analysis + v16f spec: `14-v16e-analysis-v16f.md`
+- [ ] **`0hlgni3s` `model_750`/`model_1000` evaluated (nugus_eval ≥256 envs/cmd + sim2sim) — probable FIRST GATE PASS** (err_x 0.147, air ~0.10, fell 0.375 at iter 891); best-checkpoint ≠ last-checkpoint
+- [ ] v16f launched: const / const-half / entropy-floor cells (stationary objective test — doc 14 decision rules)
 - [ ] Voided experiments re-run on entropy-fixed base: wide DR, self_paced, heel-toe long (check per-corner clearance ÷4 rescale first)
-- [x] Competence-based curriculum implemented — v20 A/B manifests ready (doc 13: adaptive commands/pushes/penalty-gating vs time-scheduled control; **launch pending v16e gate + push**)
-- [ ] v20 A/B launched (primary metric = time-to-competence)
+- [x] Competence-based curriculum implemented + **reviewed/fixed 2026-07-04** (doc 13 addendum): 2 launch-blocking bugs fixed (torch.where shape crash on standing-env resets; kwargs TypeError in staged_on_competence), pessimistic EMA init, **penalty gate now demotes on instability** (disease-#2 countermeasure), `const` stationary-objective cell added (v16f folded in). 20 tests green
+- [ ] v20 launched: 10 cells (control/const/cmd/full/hard × 2 seeds) — **needs commit+push, configmap re-pin, manifest regen first** (current manifests pin a pre-fix SHA). Primary metrics: time-to-competence, `peak_height_mean` holding ≥0.018 (ratchet detector), level-vs-iteration curves
 
 ## Standing recommendations (not tasks)
 
@@ -131,6 +133,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `11-idea-backlog.md` | Ranked backlog: adaptive command/push curricula (ADR-lite), single-support & stride rewards, IMU/incline DR, base-height & lean tweaks, AMP-from-classical-walk; ⭐ items are overnight-backfill eligible |
 | `12-overnight-postmortem.md` | Overnight collapse root cause (entropy-driven std regrowth; ENTROPY_DECAY was off), corrected hypothesis verdicts, recalibrated gate, v16e spec, new process rules |
 | `13-competence-curriculum.md` | Edge-of-competence curriculum: CompetenceController design (hysteresis/cooldown/levels), adaptive command/push/penalty axes, v20 A/B spec, replaces hard_continue |
+| `14-v16e-analysis-v16f.md` | v16e: entropy fix confirmed, disease #2 isolated (nonstationary-objective height ratchet), probable first gate-pass checkpoint (`0hlgni3s` @750–1000), v16f stationarity cells + decision rules |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |

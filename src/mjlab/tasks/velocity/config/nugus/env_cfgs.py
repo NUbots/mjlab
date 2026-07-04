@@ -1262,6 +1262,22 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   )
   cfg.rewards["feet_distance"].params["sharpness"] = 8.0
 
+  # One-sided minimum-separation cost (doc 15): the symmetric feet_distance
+  # pull is far too gentle near zero gap — the v16e gate-pass checkpoint
+  # walked at 0.14-0.15 m and stood on its own foot outside MuJoCo Warp.
+  # min 0.18 m center-to-center leaves ~0.10 m edge gap for ~0.08 m feet.
+  cfg.rewards["feet_min_sep"] = RewardTermCfg(
+    func=mdp.feet_min_separation_cost,
+    weight=_env_float("FEET_MIN_SEP_W", -1.0),
+    params={
+      "min_distance": _env_float("FEET_MIN_SEP", 0.18),
+      "sharpness": _env_float("FEET_MIN_SEP_SHARPNESS", 12.0),
+      "asset_cfg": SceneEntityCfg("robot", site_names=site_names),
+    },
+  )
+  if cfg.rewards["feet_min_sep"].weight > 0:
+    cfg.rewards["feet_min_sep"].weight = -cfg.rewards["feet_min_sep"].weight
+
   cfg.rewards["body_ang_vel"].weight = -0.05
   cfg.rewards["angular_momentum"].weight = -0.01
   cfg.rewards["air_time"].weight = 0.0

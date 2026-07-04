@@ -1143,7 +1143,7 @@ gen_v20() {
   export EXPERIMENT_NAME="nugus_gridsearch_v20"
 
   local cell slug seed job_suffix
-  for cell in control cmd full hard; do
+  for cell in control const cmd full hard; do
     _v16e_r13_exports
     _competence_defaults
     export MAX_ITERATIONS="2000"
@@ -1151,6 +1151,15 @@ gen_v20() {
     case "$cell" in
       control)
         slug="control"
+        ;;
+      const)
+        # Stationary-objective control (v16f-const, doc 14): penalties at
+        # final values from iter 0, no warm-up, no gating. With the alive
+        # bonus this should bootstrap; tests whether removing objective
+        # nonstationarity alone stops the disease-#2 height ratchet.
+        slug="const"
+        export PHASE_C_WARMUP="0"
+        export FLATTEN_PHASE_C="1"
         ;;
       cmd)
         slug="cmd"
@@ -1391,7 +1400,7 @@ case "$BATCH" in
   wave3) gen_wave3; expected=6 ;;
   wave4) gen_wave4; expected=3 ;;
   v16e) gen_v16e; expected=3 ;;
-  v20) gen_v20; expected=8 ;;
+  v20) gen_v20; expected=10 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

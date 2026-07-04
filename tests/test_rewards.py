@@ -642,3 +642,36 @@ def test_joint_torques_l2_all_actuators(mock_env):
   # All actuators: 1^2 + 2^2 + 3^2 = 14.0
   expected = torch.full((4,), 14.0)
   assert torch.allclose(result, expected)
+
+
+def test_feet_min_separation_cost_one_sided() -> None:
+  """Zero at/above min distance; steep below (doc 15 feet fix)."""
+  from unittest.mock import MagicMock
+
+  import torch
+
+  from mjlab.managers.scene_entity_config import SceneEntityCfg
+  from mjlab.tasks.velocity.mdp.rewards import feet_min_separation_cost
+
+  env = MagicMock()
+  env.num_envs = 2
+  env.device = "cpu"
+  env.extras = {"log": {}}
+  asset = MagicMock()
+  # Env 0: feet 0.25 apart (ok). Env 1: 0.10 apart (violation 0.08).
+  asset.data.site_pos_w = torch.tensor(
+    [
+      [[0.0, 0.125, 0.0], [0.0, -0.125, 0.0]],
+      [[0.0, 0.05, 0.0], [0.0, -0.05, 0.0]],
+    ]
+  )
+  asset.data.root_link_quat_w = torch.tensor(
+    [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]
+  )
+  env.scene = {"robot": asset}
+  cfg = SceneEntityCfg("robot", site_names=("left_foot", "right_foot"))
+  cfg.site_ids = [0, 1]
+  cost = feet_min_separation_cost(env, min_distance=0.18, sharpness=12.0, asset_cfg=cfg)
+  assert cost[0].item() == 0.0
+  expected = torch.exp(torch.tensor(12.0 * 0.08)) - 1.0
+  assert cost[1].item() == pytest.approx(expected.item(), rel=1e-4)

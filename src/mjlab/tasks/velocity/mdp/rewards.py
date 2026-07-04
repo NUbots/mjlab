@@ -787,6 +787,46 @@ def feet_lateral_distance_cost(
   return cost
 
 
+def feet_min_separation_cost(
+  env: ManagerBasedRlEnv,
+  min_distance: float,
+  sharpness: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """One-sided steep penalty for feet closer than a minimum lateral gap.
+
+  Complements :func:`feet_lateral_distance_cost` (whose symmetric pull toward
+  nominal is far too gentle near zero separation): below ``min_distance`` the
+  cost grows as ``exp(sharpness * violation) - 1``; at or above it the cost
+  is exactly zero, so nominal stance width is unaffected. Distance is the
+  body-Y separation of the foot sites — the same measurement the symmetric
+  term uses — so ``min_distance`` must budget for foot half-widths (feet
+  ~0.08 m wide -> center distance 0.18 m leaves a ~0.10 m edge gap).
+  Motivated by the v16e checkpoint that walked at 0.14-0.15 m mean spacing
+  and stood on its own foot on hardware-like simulators.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
+
+  num_feet = foot_pos_w.shape[1]
+  if num_feet < 2:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+  root_quat_w = asset.data.root_link_quat_w  # [B, 4]
+  pair_i, pair_j = torch.triu_indices(num_feet, num_feet, offset=1)
+  foot_a = foot_pos_w[:, pair_i, :]
+  foot_b = foot_pos_w[:, pair_j, :]
+  num_pairs = pair_i.shape[0]
+  quat_exp = root_quat_w.unsqueeze(1).expand(-1, num_pairs, -1)
+  delta_b = quat_apply_inverse(quat_exp, foot_a - foot_b)
+  pair_distance = torch.abs(delta_b[..., 1])  # [B, P]
+
+  violation = (min_distance - pair_distance).clamp(min=0.0)
+  cost = torch.sum(torch.exp(sharpness * violation) - 1.0, dim=1)
+  env.extras["log"]["Metrics/feet_min_sep_violation_mean"] = torch.mean(violation)
+  return cost
+
+
 def base_height_tracking(
   env: ManagerBasedRlEnv,
   target_height: float,

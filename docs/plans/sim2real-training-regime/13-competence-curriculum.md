@@ -154,6 +154,45 @@ single cell retires the entire hard_continue question if it works).
 time schedules always failed), and better *reliability* (no scheduled
 collapses) — the reliability is worth more than the raw speed.
 
+## Review addendum (2026-07-04, post-implementation)
+
+The implementation (`src/mjlab/tasks/velocity/mdp/competence.py`, commit
+`f272a84`) was reviewed against this spec after v16e exposed disease #2
+(doc 14). Findings, all fixed in the working tree:
+
+1. **Launch-blocking bug:** `CompetenceTracker.finalize_episodes` used
+   `torch.where` with a masked `[m]` tensor against a full `[k]` tensor —
+   guaranteed RuntimeError the first time a standing env (10% of the
+   population) completed an episode. Fixed with full-shape operands;
+   regression test added.
+2. **Launch-blocking bug:** the curriculum manager passes ALL cfg params as
+   kwargs (`func(env, env_ids, **term_cfg.params)`), but
+   `staged_on_competence.__call__` didn't accept the threshold keys wired by
+   `_competence_threshold_params()` — TypeError on first curriculum compute.
+   Fixed; a signature-audit test now covers all three term classes.
+3. **Design change — the penalty gate now DEMOTES, not just freezes.**
+   This doc originally said "never ramp down; freeze is the safe failure
+   mode." v16e (doc 14) proved that wrong for the penalty axis: the height
+   ratchet develops WHILE nominally stable and a freeze cannot recover a
+   policy already sliding down the penalty gradient. `staged_on_competence`
+   now steps back one stage when `fell_ema > demote_fell` (cooldown-limited),
+   giving the policy a path back to the basin it learned in. Freeze remains
+   the behavior in the band between thresholds.
+4. **Pessimistic EMA init:** trackers now initialize as incompetent
+   (`fell_ema=1`, `track_err=1`) so a fresh run can't promote off empty
+   statistics in the first iterations.
+5. **v20 batch extended with a `const` cell** (stationary penalties from
+   iter 0 — the v16f-const test from doc 14, folded in): one batch now
+   answers both "does competence gating beat time schedules?" and "does
+   removing objective nonstationarity alone stop the ratchet?" 10 manifests
+   (5 cells × 2 seeds) in `scripts/k8s/gen_v20/`.
+
+Honest scope note: the command/push axes DO address the ratchet only
+indirectly (demote reduces task difficulty when falls rise). The direct
+countermeasures are the penalty-gate demote (#3) and the const cell (#5) —
+if v20-const is clean and v20-full ratchets anyway, the answer is
+"stationary objective + adaptive commands/pushes, no penalty gating at all."
+
 ## Risks / gotchas
 
 - **Signal gaming:** normalize tracking error by command magnitude (above);

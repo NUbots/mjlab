@@ -188,3 +188,119 @@ def test_tracker_excludes_standing_from_track_err() -> None:
   assert tracker._track_weight[1].item() == 1.0
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
   assert tracker.fell_ema[1].item() > tracker.fell_ema[0].item()
+
+
+def _mock_tracked_env(
+  *, fell: bool, ep_len: int = 950, step_counter: int = 24
+) -> MagicMock:
+  env = MagicMock()
+  env.device = "cpu"
+  env.num_envs = 2
+  env.episode_length_buf = torch.tensor([ep_len, ep_len])
+  env.max_episode_length = 1000
+  env.common_step_counter = step_counter
+  env.termination_manager.active_terms = ["fell_over"]
+  env.termination_manager.get_term.return_value = torch.tensor([fell, fell])
+  command_term = MagicMock()
+  command_term.is_standing_env = torch.tensor([False, False])
+  command_term.vel_command_b = torch.tensor([[0.5, 0.0], [0.5, 0.0]])
+  command_term.robot.data.root_link_lin_vel_b = torch.tensor([[0.45, 0.0], [0.45, 0.0]])
+  env.command_manager.get_term.return_value = command_term
+  return env
+
+
+def test_tracker_pessimistic_init() -> None:
+  """A fresh tracker must read as incompetent, not perfect (doc 14)."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  stats = tracker.population_means()
+  assert stats["fell_ema"] == pytest.approx(1.0)
+  assert stats["track_err_norm"] == pytest.approx(1.0)
+  assert stats["ep_len_frac"] == pytest.approx(0.0)
+
+
+def test_tracker_finalize_all_weightless_envs() -> None:
+  """Resetting only standing envs (zero track weight) must not crash."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  # No record_step calls at all -> both envs weightless.
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  # track_err EMA unchanged from init; fell/ep_len EMAs still update.
+  assert tracker.track_err_ema[0].item() == pytest.approx(1.0)
+  assert tracker.fell_ema[0].item() == pytest.approx(0.9)
+
+
+def test_curriculum_terms_accept_manager_kwargs() -> None:
+  """The curriculum manager calls ``func(env, env_ids, **params)``; every
+  key wired in env_cfgs must be accepted by the term's __call__ signature."""
+  import inspect
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import (
+    _competence_threshold_params,
+  )
+  from mjlab.tasks.velocity.mdp.competence import (
+    adaptive_command_level,
+    adaptive_push_level,
+    staged_on_competence,
+  )
+
+  threshold_keys = set(_competence_threshold_params())
+  for cls, extra in (
+    (adaptive_command_level, {"command_name", "l_max"}),
+    (adaptive_push_level, {"event_name", "l_max", "start_level"}),
+    (staged_on_competence, {"reward_name", "stages"}),
+  ):
+    sig_params = set(inspect.signature(cls.__call__).parameters)
+    missing = (threshold_keys | extra) - sig_params
+    assert not missing, f"{cls.__name__}.__call__ missing params: {missing}"
+
+
+def test_staged_on_competence_demotes_on_instability() -> None:
+  """Penalty gate must BACK OFF a stage when stability is badly lost
+  (disease #2, doc 14) - a freeze alone cannot recover a sliding policy."""
+  from mjlab.tasks.velocity.mdp.competence import (
+    get_competence_tracker,
+    staged_on_competence,
+  )
+
+  stages = [{"step": i, "weight": -0.001 * i} for i in range(5)]
+  env = _mock_tracked_env(fell=False)
+  # MagicMock auto-creates attributes, so get_competence_tracker(env) would
+  # return a mock tracker; install a real one explicitly.
+  env._competence_tracker = CompetenceTracker(env)
+  term_cfg_mock = MagicMock()
+  env.reward_manager.get_term_cfg.return_value = term_cfg_mock
+
+  cfg = MagicMock()
+  cfg.params = {
+    "reward_name": "torque_rate",
+    "stages": stages,
+    "cooldown_iters": 1,
+    "demote_fell": 1.0,
+  }
+  term = staged_on_competence(cfg, env)
+  tracker = get_competence_tracker(env)
+
+  # Drive to stage 2 via two stable windows.
+  for it in (10, 20):
+    tracker.fell_ema[:] = 0.1
+    tracker.ep_len_frac_ema[:] = 0.95
+    env.common_step_counter = it * _NUM_STEPS_PER_ENV
+    tracker._finalized_step = -1
+    snap = term(env, torch.tensor([0, 1]), "torque_rate", stages)
+  assert snap["stage_idx"].item() == 2
+
+  # Stability badly lost -> demote one stage.
+  tracker.fell_ema[:] = 2.5
+  tracker.ep_len_frac_ema[:] = 0.4
+  env.common_step_counter = 40 * _NUM_STEPS_PER_ENV
+  tracker._finalized_step = -1
+  snap = term(env, torch.tensor([0, 1]), "torque_rate", stages)
+  assert snap["stage_idx"].item() == 1
+
+  # Freeze band (between thresholds): holds, no further demote.
+  tracker.fell_ema[:] = 0.7
+  env.common_step_counter = 80 * _NUM_STEPS_PER_ENV
+  tracker._finalized_step = -1
+  snap = term(env, torch.tensor([0, 1]), "torque_rate", stages)
+  assert snap["stage_idx"].item() == 1

@@ -157,8 +157,11 @@ class CompetenceTracker:
     n = env.num_envs
     self._track_sum = torch.zeros(n, device=self.device)
     self._track_weight = torch.zeros(n, device=self.device)
-    self.track_err_ema = torch.zeros(n, device=self.device)
-    self.fell_ema = torch.zeros(n, device=self.device)
+    # Pessimistic init: a fresh policy must EARN competence. Zero-init would
+    # read as "perfectly competent" and allow spurious promotions in the
+    # first iterations before the EMAs warm up.
+    self.track_err_ema = torch.ones(n, device=self.device)
+    self.fell_ema = torch.ones(n, device=self.device)
     self.ep_len_frac_ema = torch.zeros(n, device=self.device)
     self._finalized_step = -1
 
@@ -216,11 +219,12 @@ class CompetenceTracker:
     )
 
     alpha = self.ema_alpha
+    # Envs with no tracking weight this episode (e.g. standing envs) keep
+    # their previous EMA. All operands are full [len(ids)]-shaped so the
+    # where() is well-formed regardless of the has_weight mix.
+    updated_track = alpha * track_err + (1.0 - alpha) * self.track_err_ema[ids]
     self.track_err_ema[ids] = torch.where(
-      has_weight,
-      alpha * track_err[has_weight]
-      + (1.0 - alpha) * self.track_err_ema[ids][has_weight],
-      self.track_err_ema[ids],
+      has_weight, updated_track, self.track_err_ema[ids]
     )
     self.fell_ema[ids] = alpha * fell + (1.0 - alpha) * self.fell_ema[ids]
     self.ep_len_frac_ema[ids] = (
@@ -424,7 +428,17 @@ class adaptive_push_level:
 
 
 class staged_on_competence:
-  """Ramp penalty weights when stability competence holds; freeze on dip."""
+  """Ramp penalty weights when stability competence holds; back off on loss.
+
+  Promote (next stage) requires stability competence AND the cooldown.
+  Demote (previous stage) fires when stability is badly lost
+  (``fell_ema > demote_fell``), also cooldown-limited so a single demotion
+  gets time to take effect before the next. This is the disease-#2
+  countermeasure (doc 14): a pure freeze cannot recover a policy that is
+  already sliding down the penalty gradient — releasing penalty pressure
+  restores the basin the gait was learned in and gives the policy a path
+  back. Between the demote and re-promote thresholds lies the freeze band.
+  """
 
   def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
     from mjlab.envs.mdp.curriculums import (
@@ -442,6 +456,7 @@ class staged_on_competence:
       l_max=len(stages) - 1,
       thresholds=CompetenceThresholds(
         cooldown_iters=cfg.params.get("cooldown_iters", 50),
+        demote_fell=cfg.params.get("demote_fell", 1.0),
       ),
     )
     self._stage_idx = 0
@@ -459,25 +474,42 @@ class staged_on_competence:
     reward_name: str,
     stages: list[dict[str, float]],
     cooldown_iters: int = 50,
+    demote_fell: float = 1.0,
+    promote_track_err: float = 0.25,
+    demote_track_err: float = 0.45,
+    promote_fell: float = 0.3,
   ) -> dict[str, torch.Tensor]:
+    # The curriculum manager passes ALL cfg params as kwargs
+    # (curriculum_manager.py: ``func(env, env_ids, **term_cfg.params)``), so
+    # this signature must accept the full threshold set even though the
+    # values are consumed in __init__ via the controller.
     from mjlab.envs.mdp.curriculums import _apply_stages
 
-    del reward_name, stages, cooldown_iters
+    del (
+      reward_name,
+      stages,
+      cooldown_iters,
+      demote_fell,
+      promote_track_err,
+      demote_track_err,
+      promote_fell,
+    )
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
     cur_iter = env.common_step_counter // _NUM_STEPS_PER_ENV
+    cooldown = self._controller.thresholds.cooldown_iters
+    cooldown_elapsed = cur_iter - self._last_change_iter >= cooldown
     stable = self._controller.stability_ok(
       fell_ema=stats["fell_ema"], ep_len_frac=stats["ep_len_frac"]
     )
-    if (
-      stable
-      and self._stage_idx < len(self._stages) - 1
-      and cur_iter - self._last_change_iter
-      >= self._controller.thresholds.cooldown_iters
-    ):
+    badly_lost = stats["fell_ema"] > self._controller.thresholds.demote_fell
+
+    if badly_lost and self._stage_idx > 0 and cooldown_elapsed:
+      self._stage_idx -= 1
+      self._last_change_iter = cur_iter
+    elif stable and self._stage_idx < len(self._stages) - 1 and cooldown_elapsed:
       self._stage_idx += 1
       self._last_change_iter = cur_iter
-      _apply_stages(self._term_cfg, self._stages[self._stage_idx]["step"], self._stages)
 
     snapshot = _apply_stages(
       self._term_cfg, self._stages[self._stage_idx]["step"], self._stages
