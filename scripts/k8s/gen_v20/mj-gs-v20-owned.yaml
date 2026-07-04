@@ -3,13 +3,13 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: mj-gs-v20-const-s2
+  name: mj-gs-v20-owned
   namespace: mjlab
   labels:
     app.kubernetes.io/name: mjlab-train
     app.kubernetes.io/component: gridsearch
     mjlab/gridsearch: "true"
-    mjlab/variant: clock_persist
+    mjlab/variant: clock_owned
 spec:
   schedulerName: volcano
   queue: mjlab-train
@@ -26,7 +26,7 @@ spec:
             app.kubernetes.io/name: mjlab-train
             app.kubernetes.io/component: gridsearch
             mjlab/gridsearch: "true"
-            mjlab/variant: clock_persist
+            mjlab/variant: clock_owned
         spec:
           restartPolicy: Never
           runtimeClassName: nvidia
@@ -47,7 +47,7 @@ spec:
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
-                  value: "clock_persist"
+                  value: "clock_owned"
                 - name: JOULE_W
                   value: "1e-5"
                 - name: STAND_W
@@ -97,15 +97,15 @@ spec:
                 - name: SWING_TARGET_HEIGHT
                   value: "0.05"
                 - name: FLATTEN_PHASE_C
-                  value: "1"
-                - name: PHASE_C_WARMUP
                   value: "0"
+                - name: PHASE_C_WARMUP
+                  value: "1"
                 - name: ALIVE_W
                   value: "0.5"
                 - name: JOINT_ACC_W
                   value: "-1e-5"
                 - name: PHASE_DELTA_W
-                  value: ""
+                  value: "-0.2"
                 - name: FEET_MIN_SEP
                   value: "0.13"
                 - name: FEET_MIN_SEP_W
@@ -143,11 +143,11 @@ spec:
                 - name: GAMMA
                   value: ""
                 - name: ADAPTIVE_COMMANDS
-                  value: ""
+                  value: "1"
                 - name: ADAPTIVE_PUSHES
-                  value: ""
+                  value: "1"
                 - name: PENALTY_GATE
-                  value: "time"
+                  value: "competence"
                 - name: ADAPTIVE_CMD_LMAX
                   value: "5"
                 - name: ADAPTIVE_PUSH_LMAX
@@ -175,17 +175,17 @@ spec:
                 - name: EFFORT_HI
                   value: "1.2"
                 - name: SEED
-                  value: "2"
+                  value: "1"
                 - name: LOGGER
                   value: "wandb"
                 - name: EXPERIMENT_NAME
                   value: "nugus_gridsearch_v20"
                 - name: RUN_NAME
-                  value: "clock_persist__r13__v20-const__entropy-decay__s2__v20"
+                  value: "clock_persist__r13__v20-owned__entropy-decay__s1__v20"
                 - name: WANDB_PROJECT
                   value: "mjlab"
                 - name: WANDB_TAGS
-                  value: "clock_persist,r13-stack,v20-const,entropy-decay,seed-2,2k,gridsearch,batch-v20"
+                  value: "clock_persist,r13-stack,v20-owned,entropy-decay,seed-1,2k,gridsearch,batch-v20"
                 # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
                   value: "all"

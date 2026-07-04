@@ -104,6 +104,8 @@ spec:
                   value: "0.5"
                 - name: JOINT_ACC_W
                   value: "-1e-5"
+                - name: PHASE_DELTA_W
+                  value: ""
                 - name: FEET_MIN_SEP
                   value: "0.13"
                 - name: FEET_MIN_SEP_W
@@ -196,7 +198,7 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "61631696d9fe17ad5a6c71b0fdea11f230bfa7f5"
+                  value: "561b234a1a3f92f1736e31cf054ba698984eb8f5"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
