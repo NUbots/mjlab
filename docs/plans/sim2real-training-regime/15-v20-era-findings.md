@@ -52,6 +52,12 @@ All four were **thresholds outside the feasible range of their metric**:
    (small-command steps dilute the mean). Healthy runs plateaued 0.55–0.63
    and never promoted. Fixed: promote 0.60 / demote 0.40 (generator env
    `COMPETENCE_PROMOTE_ATTAIN` / `COMPETENCE_DEMOTE_ATTAIN`).
+5. The 0.60 bar is MARGINAL, not safe: the L0 attainment ceiling varies
+   run-to-run with the realized gait (v22b/v23/v24 crossed 0.60 at iters
+   1050–1300; v24b converged at 0.543 and NEVER promoted — then died of
+   R6 saturation churn while healthy in every other respect). Corollary
+   to the standing rule: bars must clear the WORST-CASE observed ceiling
+   with margin, not the typical one. v24c: promote 0.50 / demote 0.35.
 
 **Standing rule:** every gating threshold ships with a feasibility test —
 a construction proving a plausibly-good policy crosses it (see
@@ -103,6 +109,21 @@ phase; its sibling v22-floor, frozen at L0 by the old bars, drifted. The
 edge-of-competence curriculum is therefore a STABILITY mechanism, not
 just a speed feature: difficulty tracking competence keeps the objective
 unsaturated and the gradient informative.
+
+v24b (2026-07-05) is the pure-form demonstration: stuck at L0 by bar
+instance 5, it was an EXCELLENT policy at iter 1200 (ep 1000, wobble
+0.011, fell_ema 0.09) and then, with nothing left to learn, decayed on
+schedule — attain slipping from 1232, fast fall rate 0.02→0.67, entropy
+VALUE rising −1.15→+0.70 (the mid-decay entropy coefficient of the
+4000-iter schedule actively pushed std 0.24→0.26 through the churn
+window), ending in the same absorbing fall-spiral at ~2100. Saturation
+alone kills, on a ~900-iteration fuse, with no hard task in sight.
+
+**Unified law of the era: too-hard (brink burn, R7) and too-easy
+(saturation churn, R6) both terminate in the same absorbing fall-spiral.
+The only healthy corridor is a ladder that keeps moving — every bar
+reliably below its level's worst-case ceiling, the top rung capped below
+the burn zone, and the fast reflex trimming excursions.**
 
 Open sub-question — ANSWERED by v23 (2026-07-05): v22b's late L5 sag was
 the front edge of a structural failure, not mid-learning. v23 (8-GPU,
