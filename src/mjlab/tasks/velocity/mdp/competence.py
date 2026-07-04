@@ -47,14 +47,30 @@ class CompetenceControllerState(TypedDict):
 
 @dataclass
 class CompetenceThresholds:
-  promote_track_err: float = 0.25
-  demote_track_err: float = 0.45
+  """Gating thresholds.
+
+  Falls are a TRAILING indicator: over-challenged policies first retreat
+  into conservative stability (stand/shuffle, tracking sacrificed) and only
+  fall at terminal collapse (v20 pair 1: full ended ep_len 204 after a
+  whole mid-run of low fall rates). Attainment (commanded-direction speed
+  achieved / commanded speed) is the LEADING indicator — sandbagging reads
+  ~0 while never falling — and wobble fraction (steps with tilt > ~25°) is
+  the graded near-fall precursor. Falls remain as the safety net only.
+  """
+
+  promote_track_err: float = 0.25  # legacy, no longer in the predicate
+  demote_track_err: float = 0.45  # legacy, no longer in the predicate
+  promote_attain: float = 0.75
+  demote_attain: float = 0.5
+  promote_wobble: float = 0.05
+  demote_wobble: float = 0.15
   promote_fell: float = 0.3
-  demote_fell: float = 1.0
-  cooldown_iters: int = 50
+  demote_fell: float = 0.35
+  cooldown_iters: int = 150
   promote_streak_required: int = 3
   stability_ep_len_frac: float = 0.8
   stability_fell: float = 0.5
+  stability_attain: float = 0.6
 
 
 class CompetenceController:
@@ -103,20 +119,29 @@ class CompetenceController:
     fell_ema: float,
     ep_len_frac: float,
     common_step_counter: int,
+    attain_ema: float = 0.0,
+    wobble_ema: float = 1.0,
   ) -> str | None:
-    """Return ``promote``, ``demote``, or None."""
-    if not self.gate_on_track_err:
-      promote_ok = fell_ema < self.thresholds.promote_fell
-      demote_bad = fell_ema > self.thresholds.demote_fell
-    else:
-      promote_ok = (
-        track_err_norm < self.thresholds.promote_track_err
-        and fell_ema < self.thresholds.promote_fell
-      )
-      demote_bad = (
-        track_err_norm > self.thresholds.demote_track_err
-        or fell_ema > self.thresholds.demote_fell
-      )
+    """Return ``promote``, ``demote``, or None.
+
+    Unified predicate for all axes (the old fell-only push gating let the
+    push axis outrun everything): promote needs the task actually being
+    performed (attainment) with low near-fall wobble and low falls; demote
+    fires on sandbagging (attainment collapse), sustained wobble, or falls.
+    ``track_err_norm`` is retained for logging/compat but no longer gates.
+    """
+    del track_err_norm
+    t = self.thresholds
+    promote_ok = (
+      attain_ema > t.promote_attain
+      and wobble_ema < t.promote_wobble
+      and fell_ema < t.promote_fell
+    )
+    demote_bad = (
+      attain_ema < t.demote_attain
+      or wobble_ema > t.demote_wobble
+      or fell_ema > t.demote_fell
+    )
 
     if demote_bad and self.level > 0:
       self.level -= 1
@@ -140,10 +165,13 @@ class CompetenceController:
       return "promote"
     return None
 
-  def stability_ok(self, *, fell_ema: float, ep_len_frac: float) -> bool:
+  def stability_ok(
+    self, *, fell_ema: float, ep_len_frac: float, attain_ema: float = 1.0
+  ) -> bool:
     return (
       ep_len_frac > self.thresholds.stability_ep_len_frac
       and fell_ema < self.thresholds.stability_fell
+      and attain_ema > self.thresholds.stability_attain
     )
 
 
@@ -157,12 +185,17 @@ class CompetenceTracker:
     n = env.num_envs
     self._track_sum = torch.zeros(n, device=self.device)
     self._track_weight = torch.zeros(n, device=self.device)
+    self._attain_sum = torch.zeros(n, device=self.device)
+    self._wobble_sum = torch.zeros(n, device=self.device)
+    self._step_count = torch.zeros(n, device=self.device)
     # Pessimistic init: a fresh policy must EARN competence. Zero-init would
     # read as "perfectly competent" and allow spurious promotions in the
     # first iterations before the EMAs warm up.
     self.track_err_ema = torch.ones(n, device=self.device)
     self.fell_ema = torch.ones(n, device=self.device)
     self.ep_len_frac_ema = torch.zeros(n, device=self.device)
+    self.attain_ema = torch.zeros(n, device=self.device)
+    self.wobble_ema = torch.ones(n, device=self.device)
     self._finalized_step = -1
 
   def state_dict(self) -> dict[str, Any]:
@@ -170,17 +203,29 @@ class CompetenceTracker:
       "track_err_ema": self.track_err_ema.cpu(),
       "fell_ema": self.fell_ema.cpu(),
       "ep_len_frac_ema": self.ep_len_frac_ema.cpu(),
+      "attain_ema": self.attain_ema.cpu(),
+      "wobble_ema": self.wobble_ema.cpu(),
     }
 
   def load_state_dict(self, state: dict[str, Any]) -> None:
     self.track_err_ema = state["track_err_ema"].to(self.device)
     self.fell_ema = state["fell_ema"].to(self.device)
     self.ep_len_frac_ema = state["ep_len_frac_ema"].to(self.device)
+    if "attain_ema" in state:
+      self.attain_ema = state["attain_ema"].to(self.device)
+      self.wobble_ema = state["wobble_ema"].to(self.device)
 
   def record_step(self, env: ManagerBasedRlEnv) -> None:
     command_term = env.command_manager.get_term("twist")
     if command_term is None:
       return
+    # Wobble (near-fall precursor): fraction of steps with tilt > ~25deg,
+    # counted for ALL envs (a tilting stander is also incompetent).
+    grav_xy = command_term.robot.data.projected_gravity_b[:, :2]
+    tilted = (torch.norm(grav_xy, dim=-1) > 0.4226).float()  # sin(25 deg)
+    self._wobble_sum += tilted
+    self._step_count += 1.0
+
     standing = command_term.is_standing_env
     walking = ~standing
     if not walking.any():
@@ -192,6 +237,12 @@ class CompetenceTracker:
     normalized = err_norm / cmd_norm
     self._track_sum[walking] += normalized[walking]
     self._track_weight[walking] += 1.0
+    # Attainment: achieved velocity projected onto the commanded direction,
+    # as a fraction of commanded speed. Sandbagging (standing under a move
+    # command) reads ~0 without a single fall; overshoot reads > 1. Lateral
+    # sway is orthogonal to the command and drops out of the projection.
+    attain = (vel_xy * cmd_xy).sum(dim=-1) / torch.square(cmd_norm)
+    self._attain_sum[walking] += attain[walking]
 
   def finalize_episodes(
     self, env: ManagerBasedRlEnv, env_ids: torch.Tensor | slice
@@ -226,6 +277,19 @@ class CompetenceTracker:
     self.track_err_ema[ids] = torch.where(
       has_weight, updated_track, self.track_err_ema[ids]
     )
+
+    attain = torch.zeros(len(ids), device=self.device)
+    attain[has_weight] = (
+      self._attain_sum[ids][has_weight] / self._track_weight[ids][has_weight]
+    )
+    updated_attain = alpha * attain + (1.0 - alpha) * self.attain_ema[ids]
+    self.attain_ema[ids] = torch.where(has_weight, updated_attain, self.attain_ema[ids])
+
+    steps = self._step_count[ids].clamp(min=1.0)
+    wobble = self._wobble_sum[ids] / steps
+    has_steps = self._step_count[ids] > 0
+    updated_wobble = alpha * wobble + (1.0 - alpha) * self.wobble_ema[ids]
+    self.wobble_ema[ids] = torch.where(has_steps, updated_wobble, self.wobble_ema[ids])
     self.fell_ema[ids] = alpha * fell + (1.0 - alpha) * self.fell_ema[ids]
     self.ep_len_frac_ema[ids] = (
       alpha * ep_frac + (1.0 - alpha) * self.ep_len_frac_ema[ids]
@@ -233,12 +297,17 @@ class CompetenceTracker:
 
     self._track_sum[ids] = 0.0
     self._track_weight[ids] = 0.0
+    self._attain_sum[ids] = 0.0
+    self._wobble_sum[ids] = 0.0
+    self._step_count[ids] = 0.0
 
   def population_means(self) -> dict[str, float]:
     return {
       "track_err_norm": self.track_err_ema.mean().item(),
       "fell_ema": self.fell_ema.mean().item(),
       "ep_len_frac": self.ep_len_frac_ema.mean().item(),
+      "attain": self.attain_ema.mean().item(),
+      "wobble": self.wobble_ema.mean().item(),
     }
 
 
@@ -314,9 +383,13 @@ class adaptive_command_level:
     thresholds = CompetenceThresholds(
       promote_track_err=cfg.params.get("promote_track_err", 0.25),
       demote_track_err=cfg.params.get("demote_track_err", 0.45),
+      promote_attain=cfg.params.get("promote_attain", 0.75),
+      demote_attain=cfg.params.get("demote_attain", 0.5),
+      promote_wobble=cfg.params.get("promote_wobble", 0.05),
+      demote_wobble=cfg.params.get("demote_wobble", 0.15),
       promote_fell=cfg.params.get("promote_fell", 0.3),
-      demote_fell=cfg.params.get("demote_fell", 1.0),
-      cooldown_iters=cfg.params.get("cooldown_iters", 50),
+      demote_fell=cfg.params.get("demote_fell", 0.35),
+      cooldown_iters=cfg.params.get("cooldown_iters", 150),
     )
     self._controller = CompetenceController(l_max=l_max, thresholds=thresholds)
     self._tracker = get_competence_tracker(env)
@@ -334,15 +407,23 @@ class adaptive_command_level:
     l_max: int = 3,
     promote_track_err: float = 0.25,
     demote_track_err: float = 0.45,
+    promote_attain: float = 0.75,
+    demote_attain: float = 0.5,
+    promote_wobble: float = 0.05,
+    demote_wobble: float = 0.15,
     promote_fell: float = 0.3,
-    demote_fell: float = 1.0,
-    cooldown_iters: int = 50,
+    demote_fell: float = 0.35,
+    cooldown_iters: int = 150,
   ) -> dict[str, torch.Tensor]:
     del (
       command_name,
       l_max,
       promote_track_err,
       demote_track_err,
+      promote_attain,
+      demote_attain,
+      promote_wobble,
+      demote_wobble,
       promote_fell,
       demote_fell,
       cooldown_iters,
@@ -357,6 +438,8 @@ class adaptive_command_level:
         fell_ema=stats["fell_ema"],
         ep_len_frac=stats["ep_len_frac"],
         common_step_counter=env.common_step_counter,
+        attain_ema=stats["attain"],
+        wobble_ema=stats["wobble"],
       )
     snapshot = _apply_command_level(env, self._command_name, self._controller.level)
     snapshot.update({f"competence_{k}": torch.tensor(v) for k, v in stats.items()})
@@ -372,9 +455,13 @@ class adaptive_push_level:
     thresholds = CompetenceThresholds(
       promote_track_err=cfg.params.get("promote_track_err", 0.25),
       demote_track_err=cfg.params.get("demote_track_err", 0.45),
+      promote_attain=cfg.params.get("promote_attain", 0.75),
+      demote_attain=cfg.params.get("demote_attain", 0.5),
+      promote_wobble=cfg.params.get("promote_wobble", 0.05),
+      demote_wobble=cfg.params.get("demote_wobble", 0.15),
       promote_fell=cfg.params.get("promote_fell", 0.3),
-      demote_fell=cfg.params.get("demote_fell", 1.0),
-      cooldown_iters=cfg.params.get("cooldown_iters", 50),
+      demote_fell=cfg.params.get("demote_fell", 0.35),
+      cooldown_iters=cfg.params.get("cooldown_iters", 150),
     )
     self._controller = CompetenceController(
       l_max=l_max, thresholds=thresholds, gate_on_track_err=False
@@ -397,9 +484,13 @@ class adaptive_push_level:
     start_level: int = 1,
     promote_track_err: float = 0.25,
     demote_track_err: float = 0.45,
+    promote_attain: float = 0.75,
+    demote_attain: float = 0.5,
+    promote_wobble: float = 0.05,
+    demote_wobble: float = 0.15,
     promote_fell: float = 0.3,
-    demote_fell: float = 1.0,
-    cooldown_iters: int = 50,
+    demote_fell: float = 0.35,
+    cooldown_iters: int = 150,
   ) -> dict[str, torch.Tensor]:
     del (
       event_name,
@@ -407,6 +498,10 @@ class adaptive_push_level:
       start_level,
       promote_track_err,
       demote_track_err,
+      promote_attain,
+      demote_attain,
+      promote_wobble,
+      demote_wobble,
       promote_fell,
       demote_fell,
       cooldown_iters,
@@ -421,6 +516,8 @@ class adaptive_push_level:
         fell_ema=stats["fell_ema"],
         ep_len_frac=stats["ep_len_frac"],
         common_step_counter=env.common_step_counter,
+        attain_ema=stats["attain"],
+        wobble_ema=stats["wobble"],
       )
     snapshot = _apply_push_level(env, self._event_name, self._controller.level)
     snapshot.update({f"competence_{k}": torch.tensor(v) for k, v in stats.items()})
@@ -455,8 +552,10 @@ class staged_on_competence:
     self._controller = CompetenceController(
       l_max=len(stages) - 1,
       thresholds=CompetenceThresholds(
-        cooldown_iters=cfg.params.get("cooldown_iters", 50),
-        demote_fell=cfg.params.get("demote_fell", 1.0),
+        cooldown_iters=cfg.params.get("cooldown_iters", 150),
+        demote_fell=cfg.params.get("demote_fell", 0.35),
+        demote_attain=cfg.params.get("demote_attain", 0.5),
+        demote_wobble=cfg.params.get("demote_wobble", 0.15),
       ),
     )
     self._stage_idx = 0
@@ -473,10 +572,14 @@ class staged_on_competence:
     env_ids: torch.Tensor,
     reward_name: str,
     stages: list[dict[str, float]],
-    cooldown_iters: int = 50,
-    demote_fell: float = 1.0,
+    cooldown_iters: int = 150,
+    demote_fell: float = 0.35,
     promote_track_err: float = 0.25,
     demote_track_err: float = 0.45,
+    promote_attain: float = 0.75,
+    demote_attain: float = 0.5,
+    promote_wobble: float = 0.05,
+    demote_wobble: float = 0.15,
     promote_fell: float = 0.3,
   ) -> dict[str, torch.Tensor]:
     # The curriculum manager passes ALL cfg params as kwargs
@@ -492,6 +595,10 @@ class staged_on_competence:
       demote_fell,
       promote_track_err,
       demote_track_err,
+      promote_attain,
+      demote_attain,
+      promote_wobble,
+      demote_wobble,
       promote_fell,
     )
     self._tracker.finalize_episodes(env, env_ids)
@@ -500,9 +607,16 @@ class staged_on_competence:
     cooldown = self._controller.thresholds.cooldown_iters
     cooldown_elapsed = cur_iter - self._last_change_iter >= cooldown
     stable = self._controller.stability_ok(
-      fell_ema=stats["fell_ema"], ep_len_frac=stats["ep_len_frac"]
+      fell_ema=stats["fell_ema"],
+      ep_len_frac=stats["ep_len_frac"],
+      attain_ema=stats["attain"],
     )
-    badly_lost = stats["fell_ema"] > self._controller.thresholds.demote_fell
+    t = self._controller.thresholds
+    badly_lost = (
+      stats["fell_ema"] > t.demote_fell
+      or stats["attain"] < t.demote_attain
+      or stats["wobble"] > t.demote_wobble
+    )
 
     if badly_lost and self._stage_idx > 0 and cooldown_elapsed:
       self._stage_idx -= 1

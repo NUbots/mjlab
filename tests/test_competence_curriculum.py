@@ -38,6 +38,8 @@ def test_controller_promotes_after_cooldown_and_streak() -> None:
       fell_ema=0.1,
       ep_len_frac=0.9,
       common_step_counter=step,
+      attain_ema=0.9,
+      wobble_ema=0.01,
     )
     is None
   )
@@ -48,6 +50,8 @@ def test_controller_promotes_after_cooldown_and_streak() -> None:
       fell_ema=0.1,
       ep_len_frac=0.9,
       common_step_counter=step,
+      attain_ema=0.9,
+      wobble_ema=0.01,
     )
     == "promote"
   )
@@ -63,6 +67,8 @@ def test_controller_demotes_immediately() -> None:
       fell_ema=0.1,
       ep_len_frac=0.9,
       common_step_counter=100 * _NUM_STEPS_PER_ENV,
+      attain_ema=0.3,
+      wobble_ema=0.01,
     )
     == "demote"
   )
@@ -75,9 +81,11 @@ def test_controller_hysteresis_holds_level_in_band() -> None:
   assert (
     ctrl.update(
       track_err_norm=0.30,
-      fell_ema=0.4,
+      fell_ema=0.32,
       ep_len_frac=0.9,
       common_step_counter=50 * _NUM_STEPS_PER_ENV,
+      attain_ema=0.65,
+      wobble_ema=0.08,
     )
     is None
   )
@@ -180,6 +188,9 @@ def test_tracker_excludes_standing_from_track_err() -> None:
   command_term.is_standing_env = torch.tensor([True, False])
   command_term.vel_command_b = torch.tensor([[0.0, 0.0], [0.5, 0.0]])
   command_term.robot.data.root_link_lin_vel_b = torch.tensor([[0.0, 0.0], [0.4, 0.0]])
+  command_term.robot.data.projected_gravity_b = torch.tensor(
+    [[0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]
+  )
   env.command_manager.get_term.return_value = command_term
 
   tracker = CompetenceTracker(env)
@@ -205,6 +216,9 @@ def _mock_tracked_env(
   command_term.is_standing_env = torch.tensor([False, False])
   command_term.vel_command_b = torch.tensor([[0.5, 0.0], [0.5, 0.0]])
   command_term.robot.data.root_link_lin_vel_b = torch.tensor([[0.45, 0.0], [0.45, 0.0]])
+  command_term.robot.data.projected_gravity_b = torch.tensor(
+    [[0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]
+  )
   env.command_manager.get_term.return_value = command_term
   return env
 
@@ -285,22 +299,62 @@ def test_staged_on_competence_demotes_on_instability() -> None:
   for it in (10, 20):
     tracker.fell_ema[:] = 0.1
     tracker.ep_len_frac_ema[:] = 0.95
+    tracker.attain_ema[:] = 0.9
+    tracker.wobble_ema[:] = 0.02
     env.common_step_counter = it * _NUM_STEPS_PER_ENV
     tracker._finalized_step = -1
     snap = term(env, torch.tensor([0, 1]), "torque_rate", stages)
   assert snap["stage_idx"].item() == 2
 
-  # Stability badly lost -> demote one stage.
-  tracker.fell_ema[:] = 2.5
-  tracker.ep_len_frac_ema[:] = 0.4
+  # Stability badly lost -> demote one stage. Falls stay LOW — the loss
+  # shows up as sandbagging (attainment collapse), per the user's
+  # observation that the policy prefers a stable stand to risking falls.
+  tracker.fell_ema[:] = 0.2
+  tracker.attain_ema[:] = 0.25
+  tracker.ep_len_frac_ema[:] = 0.9
   env.common_step_counter = 40 * _NUM_STEPS_PER_ENV
   tracker._finalized_step = -1
   snap = term(env, torch.tensor([0, 1]), "torque_rate", stages)
   assert snap["stage_idx"].item() == 1
 
   # Freeze band (between thresholds): holds, no further demote.
-  tracker.fell_ema[:] = 0.7
+  tracker.fell_ema[:] = 0.2
+  tracker.attain_ema[:] = 0.55
+  tracker.wobble_ema[:] = 0.08
   env.common_step_counter = 80 * _NUM_STEPS_PER_ENV
   tracker._finalized_step = -1
   snap = term(env, torch.tensor([0, 1]), "torque_rate", stages)
   assert snap["stage_idx"].item() == 1
+
+
+def test_controller_sandbag_demotes_without_falls() -> None:
+  """Conservative retreat (high ep_len, low falls, near-zero attainment)
+  must DEMOTE — falls are the trailing indicator (user observation
+  2026-07-04: the policy prefers a stable stand over risking a fall, so
+  fall-gated demotion never fires until terminal collapse)."""
+  ctrl = CompetenceController(l_max=5, thresholds=_thresholds())
+  ctrl.level = 4
+  result = ctrl.update(
+    track_err_norm=1.0,
+    fell_ema=0.05,
+    ep_len_frac=0.98,
+    common_step_counter=200 * _NUM_STEPS_PER_ENV,
+    attain_ema=0.2,
+    wobble_ema=0.02,
+  )
+  assert result == "demote"
+  assert ctrl.level == 3
+
+
+def test_controller_wobble_demotes_before_falls() -> None:
+  ctrl = CompetenceController(l_max=5, thresholds=_thresholds())
+  ctrl.level = 2
+  result = ctrl.update(
+    track_err_norm=0.3,
+    fell_ema=0.1,
+    ep_len_frac=0.9,
+    common_step_counter=300 * _NUM_STEPS_PER_ENV,
+    attain_ema=0.9,
+    wobble_ema=0.4,
+  )
+  assert result == "demote"

@@ -543,9 +543,13 @@ def _competence_threshold_params() -> dict[str, float | int]:
   return {
     "promote_track_err": _env_float("COMPETENCE_PROMOTE_TRACK_ERR", 0.25),
     "demote_track_err": _env_float("COMPETENCE_DEMOTE_TRACK_ERR", 0.45),
+    "promote_attain": _env_float("COMPETENCE_PROMOTE_ATTAIN", 0.75),
+    "demote_attain": _env_float("COMPETENCE_DEMOTE_ATTAIN", 0.5),
+    "promote_wobble": _env_float("COMPETENCE_PROMOTE_WOBBLE", 0.05),
+    "demote_wobble": _env_float("COMPETENCE_DEMOTE_WOBBLE", 0.15),
     "promote_fell": _env_float("COMPETENCE_PROMOTE_FELL", 0.3),
-    "demote_fell": _env_float("COMPETENCE_DEMOTE_FELL", 1.0),
-    "cooldown_iters": _env_int("COMPETENCE_COOLDOWN_ITERS", 50),
+    "demote_fell": _env_float("COMPETENCE_DEMOTE_FELL", 0.35),
+    "cooldown_iters": _env_int("COMPETENCE_COOLDOWN_ITERS", 150),
   }
 
 

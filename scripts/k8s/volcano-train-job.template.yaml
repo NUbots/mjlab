@@ -156,6 +156,14 @@ spec:
                   value: "${COMPETENCE_PROMOTE_TRACK_ERR}"
                 - name: COMPETENCE_DEMOTE_TRACK_ERR
                   value: "${COMPETENCE_DEMOTE_TRACK_ERR}"
+                - name: COMPETENCE_PROMOTE_ATTAIN
+                  value: "${COMPETENCE_PROMOTE_ATTAIN}"
+                - name: COMPETENCE_DEMOTE_ATTAIN
+                  value: "${COMPETENCE_DEMOTE_ATTAIN}"
+                - name: COMPETENCE_PROMOTE_WOBBLE
+                  value: "${COMPETENCE_PROMOTE_WOBBLE}"
+                - name: COMPETENCE_DEMOTE_WOBBLE
+                  value: "${COMPETENCE_DEMOTE_WOBBLE}"
                 - name: COMPETENCE_PROMOTE_FELL
                   value: "${COMPETENCE_PROMOTE_FELL}"
                 - name: COMPETENCE_DEMOTE_FELL

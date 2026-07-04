@@ -231,6 +231,8 @@ export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W PHASE_DELTA_W
 export ADAPTIVE_COMMANDS ADAPTIVE_PUSHES PENALTY_GATE
 export ADAPTIVE_CMD_LMAX ADAPTIVE_PUSH_LMAX
 export COMPETENCE_PROMOTE_TRACK_ERR COMPETENCE_DEMOTE_TRACK_ERR
+export COMPETENCE_PROMOTE_ATTAIN COMPETENCE_DEMOTE_ATTAIN
+export COMPETENCE_PROMOTE_WOBBLE COMPETENCE_DEMOTE_WOBBLE
 export COMPETENCE_PROMOTE_FELL COMPETENCE_DEMOTE_FELL COMPETENCE_COOLDOWN_ITERS
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
@@ -1143,18 +1145,22 @@ _competence_defaults() {
   # fell 0.58 -> the 0.25 code default could NEVER promote). 0.7 makes
   # low-level promotion effectively stability-gated; the err bar binds at
   # higher levels where commands dominate sway.
-  export COMPETENCE_PROMOTE_TRACK_ERR="0.7"
-  export COMPETENCE_DEMOTE_TRACK_ERR="1.2"
+  export COMPETENCE_PROMOTE_TRACK_ERR=""
+  export COMPETENCE_DEMOTE_TRACK_ERR=""
+  export COMPETENCE_PROMOTE_ATTAIN=""
+  export COMPETENCE_DEMOTE_ATTAIN=""
+  export COMPETENCE_PROMOTE_WOBBLE=""
+  export COMPETENCE_DEMOTE_WOBBLE=""
   export COMPETENCE_PROMOTE_FELL=""
   # fell_ema is a RATE (<=1.0): the code default demote bar of 1.0 is
   # unreachable, making push/penalty demotion dead code (v20 attempt 3:
   # falls climbed at the brink with no demote). 0.5 = half of episodes
   # ending in falls is decisively past competence.
-  export COMPETENCE_DEMOTE_FELL="0.5"
+  export COMPETENCE_DEMOTE_FELL=""
   # Cooldown must exceed the EMA refresh time (~10 episodes ~ 200 iters at
   # alpha 0.1) or promotions cascade on stale competence (v20 attempt 3:
   # cmd chained L1->L5 in 240 iters).
-  export COMPETENCE_COOLDOWN_ITERS="150"
+  export COMPETENCE_COOLDOWN_ITERS=""
 }
 
 
