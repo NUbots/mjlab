@@ -133,11 +133,24 @@ iters and cascading L5→L0 in 5 more. Plus top-rung promote caution
 demotes on the fast channel alone with stale-healthy slow EMAs; healthy
 L5 band (0.30) does not trip the 0.5 bar.
 
-Remedies still in reserve if v24 spirals anyway: lower fast bar (0.4),
-soften the fall termination penalty during demote windows, landing
-LR/desired_kl anneal at top level, per-|cmd| binned attainment (the
-population mean dilutes high-command failure), best-checkpoint selection
-(standing).
+v24 verdict (2026-07-05): the reflex fired EXACTLY at its 0.5 bar (iter
+~2020, measured rate 0.51) and cascaded L5→L0 in ~40 iters — but the
+spiral outran it: falls kept exploding at L0 (5.2→13.6 by iter 2137,
+ep 253). Two lessons: (a) the point of no return sits BELOW 0.5 — during
+the L5 burn (rate 0.3–0.45, under the bar) the −10 gradients were
+already poisoning the batch, and once poisoned, easing the task does not
+stop the bleeding; (b) all three L5 visits to date (v22b, v23, v24)
+ignited the burn at ±0.75 — consistent with the XH540 velocity-margin
+analysis that ±0.75 m/s sits at the actuator's physical edge. v24b:
+fast bar 0.35 (healthy-L5 band measured 0.26) + ladder capped at L4
+(±0.6) until a healthy full-length L4 run exists.
+
+Remedies still in reserve if v24b burns at L4 too: checkpoint rollback
+on crash (restore last healthy model instead of healing a poisoned one —
+the only structural cure for an absorbing spiral), soften the fall
+termination penalty during demote windows, landing LR/desired_kl anneal
+at top level, per-|cmd| binned attainment (the population mean dilutes
+high-command failure), best-checkpoint selection (standing).
 
 ## Multi-GPU program (user-driven, latency-first)
 
