@@ -1474,6 +1474,43 @@ gen_v24c() {
 }
 
 
+# BATCH=v24d: the planned landing. v24c proved the corridor (bar 0.50:
+# L0->L4 by 1157, attain RECORD 0.701 at 1424, ~800 healthy iters at L4)
+# and then proved the law again: saturation at the capped top rung lit the
+# ~700-900-iter churn fuse at ~1424, the fast demote fired correctly at
+# 1959 and the spiral completed THROUGH the cascade anyway — demotion is
+# not an antidote to churn damage. With ~1400-1500 iters of genuine
+# curriculum content in the current ladder, the only clean exit tonight is
+# to stop at the peak: MAX_ITERATIONS=1600 (PHASE kept 2000 to reproduce
+# the healthy climb exactly). Longer-term exits (more rungs / landing
+# anneal) need code. Artifact: final checkpoint at the attainment peak.
+gen_v24d() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export ADAPTIVE_CMD_LMAX="4"
+  export COMPETENCE_PROMOTE_ATTAIN="0.50"
+  export COMPETENCE_DEMOTE_ATTAIN="0.35"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export EXPERIMENT_NAME="nugus_gridsearch_v24"
+  export MAX_ITERATIONS="1600"
+  export MJLAB_LOG_STAMP="v24d-prod-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v24d-landing1600__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v24d,landing-1600,attain-0.50,lmax4,std-min-0.13,8gpu,multinode,batch-v24,gridsearch"
+  emit_manifest "mj-gs-v24d-prod"
+}
+
+
 gen_v24b() {
   _v16e_r13_exports
   _competence_defaults
@@ -1737,6 +1774,7 @@ case "$BATCH" in
   v24) gen_v24; expected=1 ;;
   v24b) gen_v24b; expected=1 ;;
   v24c) gen_v24c; expected=1 ;;
+  v24d) gen_v24d; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
