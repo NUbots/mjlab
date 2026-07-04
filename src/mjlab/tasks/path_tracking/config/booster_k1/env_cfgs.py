@@ -1,0 +1,167 @@
+"""Booster K1 path tracking environment configurations.
+
+Built on top of the K1 velocity configurations: the reward structure,
+sensors, events, and domain randomization are reused unchanged. The
+differences are the command term (a generated walk path instead of a
+sampled twist) and the actor's command observation (relative path
+waypoints instead of the twist — matching what a deployed walk path
+planner can provide from odometry).
+"""
+
+import math
+
+from mjlab.envs import ManagerBasedRlEnvCfg
+from mjlab.managers.observation_manager import ObservationTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.tasks.path_tracking import mdp
+from mjlab.tasks.path_tracking.mdp import PathCommandCfg
+from mjlab.tasks.velocity.config.booster_k1.env_cfgs import (
+  booster_k1_flat_env_cfg,
+  booster_k1_rough_env_cfg,
+)
+from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
+from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
+
+# Approximate per-axis limits of the K1's achievable twist. Each is
+# reachable alone; the path command scales combined demands onto the
+# ellipsoid these define.
+_MAX_LIN_VEL_X = 0.8  # m/s
+_MAX_LIN_VEL_Y = 0.4  # m/s
+_MAX_ANG_VEL_Z = 1.0  # rad/s
+
+
+def _clip_range(r: tuple[float, float], limit: float) -> tuple[float, float]:
+  return (max(r[0], -limit), min(r[1], limit))
+
+
+def _convert_to_path_tracking(cfg: ManagerBasedRlEnvCfg) -> None:
+  """Swap the twist command for a path command, in place.
+
+  The path command's ``command`` property is a desired twist derived from
+  the path, so every reward, gate, and curriculum that consumed the
+  ``"twist"`` command keeps working — they are only retargeted to the new
+  term name. The actor's observation is replaced with the deployment-safe
+  relative-waypoint view of the path.
+  """
+  twist_cmd = cfg.commands.pop("twist")
+  assert isinstance(twist_cmd, UniformVelocityCommandCfg)
+
+  cfg.commands["path"] = PathCommandCfg(
+    entity_name="robot",
+    # Mid-episode resamples emulate the planner replanning the path on the
+    # fly (e.g. an obstruction appears): a fresh path is generated from
+    # the robot's current pose while the episode keeps running.
+    resampling_time_range=(4.0, 8.0),
+    rel_standing_envs=0.1,
+    segment_duration_range=(2.0, 4.0),
+    lookahead_times=(0.2, 0.5, 1.0, 2.0),
+    pos_gain=1.0,
+    heading_gain=0.5,
+    twist_limits=(_MAX_LIN_VEL_X, _MAX_LIN_VEL_Y, _MAX_ANG_VEL_Z),
+    twist_blend_time=0.5,
+    # Keep the direction of travel within ±20° of the commanded heading so
+    # the robot's yaw stays tightly aligned with where the path goes and it
+    # can follow a fresh path by mostly walking forward.
+    max_travel_angle=math.radians(20.0),
+    # Widen curved segments to a gentler minimum turning radius so the robot
+    # is not asked to trace tight arcs it struggles to keep up with. In-place
+    # turns are exempt.
+    min_turn_radius=0.75,
+    debug_vis=True,
+    # Inherit the velocity task's (possibly play-adjusted) twist ranges,
+    # clipped to the robot's feasible envelope: the velocity task's base
+    # ±1.0 m/s linear box exceeds what the K1 can walk.
+    ranges=PathCommandCfg.Ranges(
+      lin_vel_x=_clip_range(twist_cmd.ranges.lin_vel_x, _MAX_LIN_VEL_X),
+      lin_vel_y=_clip_range(twist_cmd.ranges.lin_vel_y, _MAX_LIN_VEL_Y),
+      ang_vel_z=_clip_range(twist_cmd.ranges.ang_vel_z, _MAX_ANG_VEL_Z),
+    ),
+  )
+
+  # Direct path-tracking rewards. The inherited velocity rewards only track
+  # the derived twist; these add pressure to stay on the generated path so
+  # the robot keeps pace with the moving reference (reaching the path's end
+  # on schedule) and aligns its heading tightly with the reference pose.
+  cfg.rewards["track_path_position"] = RewardTermCfg(
+    func=mdp.track_path_position,
+    weight=1.0,
+    params={"command_name": "path", "std": 0.3},
+  )
+  cfg.rewards["track_path_heading"] = RewardTermCfg(
+    func=mdp.track_path_heading,
+    weight=1.0,
+    params={"command_name": "path", "std": 0.5},
+  )
+
+  # Retarget every term that referenced the twist command.
+  for reward in cfg.rewards.values():
+    if reward.params.get("command_name") == "twist":
+      reward.params["command_name"] = "path"
+  for group in cfg.observations.values():
+    for obs_term in group.terms.values():
+      if obs_term.params.get("command_name") == "twist":
+        obs_term.params["command_name"] = "path"
+  for curriculum in cfg.curriculum.values():
+    if curriculum.params.get("command_name") == "twist":
+      curriculum.params["command_name"] = "path"
+
+  # Finish training at the K1's full feasible ranges; the same easy-to-hard
+  # staging as the velocity task is kept.
+  if "command_vel" in cfg.curriculum:
+    cfg.curriculum["command_vel"].params["velocity_stages"] = [
+      {
+        "step": 0,
+        "lin_vel_x": (-_MAX_LIN_VEL_X, _MAX_LIN_VEL_X),
+        "lin_vel_y": (-0.1, 0.1),
+        "ang_vel_z": (-0.1, 0.1),
+      },
+      {
+        "step": 9000 * 24,
+        "lin_vel_x": (-_MAX_LIN_VEL_X, _MAX_LIN_VEL_X),
+        "lin_vel_y": (-0.2, 0.2),
+        "ang_vel_z": (-0.5, 0.5),
+      },
+      {
+        "step": 12000 * 24,
+        "lin_vel_x": (-_MAX_LIN_VEL_X, _MAX_LIN_VEL_X),
+        "lin_vel_y": (-_MAX_LIN_VEL_Y, _MAX_LIN_VEL_Y),
+        "ang_vel_z": (-_MAX_ANG_VEL_Z, _MAX_ANG_VEL_Z),
+      },
+    ]
+
+  # Actor: observe the path as relative waypoints, never the twist. Noise
+  # models odometry error in the planner-provided relative path; the delay
+  # models planner/network latency.
+  actor_command = ObservationTermCfg(
+    func=mdp.path_waypoints,
+    params={"command_name": "path"},
+    noise=Gnoise(mean=0.0, std=0.02),
+    delay_min_lag=0,
+    delay_max_lag=3,  # 0-60ms
+  )
+  cfg.observations["actor"].terms["command"] = actor_command
+
+  # Critic: clean waypoints plus the privileged desired twist (critic-only
+  # inputs are fine — the critic is not deployed).
+  cfg.observations["critic"].terms["command"] = ObservationTermCfg(
+    func=mdp.path_waypoints,
+    params={"command_name": "path"},
+  )
+  cfg.observations["critic"].terms["target_twist"] = ObservationTermCfg(
+    func=mdp.generated_commands,
+    params={"command_name": "path"},
+  )
+
+
+def booster_k1_path_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Create Booster K1 rough terrain path tracking configuration."""
+  cfg = booster_k1_rough_env_cfg(play=play)
+  _convert_to_path_tracking(cfg)
+  return cfg
+
+
+def booster_k1_path_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Create Booster K1 flat terrain path tracking configuration."""
+  cfg = booster_k1_flat_env_cfg(play=play)
+  _convert_to_path_tracking(cfg)
+  return cfg

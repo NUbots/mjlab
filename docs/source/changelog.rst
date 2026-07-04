@@ -8,6 +8,17 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added the Booster K1 humanoid to the asset zoo
+  (``mjlab.asset_zoo.robots.booster_k1``) along with velocity and path
+  tracking task configurations
+  (``Mjlab-Velocity-{Rough,Flat}-Booster-K1`` and
+  ``Mjlab-PathTracking-{Rough,Flat}-Booster-K1``). The MJCF is adapted from
+  the official Booster Robotics assets (BSD-3-Clause); actuator gains,
+  effort/velocity limits, and rotor armatures follow Booster's published
+  per-joint motor models and gain formula. The task configurations mirror
+  the tuned Nugus setups, retargeted to the K1's joint naming, foot
+  geometry, and faster twist envelope (±0.8 m/s forward, ±0.4 m/s lateral,
+  ±1.0 rad/s yaw).
 - Added a new path tracking task (``mjlab.tasks.path_tracking``) with NUbots
   Nugus configurations (``Mjlab-PathTracking-{Rough,Flat}-Nubots-Nugus``).
   Instead of observing a sampled twist command, the actor observes a short
