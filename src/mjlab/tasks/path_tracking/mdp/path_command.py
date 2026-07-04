@@ -118,6 +118,11 @@ class PathCommand(CommandTerm):
     self.is_standing_env = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+    # Instantaneous lag from the current reference pose, refreshed each step
+    # in _compute_outputs and consumed by the path-tracking rewards. A robot
+    # that cannot keep up with the time-parameterized path sees these grow.
+    self.pos_error = torch.zeros(self.num_envs, device=self.device)
+    self.heading_error = torch.zeros(self.num_envs, device=self.device)
 
     self.metrics["error_pos"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_heading"] = torch.zeros(self.num_envs, device=self.device)
@@ -214,6 +219,19 @@ class PathCommand(CommandTerm):
       rotate = (speed > 1e-6) & (bearing != clamped)
       twists[..., 0] = torch.where(rotate, speed * torch.cos(clamped), twists[..., 0])
       twists[..., 1] = torch.where(rotate, speed * torch.sin(clamped), twists[..., 1])
+
+    # Impose a minimum turning radius on curved segments: for any segment
+    # with linear motion, cap |wz| to speed / min_turn_radius so a
+    # forward-and-turning segment traces an arc no tighter than that radius.
+    # Pure in-place turns (zero linear speed) are exempt and keep the full
+    # ang_vel_z range.
+    if self.cfg.min_turn_radius > 0.0:
+      speed = torch.linalg.vector_norm(twists[..., :2], dim=-1)
+      max_wz = speed / self.cfg.min_turn_radius
+      moving = speed > 1e-6
+      twists[..., 2] = torch.where(
+        moving, twists[..., 2].clamp(-max_wz, max_wz), twists[..., 2]
+      )
 
     # Some environments stand in place for the whole path.
     self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
@@ -321,6 +339,10 @@ class PathCommand(CommandTerm):
 
     robot_pos = self.robot.data.root_link_pos_w[:, :2]
     robot_heading = self.robot.data.heading_w
+
+    # Lag from the current reference pose, for the path-tracking rewards.
+    self.pos_error = torch.norm(ref_pos - robot_pos, dim=-1)
+    self.heading_error = torch.abs(wrap_to_pi(ref_heading - robot_heading))
 
     # Reference linear velocity in world frame.
     cos_r = torch.cos(ref_heading)
@@ -461,6 +483,16 @@ class PathCommandCfg(CommandTermCfg):
   ``math.pi`` (the default) disables the cap; smaller values progressively
   suppress strafing and backward walking (0 forces pure forward travel)."""
 
+  min_turn_radius: float = 0.0
+  """Smallest turning radius in meters imposed on curved path segments.
+
+  For any segment with linear motion, the yaw rate is capped to
+  ``speed / min_turn_radius`` so a forward-and-turning segment traces an arc
+  no tighter than this radius. Pure in-place turns (zero linear speed) are
+  exempt and keep the full ``ang_vel_z`` range. ``0.0`` (the default)
+  disables the cap and lets arcs turn as tightly as the sampled twist
+  allows; larger values yield gentler, wider curves."""
+
   @dataclass
   class SegmentMix:
     """Relative frequencies of path segment archetypes.
@@ -529,6 +561,8 @@ class PathCommandCfg(CommandTermCfg):
       raise ValueError("twist_blend_time must be non-negative.")
     if not 0.0 <= self.max_travel_angle <= math.pi:
       raise ValueError("max_travel_angle must be in [0, pi].")
+    if self.min_turn_radius < 0.0:
+      raise ValueError("min_turn_radius must be non-negative.")
     mix = self.segment_mix
     weights = (
       mix.standing,

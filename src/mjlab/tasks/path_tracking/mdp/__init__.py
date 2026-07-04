@@ -9,3 +9,4 @@ from mjlab.tasks.velocity.mdp import *  # noqa: F401, F403
 
 from .observations import path_waypoints  # noqa: F401
 from .path_command import PathCommand, PathCommandCfg  # noqa: F401
+from .rewards import track_path_heading, track_path_position  # noqa: F401

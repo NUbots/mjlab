@@ -33,8 +33,22 @@ Added
   heading: sampled linear velocities whose body-frame bearing falls outside
   the cone are rotated onto its edge with speed preserved. This keeps the
   robot's yaw roughly aligned with where the path goes so a fresh path can be
-  followed by mostly walking forward. Enabled at ±30° for the NUbots Nugus
+  followed by mostly walking forward. Enabled at ±20° for the NUbots Nugus
   path tracking configurations; the default (``pi``) leaves paths unchanged.
+- Added a ``min_turn_radius`` option to the path tracking command that imposes
+  a smallest turning radius on curved segments: for any segment with linear
+  motion the yaw rate is capped to ``speed / min_turn_radius`` so arcs are no
+  tighter than that radius, while pure in-place turns keep the full yaw range.
+  Set to 0.75 m for the NUbots Nugus path tracking configurations to plan
+  gentler curves the robot can keep up with; the default (``0``) leaves paths
+  unchanged.
+- Added ``track_path_position`` and ``track_path_heading`` rewards to the
+  NUbots Nugus path tracking configurations. Because the path is
+  time-parameterized (its reference pose advances at the planned pace whether
+  or not the robot follows), these reward the robot for staying on the moving
+  reference pose — keeping pace so it reaches the path's end on schedule and
+  aligning its heading tightly with the reference — adding direct path
+  pressure on top of the inherited twist-tracking rewards.
 - Added support for warm-starting path tracking training from a velocity
   task checkpoint despite the mismatched observation layouts. The path
   tracking runner's ``load()`` detects a velocity checkpoint by its actor

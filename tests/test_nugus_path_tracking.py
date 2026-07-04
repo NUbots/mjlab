@@ -370,6 +370,107 @@ def test_travel_direction_cone_rejects_invalid_angle() -> None:
     )
 
 
+def _make_term(
+  *,
+  segment_mix: PathCommandCfg.SegmentMix,
+  min_turn_radius: float,
+) -> PathCommand:
+  """Build a term whose reference twist equals its per-segment twist.
+
+  A zero blend time and a single long segment mean ``ref_twist_b`` is the
+  raw sampled (and radius-capped) segment twist, so per-segment constraints
+  can be asserted directly.
+  """
+  robot = FakeRobot(NUM_ENVS)
+  env = types.SimpleNamespace(
+    num_envs=NUM_ENVS, device=DEVICE, step_dt=STEP_DT, scene={"robot": robot}
+  )
+  cfg = PathCommandCfg(
+    entity_name="robot",
+    resampling_time_range=(4.0, 8.0),
+    twist_limits=TWIST_LIMITS,
+    twist_blend_time=0.0,
+    segment_duration_range=(20.0, 20.0),
+    min_turn_radius=min_turn_radius,
+    segment_mix=segment_mix,
+    ranges=PathCommandCfg.Ranges(
+      lin_vel_x=(-0.5, 0.5),
+      lin_vel_y=(-0.3, 0.3),
+      ang_vel_z=(-1.0, 1.0),
+    ),
+  )
+  term = cfg.build(env)  # type: ignore[arg-type]
+  term.reset(torch.arange(NUM_ENVS))
+  term.compute(0.0)
+  return term
+
+
+def test_min_turn_radius_widens_arcs() -> None:
+  """Curved segments respect the minimum turning radius (radius >= min)."""
+  torch.manual_seed(4)
+  radius = 0.75
+  term = _make_term(
+    segment_mix=PathCommandCfg.SegmentMix(
+      standing=0.0, straight=0.0, arc=1.0, turn_in_place=0.0, strafe=0.0, omni=0.0
+    ),
+    min_turn_radius=radius,
+  )
+  twist = term.ref_twist_b
+  speed = torch.linalg.vector_norm(twist[..., :2], dim=-1)
+  wz = twist[..., 2].abs()
+  moving = speed > 1e-3
+  assert moving.any()
+  # radius = speed / |wz| >= min_turn_radius, i.e. |wz| <= speed / radius.
+  assert (wz[moving] <= speed[moving] / radius + 1e-4).all()
+
+
+def test_min_turn_radius_exempts_in_place_turns() -> None:
+  """Pure in-place turns keep the full yaw range despite a radius cap."""
+  torch.manual_seed(5)
+  term = _make_term(
+    segment_mix=PathCommandCfg.SegmentMix(
+      standing=0.0, straight=0.0, arc=0.0, turn_in_place=1.0, strafe=0.0, omni=0.0
+    ),
+    min_turn_radius=0.75,
+  )
+  twist = term.ref_twist_b
+  assert twist[..., :2].abs().max() < 1e-6  # No linear motion.
+  assert twist[..., 2].abs().max() > 0.1  # Still spins.
+
+
+def test_min_turn_radius_rejects_negative() -> None:
+  with pytest.raises(ValueError, match="min_turn_radius"):
+    PathCommandCfg(
+      entity_name="robot",
+      resampling_time_range=(4.0, 8.0),
+      twist_limits=TWIST_LIMITS,
+      min_turn_radius=-0.1,
+      ranges=PathCommandCfg.Ranges(
+        lin_vel_x=(-0.5, 0.5),
+        lin_vel_y=(-0.3, 0.3),
+        ang_vel_z=(-1.0, 1.0),
+      ),
+    )
+
+
+def test_path_tracking_rewards_decay_with_lag(seeded_term) -> None:
+  """Path position/heading rewards saturate on the path and decay off it."""
+  env, _, term = seeded_term
+  env.command_manager = types.SimpleNamespace(get_term=lambda name: term)
+
+  term.pos_error = torch.zeros(NUM_ENVS)
+  term.heading_error = torch.zeros(NUM_ENVS)
+  pos_on = mdp.track_path_position(env, std=0.3, command_name="path")
+  head_on = mdp.track_path_heading(env, std=0.5, command_name="path")
+  assert torch.allclose(pos_on, torch.ones(NUM_ENVS), atol=1e-5)
+  assert torch.allclose(head_on, torch.ones(NUM_ENVS), atol=1e-5)
+
+  term.pos_error = torch.full((NUM_ENVS,), 0.6)
+  term.heading_error = torch.full((NUM_ENVS,), 1.0)
+  assert (mdp.track_path_position(env, std=0.3, command_name="path") < pos_on).all()
+  assert (mdp.track_path_heading(env, std=0.5, command_name="path") < head_on).all()
+
+
 def test_resample_restarts_path_from_current_pose(seeded_term) -> None:
   _, robot, term = seeded_term
   all_ids = torch.arange(NUM_ENVS)

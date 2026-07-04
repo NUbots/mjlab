@@ -12,6 +12,7 @@ import math
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
+from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.tasks.path_tracking import mdp
 from mjlab.tasks.path_tracking.mdp import PathCommandCfg
 from mjlab.tasks.velocity.config.nugus.env_cfgs import (
@@ -58,10 +59,14 @@ def _convert_to_path_tracking(cfg: ManagerBasedRlEnvCfg) -> None:
     heading_gain=0.5,
     twist_limits=(_MAX_LIN_VEL_X, _MAX_LIN_VEL_Y, _MAX_ANG_VEL_Z),
     twist_blend_time=0.5,
-    # Keep the direction of travel within ±30° of the commanded heading so
-    # the robot's yaw stays roughly aligned with where the path goes and it
+    # Keep the direction of travel within ±20° of the commanded heading so
+    # the robot's yaw stays tightly aligned with where the path goes and it
     # can follow a fresh path by mostly walking forward.
-    max_travel_angle=math.radians(30.0),
+    max_travel_angle=math.radians(20.0),
+    # Widen curved segments to a gentler minimum turning radius so the robot
+    # is not asked to trace tight arcs it struggles to keep up with. In-place
+    # turns are exempt.
+    min_turn_radius=0.75,
     debug_vis=True,
     # Inherit the velocity task's (possibly play-adjusted) twist ranges,
     # clipped to the robot's feasible envelope: the velocity task's base
@@ -71,6 +76,21 @@ def _convert_to_path_tracking(cfg: ManagerBasedRlEnvCfg) -> None:
       lin_vel_y=_clip_range(twist_cmd.ranges.lin_vel_y, _MAX_LIN_VEL_Y),
       ang_vel_z=_clip_range(twist_cmd.ranges.ang_vel_z, _MAX_ANG_VEL_Z),
     ),
+  )
+
+  # Direct path-tracking rewards. The inherited velocity rewards only track
+  # the derived twist; these add pressure to stay on the generated path so
+  # the robot keeps pace with the moving reference (reaching the path's end
+  # on schedule) and aligns its heading tightly with the reference pose.
+  cfg.rewards["track_path_position"] = RewardTermCfg(
+    func=mdp.track_path_position,
+    weight=1.0,
+    params={"command_name": "path", "std": 0.3},
+  )
+  cfg.rewards["track_path_heading"] = RewardTermCfg(
+    func=mdp.track_path_heading,
+    weight=1.0,
+    params={"command_name": "path", "std": 0.5},
   )
 
   # Retarget every term that referenced the twist command.
