@@ -14,6 +14,9 @@ spec:
   schedulerName: volcano
   queue: mjlab-train
   minAvailable: 1
+  plugins:
+    env: []
+    svc: []
   maxRetry: 0
   ttlSecondsAfterFinished: 86400
   tasks:
@@ -44,6 +47,12 @@ spec:
               env:
                 - name: MUJOCO_GL
                   value: egl
+                - name: MULTINODE
+                  value: ""
+                - name: NNODES
+                  value: "1"
+                - name: MJLAB_LOG_STAMP
+                  value: ""
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
@@ -206,7 +215,7 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "38f830d831b85e1b8139c67b2ab497b23a42fae5"
+                  value: "d4b1f84ba87c07350b86418ffd4f3048b927942e"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).

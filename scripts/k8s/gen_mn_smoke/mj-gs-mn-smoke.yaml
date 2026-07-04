@@ -3,17 +3,17 @@
 apiVersion: batch.volcano.sh/v1alpha1
 kind: Job
 metadata:
-  name: mj-gs-v20-owned-s2
+  name: mj-gs-mn-smoke
   namespace: mjlab
   labels:
     app.kubernetes.io/name: mjlab-train
     app.kubernetes.io/component: gridsearch
     mjlab/gridsearch: "true"
-    mjlab/variant: clock_owned
+    mjlab/variant: clock_persist
 spec:
   schedulerName: volcano
   queue: mjlab-train
-  minAvailable: 1
+  minAvailable: 2
   plugins:
     env: []
     svc: []
@@ -21,15 +21,15 @@ spec:
   ttlSecondsAfterFinished: 86400
   tasks:
     - name: train
-      replicas: 1
-      minAvailable: 1
+      replicas: 2
+      minAvailable: 2
       template:
         metadata:
           labels:
             app.kubernetes.io/name: mjlab-train
             app.kubernetes.io/component: gridsearch
             mjlab/gridsearch: "true"
-            mjlab/variant: clock_owned
+            mjlab/variant: clock_persist
         spec:
           restartPolicy: Never
           runtimeClassName: nvidia
@@ -48,15 +48,15 @@ spec:
                 - name: MUJOCO_GL
                   value: egl
                 - name: MULTINODE
-                  value: ""
-                - name: NNODES
                   value: "1"
+                - name: NNODES
+                  value: "2"
                 - name: MJLAB_LOG_STAMP
-                  value: ""
+                  value: "mn-smoke-20260704-155227"
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
-                  value: "clock_owned"
+                  value: "clock_persist"
                 - name: JOULE_W
                   value: "1e-5"
                 - name: STAND_W
@@ -73,7 +73,7 @@ spec:
                 # iterations starting from the checkpoint's iteration). Overrides
                 # the configmap default per cell.
                 - name: MAX_ITERATIONS
-                  value: "2000"
+                  value: "300"
                 # New clock_anneal variant knobs read by the factory.
                 - name: SILENCE_CLOCK
                   value: "0"
@@ -114,7 +114,7 @@ spec:
                 - name: JOINT_ACC_W
                   value: "-1e-5"
                 - name: PHASE_DELTA_W
-                  value: "-0.2"
+                  value: ""
                 - name: FEET_MIN_SEP
                   value: "0.13"
                 - name: FEET_MIN_SEP_W
@@ -192,17 +192,17 @@ spec:
                 - name: EFFORT_HI
                   value: "1.2"
                 - name: SEED
-                  value: "2"
+                  value: "1"
                 - name: LOGGER
                   value: "wandb"
                 - name: EXPERIMENT_NAME
-                  value: "nugus_gridsearch_v20"
+                  value: "nugus_mn_smoke"
                 - name: RUN_NAME
-                  value: "clock_persist__r13__v20-owned__entropy-decay__s2__v20"
+                  value: "clock_persist__mn-smoke__8gpu__mn-smoke"
                 - name: WANDB_PROJECT
                   value: "mjlab"
                 - name: WANDB_TAGS
-                  value: "clock_persist,r13-stack,v20-owned,entropy-decay,seed-2,2k,gridsearch,batch-v20"
+                  value: "mn-smoke,8gpu,multinode,batch-mn-smoke"
                 # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
                   value: "all"
