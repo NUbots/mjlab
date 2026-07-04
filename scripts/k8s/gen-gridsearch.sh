@@ -245,6 +245,7 @@ export COMPETENCE_PROMOTE_TRACK_ERR COMPETENCE_DEMOTE_TRACK_ERR
 export COMPETENCE_PROMOTE_ATTAIN COMPETENCE_DEMOTE_ATTAIN
 export COMPETENCE_PROMOTE_WOBBLE COMPETENCE_DEMOTE_WOBBLE
 export COMPETENCE_PROMOTE_FELL COMPETENCE_DEMOTE_FELL COMPETENCE_COOLDOWN_ITERS
+export COMPETENCE_DEMOTE_FAST_FELL COMPETENCE_TOP_STREAK
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
@@ -1176,6 +1177,10 @@ _competence_defaults() {
   # alpha 0.1) or promotions cascade on stale competence (v20 attempt 3:
   # cmd chained L1->L5 in 240 iters).
   export COMPETENCE_COOLDOWN_ITERS=""
+  # Fast windowed fall-rate demote (R7) and top-rung promote streak; empty
+  # uses code defaults (0.5 / 5).
+  export COMPETENCE_DEMOTE_FAST_FELL=""
+  export COMPETENCE_TOP_STREAK=""
 }
 
 
@@ -1419,6 +1424,42 @@ gen_v24() {
 }
 
 
+# BATCH=v24b: v24 outcome — the reflex fired exactly at its 0.5 bar (iter
+# ~2020, rate 0.51) and cascaded L5->L0 in ~40 iters, but the spiral outran
+# it: falls kept exploding at L0 (5.2 -> 13.6 by 2137, ep 253). The point of
+# no return sits BELOW 0.5: during the L5 burn (rate 0.3-0.45, under the
+# bar) the -10 fall gradients were already poisoning the batch, and once
+# poisoned, easing the task does not stop the bleeding. Two counters:
+# (1) bar 0.35 — just above the healthy-L5 band (0.26), catching the burn
+# at its first acceleration; (2) cap the ladder at L4 (±0.6) — three runs
+# (v22b, v23, v24) all ignited the burn at L5 (±0.75), consistent with the
+# XH540 velocity-margin analysis; sample L5 again only after a full-length
+# healthy L4 run exists.
+gen_v24b() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export ADAPTIVE_CMD_LMAX="4"
+  export MJLAB_LOG_STAMP="v24b-prod-$(date +%Y%m%d-%H%M%S)"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="4000"
+  export SEED="1"
+  export EXPERIMENT_NAME="nugus_gridsearch_v24"
+  export RUN_NAME="clock_owned__v24b-bar035-lmax4__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v24b,fast-bar-0.35,lmax4,std-min-0.13,8gpu,multinode,batch-v24,gridsearch"
+  emit_manifest "mj-gs-v24b-prod"
+}
+
+
 # BATCH=mn-smoke: 8-GPU multi-node smoke (backlog 15c -> active). v20-full
 # config at 300 iters across 2x4 GPUs via torchrun env-rendezvous. PASS =
 # one W&B run (not two -> rank gating bug), iterating, collection_time
@@ -1655,6 +1696,7 @@ case "$BATCH" in
   v22) gen_v22; expected=2 ;;
   v23) gen_v23; expected=1 ;;
   v24) gen_v24; expected=1 ;;
+  v24b) gen_v24b; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
