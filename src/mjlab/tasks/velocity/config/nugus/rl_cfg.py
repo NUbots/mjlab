@@ -45,6 +45,14 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
         "class_name": "GaussianDistribution",
         "init_std": 1.0,
         "std_type": "log",
+        # Hard sigma floor (STD_MIN): on the corrected physics every late-run
+        # degradation began after std sank below ~0.15 regardless of entropy
+        # coefficient (v16c held coef 0.01 and std was still crushed to
+        # 0.087) — the reward economics pay for killing action noise until
+        # the policy overfits a narrow action tube and ordinary pushes
+        # become OOD. Clamp the distribution's std_range instead of fighting
+        # the economics through the entropy bonus.
+        "std_range": (_env_float("STD_MIN", 1e-6), 4.0),
       },
     ),
     critic=RslRlModelCfg(

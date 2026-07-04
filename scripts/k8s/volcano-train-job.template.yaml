@@ -155,6 +155,8 @@ spec:
                   value: "${ENTROPY_START}"
                 - name: ENTROPY_END
                   value: "${ENTROPY_END}"
+                - name: STD_MIN
+                  value: "${STD_MIN}"
                 - name: GAMMA
                   value: "${GAMMA}"
                 - name: ADAPTIVE_COMMANDS

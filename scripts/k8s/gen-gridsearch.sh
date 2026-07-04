@@ -230,6 +230,8 @@ export ENTROPY_DECAY GAMMA
 export ENTROPY_START ENTROPY_END
 ENTROPY_START="${ENTROPY_START:-}"
 ENTROPY_END="${ENTROPY_END:-}"
+export STD_MIN
+STD_MIN="${STD_MIN:-}"
 export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W PHASE_DELTA_W
 export JOB_REPLICAS MULTINODE MJLAB_LOG_STAMP
 JOB_REPLICAS="${JOB_REPLICAS:-1}"
@@ -1335,6 +1337,16 @@ gen_v22() {
   export RUN_NAME="clock_owned__v22-floor-0.004__bs2048__s1__${BATCH}"
   export WANDB_TAGS="clock_owned,v22-floor,entropy-end-0.004,bs2048,batch-v22,gridsearch"
   emit_manifest "mj-gs-v22-floor"
+
+  # v22b: hard sigma floor (STD_MIN=0.13), entropy schedule UNCHANGED
+  # (END=0.001). Two-arm discrimination vs v22: if v22b stays healthy and
+  # v22 does not, sigma LEVEL is causal (mechanical floor is the exact
+  # fix); if v22 alone works, the entropy economics were the lever.
+  export ENTROPY_END=""
+  export STD_MIN="0.13"
+  export RUN_NAME="clock_owned__v22b-stdmin-0.13__bs2048__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v22b-stdmin,std-min-0.13,bs2048,batch-v22,gridsearch"
+  emit_manifest "mj-gs-v22b-stdmin"
 }
 
 
@@ -1571,7 +1583,7 @@ case "$BATCH" in
   mn-smoke) gen_mn_smoke; expected=1 ;;
   mn-bench) gen_mn_bench; expected=6 ;;
   v21) gen_v21; expected=2 ;;
-  v22) gen_v22; expected=1 ;;
+  v22) gen_v22; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
