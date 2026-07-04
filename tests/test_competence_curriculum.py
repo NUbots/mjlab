@@ -358,3 +358,24 @@ def test_controller_wobble_demotes_before_falls() -> None:
     wobble_ema=0.4,
   )
   assert result == "demote"
+
+
+def test_attainment_true_fraction_at_small_commands() -> None:
+  """Perfect tracking of a 0.18 m/s command must read attain ~1.0 — the
+  floor-squared form capped it at |c|^2/0.04 and froze level-0 promotion
+  (v20 pair 3: attain 0.17-0.25 while every other gate passed)."""
+  env = _mock_tracked_env(fell=False)
+  ct = env.command_manager.get_term.return_value
+  ct.vel_command_b = torch.tensor([[0.18, 0.0], [0.18, 0.0]])
+  ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.18, 0.0], [0.18, 0.0]])
+  tracker = CompetenceTracker(env)
+  for _ in range(10):
+    tracker.record_step(env)
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  # EMA from pessimistic 0 with alpha 0.1 and a perfect episode -> 0.1.
+  assert tracker.attain_ema[0].item() == pytest.approx(0.1, abs=0.01)
+  # Commands below the 0.15 filter contribute no attainment weight.
+  ct.vel_command_b = torch.tensor([[0.05, 0.0], [0.05, 0.0]])
+  tracker2 = CompetenceTracker(env)
+  tracker2.record_step(env)
+  assert tracker2._attain_weight.sum().item() == 0.0

@@ -62,8 +62,8 @@ class CompetenceThresholds:
   demote_track_err: float = 0.45  # legacy, no longer in the predicate
   promote_attain: float = 0.75
   demote_attain: float = 0.5
-  promote_wobble: float = 0.05
-  demote_wobble: float = 0.15
+  promote_wobble: float = 0.10
+  demote_wobble: float = 0.25
   promote_fell: float = 0.3
   demote_fell: float = 0.35
   cooldown_iters: int = 150
@@ -186,6 +186,7 @@ class CompetenceTracker:
     self._track_sum = torch.zeros(n, device=self.device)
     self._track_weight = torch.zeros(n, device=self.device)
     self._attain_sum = torch.zeros(n, device=self.device)
+    self._attain_weight = torch.zeros(n, device=self.device)
     self._wobble_sum = torch.zeros(n, device=self.device)
     self._step_count = torch.zeros(n, device=self.device)
     # Pessimistic init: a fresh policy must EARN competence. Zero-init would
@@ -238,11 +239,18 @@ class CompetenceTracker:
     self._track_sum[walking] += normalized[walking]
     self._track_weight[walking] += 1.0
     # Attainment: achieved velocity projected onto the commanded direction,
-    # as a fraction of commanded speed. Sandbagging (standing under a move
-    # command) reads ~0 without a single fall; overshoot reads > 1. Lateral
-    # sway is orthogonal to the command and drops out of the projection.
-    attain = (vel_xy * cmd_xy).sum(dim=-1) / torch.square(cmd_norm)
-    self._attain_sum[walking] += attain[walking]
+    # as a TRUE fraction of commanded speed, measured only on steps with a
+    # meaningful command (|c| >= 0.15). Sandbagging reads ~0 without a
+    # single fall; lateral sway is orthogonal and drops out. The earlier
+    # floor-SQUARED denominator capped perfect tracking of a 0.1 m/s
+    # command at 0.25 and froze level-0 promotion (v20 pair 3: attain
+    # 0.17-0.25 while every other gate passed); the meaningful-command
+    # filter replaces the floor's anti-gaming role.
+    cmd_sq = (cmd_xy * cmd_xy).sum(dim=-1)
+    meaningful = walking & (cmd_sq >= 0.15 * 0.15)
+    attain = (vel_xy * cmd_xy).sum(dim=-1) / cmd_sq.clamp(min=1e-6)
+    self._attain_sum[meaningful] += attain[meaningful]
+    self._attain_weight[meaningful] += 1.0
 
   def finalize_episodes(
     self, env: ManagerBasedRlEnv, env_ids: torch.Tensor | slice
@@ -279,11 +287,12 @@ class CompetenceTracker:
     )
 
     attain = torch.zeros(len(ids), device=self.device)
-    attain[has_weight] = (
-      self._attain_sum[ids][has_weight] / self._track_weight[ids][has_weight]
+    has_attain = self._attain_weight[ids] > 0
+    attain[has_attain] = (
+      self._attain_sum[ids][has_attain] / self._attain_weight[ids][has_attain]
     )
     updated_attain = alpha * attain + (1.0 - alpha) * self.attain_ema[ids]
-    self.attain_ema[ids] = torch.where(has_weight, updated_attain, self.attain_ema[ids])
+    self.attain_ema[ids] = torch.where(has_attain, updated_attain, self.attain_ema[ids])
 
     steps = self._step_count[ids].clamp(min=1.0)
     wobble = self._wobble_sum[ids] / steps
@@ -298,6 +307,7 @@ class CompetenceTracker:
     self._track_sum[ids] = 0.0
     self._track_weight[ids] = 0.0
     self._attain_sum[ids] = 0.0
+    self._attain_weight[ids] = 0.0
     self._wobble_sum[ids] = 0.0
     self._step_count[ids] = 0.0
 
@@ -385,8 +395,8 @@ class adaptive_command_level:
       demote_track_err=cfg.params.get("demote_track_err", 0.45),
       promote_attain=cfg.params.get("promote_attain", 0.75),
       demote_attain=cfg.params.get("demote_attain", 0.5),
-      promote_wobble=cfg.params.get("promote_wobble", 0.05),
-      demote_wobble=cfg.params.get("demote_wobble", 0.15),
+      promote_wobble=cfg.params.get("promote_wobble", 0.10),
+      demote_wobble=cfg.params.get("demote_wobble", 0.25),
       promote_fell=cfg.params.get("promote_fell", 0.3),
       demote_fell=cfg.params.get("demote_fell", 0.35),
       cooldown_iters=cfg.params.get("cooldown_iters", 150),
@@ -409,8 +419,8 @@ class adaptive_command_level:
     demote_track_err: float = 0.45,
     promote_attain: float = 0.75,
     demote_attain: float = 0.5,
-    promote_wobble: float = 0.05,
-    demote_wobble: float = 0.15,
+    promote_wobble: float = 0.10,
+    demote_wobble: float = 0.25,
     promote_fell: float = 0.3,
     demote_fell: float = 0.35,
     cooldown_iters: int = 150,
@@ -457,8 +467,8 @@ class adaptive_push_level:
       demote_track_err=cfg.params.get("demote_track_err", 0.45),
       promote_attain=cfg.params.get("promote_attain", 0.75),
       demote_attain=cfg.params.get("demote_attain", 0.5),
-      promote_wobble=cfg.params.get("promote_wobble", 0.05),
-      demote_wobble=cfg.params.get("demote_wobble", 0.15),
+      promote_wobble=cfg.params.get("promote_wobble", 0.10),
+      demote_wobble=cfg.params.get("demote_wobble", 0.25),
       promote_fell=cfg.params.get("promote_fell", 0.3),
       demote_fell=cfg.params.get("demote_fell", 0.35),
       cooldown_iters=cfg.params.get("cooldown_iters", 150),
@@ -486,8 +496,8 @@ class adaptive_push_level:
     demote_track_err: float = 0.45,
     promote_attain: float = 0.75,
     demote_attain: float = 0.5,
-    promote_wobble: float = 0.05,
-    demote_wobble: float = 0.15,
+    promote_wobble: float = 0.10,
+    demote_wobble: float = 0.25,
     promote_fell: float = 0.3,
     demote_fell: float = 0.35,
     cooldown_iters: int = 150,
@@ -555,7 +565,7 @@ class staged_on_competence:
         cooldown_iters=cfg.params.get("cooldown_iters", 150),
         demote_fell=cfg.params.get("demote_fell", 0.35),
         demote_attain=cfg.params.get("demote_attain", 0.5),
-        demote_wobble=cfg.params.get("demote_wobble", 0.15),
+        demote_wobble=cfg.params.get("demote_wobble", 0.25),
       ),
     )
     self._stage_idx = 0
@@ -578,8 +588,8 @@ class staged_on_competence:
     demote_track_err: float = 0.45,
     promote_attain: float = 0.75,
     demote_attain: float = 0.5,
-    promote_wobble: float = 0.05,
-    demote_wobble: float = 0.15,
+    promote_wobble: float = 0.10,
+    demote_wobble: float = 0.25,
     promote_fell: float = 0.3,
   ) -> dict[str, torch.Tensor]:
     # The curriculum manager passes ALL cfg params as kwargs
