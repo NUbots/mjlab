@@ -17,7 +17,7 @@ data:
   GIT_REPO: https://github.com/NUbots/mjlab.git
   GIT_REF: add-phase-clock
   # GIT_COMMIT: full 40-char SHA when pinning; entrypoint fetches by object id.
-  GIT_COMMIT: "d4b1f84ba87c07350b86418ffd4f3048b927942e"
+  GIT_COMMIT: "66617b3b7721d09f1837f6b44cbfb6fd230df3e2"
   PYTHON_VERSION: "3.13"
   TASK: Mjlab-Velocity-Flat-Nubots-Nugus
   # Per-GPU env count. Benchmark sweet spot on RTX 4090 (2026-06-30):

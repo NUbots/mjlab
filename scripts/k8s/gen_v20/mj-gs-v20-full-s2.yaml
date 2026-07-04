@@ -47,6 +47,8 @@ spec:
               env:
                 - name: MUJOCO_GL
                   value: egl
+                - name: NUM_ENVS
+                  value: "8192"
                 - name: MULTINODE
                   value: ""
                 - name: NNODES
@@ -215,7 +217,7 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "d4b1f84ba87c07350b86418ffd4f3048b927942e"
+                  value: "66617b3b7721d09f1837f6b44cbfb6fd230df3e2"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
