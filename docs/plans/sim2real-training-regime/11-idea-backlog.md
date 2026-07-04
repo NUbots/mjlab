@@ -108,6 +108,22 @@ un-starred items overnight — they need design attention.
     Caveat: partial-length first episodes slightly perturb the first few
     iterations' stats — irrelevant beyond iter ~50.
 
+## Infrastructure
+
+15c. **Multi-node 8-GPU single-run training (munin+hugin).** Feasible and
+    algorithmically safe: iteration time is ~88% sim collection
+    (collection 2.0–2.5 s vs learning 0.13–0.34 s), gradients are ~6 MB —
+    NCCL over plain Ethernet is fine, and rsl-rl's data-parallel path is
+    already proven single-node. Plumbing (~1 day): 2-pod Volcano job with
+    per-node affinity, env-rendezvous `torchrun` instead of torchrunx SSH
+    (Volcano svc plugin for MASTER_ADDR), NCCL_SOCKET_IFNAME, rank-0-only
+    checkpoint/W&B verification. Honest speedup: 1.4–1.6× per run (8×4096
+    sits below the 8192/GPU 4090 throughput sweet spot), NOT 2×, and it
+    serializes A/B pairs (comparison arrives ~1.3× LATER than two parallel
+    4-GPU runs). Use only when a single run gates everything: final 4k–8k
+    consolidation, pre-hardware hard-cell training. Cheaper first: smoke
+    test 4×16384 envs (only 20480 is known to OOM; 16384 untested).
+
 ## Learning / architecture (log only — not overnight material)
 
 16. **num_steps_per_env 24 → 48.** Longer rollout horizon for gait credit

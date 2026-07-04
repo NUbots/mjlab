@@ -228,6 +228,10 @@ export CLEARANCE_TARGET_HEIGHT CLEARANCE_TARGET_FROM_SWING PUSH_INTERVAL_SCALE
 export MIRROR_AUG TRACK_LIN_W TRACK_ANG_W AIR_TIME_W LR_CAP LR_CAP_START_ITER
 export ENTROPY_DECAY GAMMA
 export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W PHASE_DELTA_W
+export JOB_REPLICAS MULTINODE MJLAB_LOG_STAMP
+JOB_REPLICAS="${JOB_REPLICAS:-1}"
+MULTINODE="${MULTINODE:-}"
+MJLAB_LOG_STAMP="${MJLAB_LOG_STAMP:-}"
 export ADAPTIVE_COMMANDS ADAPTIVE_PUSHES PENALTY_GATE
 export ADAPTIVE_CMD_LMAX ADAPTIVE_PUSH_LMAX
 export COMPETENCE_PROMOTE_TRACK_ERR COMPETENCE_DEMOTE_TRACK_ERR
@@ -1236,6 +1240,30 @@ gen_v20() {
 }
 
 
+# BATCH=mn-smoke: 8-GPU multi-node smoke (backlog 15c -> active). v20-full
+# config at 300 iters across 2x4 GPUs via torchrun env-rendezvous. PASS =
+# one W&B run (not two -> rank gating bug), iterating, collection_time
+# comparable to single-node, one checkpoint dir. NUM_ENVS stays 8192/GPU
+# (65k total) for the smoke; the 4096-point benchmark decides the fast mode.
+gen_mn_smoke() {
+  _v16e_r13_exports
+  _competence_defaults
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export MAX_ITERATIONS="300"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export MJLAB_LOG_STAMP="mn-smoke-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_mn_smoke"
+  export RUN_NAME="clock_persist__mn-smoke__8gpu__${BATCH}"
+  export WANDB_TAGS="mn-smoke,8gpu,multinode,batch-mn-smoke"
+  emit_manifest "mj-gs-mn-smoke"
+}
+
+
 # BATCH=v16: Phase-0 smoke — clock_anneal flat base (no hard_continue), 2k iters,
 # critic height_scan, JOULE_W=1e-5. Establishes the post-E0.2/A3/C1 baseline.
 gen_v16_base() {
@@ -1442,6 +1470,7 @@ case "$BATCH" in
   wave4) gen_wave4; expected=3 ;;
   v16e) gen_v16e; expected=3 ;;
   v20) gen_v20; expected=12 ;;
+  mn-smoke) gen_mn_smoke; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

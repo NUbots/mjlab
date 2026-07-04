@@ -184,7 +184,12 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
   # Create log directory once before launching workers.
   log_root_path = Path("logs") / "rsl_rl" / args.agent.experiment_name
   log_root_path.resolve()
-  log_dir_name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+  # MJLAB_LOG_STAMP overrides the wall-clock stamp so multi-node pods (which
+  # each execute this code independently under torchrun) agree on one
+  # log/checkpoint/W&B directory name.
+  log_dir_name = os.environ.get("MJLAB_LOG_STAMP") or datetime.now().strftime(
+    "%Y-%m-%d_%H-%M-%S"
+  )
   if args.agent.run_name:
     log_dir_name += f"_{args.agent.run_name}"
   log_dir = log_root_path / log_dir_name
@@ -199,7 +204,12 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, selected_gpus))
   os.environ["MUJOCO_GL"] = "egl"
 
-  if num_gpus <= 1:
+  if os.environ.get("RANK") is not None and os.environ.get("WORLD_SIZE") is not None:
+    # Already launched by torchrun (multi-node path): every worker process
+    # runs this branch; rsl-rl reads RANK/WORLD_SIZE/LOCAL_RANK and joins
+    # the process group itself. torchrunx must NOT be nested here.
+    run_train(task_id, args, log_dir)
+  elif num_gpus <= 1:
     # CPU or single GPU: run directly without torchrunx.
     run_train(task_id, args, log_dir)
   else:

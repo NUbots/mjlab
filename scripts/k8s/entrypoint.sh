@@ -181,4 +181,22 @@ if [[ -n "${WANDB_CHECKPOINT_NAME:-}" ]]; then
 fi
 
 echo "[INFO] Starting training: task=${TASK}, experiment=${EXPERIMENT_NAME}, run_name=${RUN_NAME:-<unset>}, num_envs=${NUM_ENVS}, max_iterations=${MAX_ITERATIONS}, gpu_ids=${GPU_IDS}, logger=${LOGGER}, variant=${MJLAB_VARIANT:-<unset>}"
+if [[ "${MULTINODE:-}" == "1" ]]; then
+  # Multi-node data-parallel via torchrun env-rendezvous (no SSH). The
+  # Volcano svc plugin provides VC_<TASK>_HOSTS (comma-separated pod
+  # FQDNs); the env plugin provides VC_TASK_INDEX. Gradients are ~2 MB so
+  # plain Ethernet is fine (~80 ms/iter at 10G across 20 all-reduces).
+  MASTER_ADDR="${MASTER_ADDR:-${VC_TRAIN_HOSTS%%,*}}"
+  NODE_RANK="${NODE_RANK:-${VC_TASK_INDEX:-0}}"
+  NNODES="${NNODES:-2}"
+  NPROC_PER_NODE="${NPROC_PER_NODE:-4}"
+  echo "[INFO] Multinode: nnodes=${NNODES} node_rank=${NODE_RANK} master=${MASTER_ADDR} nproc=${NPROC_PER_NODE}"
+  exec "${VENV}/bin/python" -m torch.distributed.run \
+    --nnodes "${NNODES}" \
+    --node-rank "${NODE_RANK}" \
+    --nproc-per-node "${NPROC_PER_NODE}" \
+    --master-addr "${MASTER_ADDR}" \
+    --master-port "${MASTER_PORT:-29500}" \
+    --no-python "${VENV}/bin/train" "${TRAIN_ARGS[@]}"
+fi
 exec "${VENV}/bin/train" "${TRAIN_ARGS[@]}"

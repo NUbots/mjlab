@@ -13,13 +13,16 @@ metadata:
 spec:
   schedulerName: volcano
   queue: mjlab-train
-  minAvailable: 1
+  minAvailable: ${JOB_REPLICAS}
+  plugins:
+    env: []
+    svc: []
   maxRetry: 0
   ttlSecondsAfterFinished: 86400
   tasks:
     - name: train
-      replicas: 1
-      minAvailable: 1
+      replicas: ${JOB_REPLICAS}
+      minAvailable: ${JOB_REPLICAS}
       template:
         metadata:
           labels:
@@ -44,6 +47,12 @@ spec:
               env:
                 - name: MUJOCO_GL
                   value: egl
+                - name: MULTINODE
+                  value: "${MULTINODE}"
+                - name: NNODES
+                  value: "${JOB_REPLICAS}"
+                - name: MJLAB_LOG_STAMP
+                  value: "${MJLAB_LOG_STAMP}"
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
