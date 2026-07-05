@@ -1049,3 +1049,33 @@ def test_split_aimd_population_emergency_arrests_both() -> None:
   # ...but the population emergency cuts both anyway.
   assert out["difficulty"].item() < 0.9
   assert out["difficulty_push"].item() < 0.9
+
+
+def test_joule_lambda_live_applies_weight() -> None:
+  """Live mode writes -lambda into the reward weight; shadow does not."""
+  from mjlab.tasks.velocity.mdp.competence import joule_lambda_shadow
+
+  for live, expect_written in ((False, False), (True, True)):
+    cfg = MagicMock()
+    cfg.params = {"lambda_cap": 2e-5, "ramp_iters": 10, "apply_live": live}
+    env0 = _shadow_env(peak=0.012, step=0)
+    env0._competence_tracker = CompetenceTracker(env0)
+    term = joule_lambda_shadow(cfg, env0)
+    tracker = env0._competence_tracker
+    tracker.set_push_cohort(0.5)
+    tracker.attain_ema[:] = 0.7
+    tracker.fast_fall_clean = 0.05
+    for _ in range(200):
+      tracker.record_peak_height(_shadow_env(peak=0.012, step=0))
+    env = _shadow_env(peak=0.012, step=24)
+    env._competence_tracker = tracker
+    term_cfg = MagicMock()
+    term_cfg.weight = -1e-5
+    env.reward_manager.get_term_cfg.return_value = term_cfg
+    tracker._finalized_step = -1
+    term(env, torch.tensor([0, 1]))
+    if expect_written:
+      assert term_cfg.weight == pytest.approx(-term._lam)
+      assert term._lam > 0
+    else:
+      assert term_cfg.weight == pytest.approx(-1e-5)

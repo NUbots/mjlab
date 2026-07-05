@@ -1472,6 +1472,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
           "reward_name": "joule_heating",
           "lambda_cap": _env_float("LAMBDA_CAP", 2e-5),
           "ramp_iters": _env_int("LAMBDA_RAMP_ITERS", 1000),
+          "apply_live": _env_bool("JOULE_LAMBDA_LIVE", default=False),
         },
       )
 

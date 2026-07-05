@@ -219,6 +219,8 @@ spec:
                   value: "${LAMBDA_CAP}"
                 - name: LAMBDA_RAMP_ITERS
                   value: "${LAMBDA_RAMP_ITERS}"
+                - name: JOULE_LAMBDA_LIVE
+                  value: "${JOULE_LAMBDA_LIVE}"
                 - name: COMMAND_GEOMETRY
                   value: "${COMMAND_GEOMETRY}"
                 - name: AIMD_BETA_ARREST

@@ -674,6 +674,11 @@ class joule_lambda_shadow:
     self._peak_retreat_frac: float = cfg.params.get("peak_retreat_frac", 0.70)
     self._attain_floor: float = cfg.params.get("attain_floor", 0.50)
     self._fall_bar: float = cfg.params.get("fall_bar", 0.20)
+    # Live mode (R10 phase 2): the multiplier REPLACES the staged joule
+    # weight (reward weight = -lambda). Flip only after a full shadow run
+    # validates the trajectory; the staged curriculum for this reward
+    # must be disabled when live or the two would fight.
+    self._apply_live: bool = bool(cfg.params.get("apply_live", False))
     self._lam = 0.0
     self._last_iter = -1
 
@@ -692,9 +697,10 @@ class joule_lambda_shadow:
     peak_retreat_frac: float = 0.70,
     attain_floor: float = 0.50,
     fall_bar: float = 0.20,
+    apply_live: bool = False,
   ) -> dict[str, torch.Tensor]:
     del (reward_name, lambda_cap, ramp_iters, retreat, peak_floor_frac)
-    del (peak_retreat_frac, attain_floor, fall_bar)
+    del (peak_retreat_frac, attain_floor, fall_bar, apply_live)
     self._tracker.finalize_episodes(env, env_ids)
     t = self._tracker
     strat = t.stratified_means()
@@ -714,6 +720,11 @@ class joule_lambda_shadow:
       elif gates_ok:
         self._lam = min(self._lam + self._eta, self._lambda_cap)
       # else: hold.
+    if self._apply_live:
+      try:
+        env.reward_manager.get_term_cfg(self._reward_name).weight = -self._lam
+      except (KeyError, AttributeError):
+        pass
     try:
       live_weight = float(env.reward_manager.get_term_cfg(self._reward_name).weight)
     except (KeyError, AttributeError, TypeError, ValueError):
