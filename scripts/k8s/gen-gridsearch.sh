@@ -253,6 +253,7 @@ export PUSH_COHORT_FRAC FRONTIER_HAZARD_BAR
 export JOULE_LAMBDA_SHADOW LAMBDA_CAP LAMBDA_RAMP_ITERS
 export COMMAND_GEOMETRY
 export AIMD_BETA_ARREST AIMD_ENVELOPE_SCALE
+export AIMD_PUSH_CONGEST_BAR AIMD_PUSH_GATE_EXCESS
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
@@ -1216,6 +1217,10 @@ _competence_defaults() {
   # code defaults (0.93 / 1.0).
   export AIMD_BETA_ARREST=""
   export AIMD_ENVELOPE_SCALE=""
+  # Split push-axis congestion (v28 postmortem); empty = code defaults
+  # (excess bar 0.30, rise gate 0.15).
+  export AIMD_PUSH_CONGEST_BAR=""
+  export AIMD_PUSH_GATE_EXCESS=""
 }
 
 

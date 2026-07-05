@@ -16,7 +16,14 @@ prefix as they appear in W&B.
   1.0 means no congestion yet.
 - `lin_vel_x_max`, `ang_vel_z_max` — the actual command range bounds d
   currently implies (m/s, rad/s). What the robot is being asked to do.
-- `push_scale` — push magnitude multiplier implied by d (0.75–2.0).
+- `push_scale` — push magnitude multiplier implied by d_push (0.75–2.0).
+- `difficulty_push` — the push axis's own AIMD scalar (v29+: control is
+  split per axis; v28 died of a cohort-blind single scalar — the pushed
+  cohort burned above the bar for ~1000 iters while the blended
+  population rate read healthy). Congestion signal is the EXCESS rate
+  (fast_fall_pushed − fast_fall_clean, bar 0.30); commands and pushes
+  now retreat independently, population emergency arrests both.
+- `ssthresh_push` — high-water mark for the push axis.
 - `competence_*` — copies of the tracker population means (see
   diagnostics below) snapshotted by this term.
 

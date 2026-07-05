@@ -1143,18 +1143,48 @@ class AimdController:
 
 
 class aimd_difficulty:
-  """Continuous TCP-style difficulty: one scalar drives commands + pushes."""
+  """Continuous TCP-style difficulty, split per axis (v28 postmortem).
+
+  v28 died of a cohort-blind governor: the pushed cohort burned above the
+  congestion bar for ~1000 iterations (fast_fall_pushed 0.34->0.62 from
+  iter ~970) while the single controller read the blended population rate
+  (~0.15, diluted by the healthy 70% clean cohort) - a third of every
+  batch was -10 poison, invisible to the one signal consumed, and the
+  single scalar could not have eased pushes without easing commands even
+  if it had seen it. Control now matches the stratified measurement:
+
+  - d_cmd (command ellipsoid scale): congestion on fast_fall_clean.
+  - d_push (push magnitude): congestion on the EXCESS rate
+    (fast_fall_pushed - fast_fall_clean), so it responds to push-specific
+    damage without double-charging when everything burns. Replay: at
+    v28's iter 970 the excess was 0.30 -> pushes would have cut 2.0x ->
+    1.4x right at burn onset while commands held.
+  - Population emergency (>= emergency_bar) arrests BOTH axes.
+
+  Falls back to blended signals when the cohort split is off
+  (PUSH_COHORT_FRAC=1: stratified means degrade to global means).
+  """
 
   def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
     self._command_name: str = cfg.params["command_name"]
     self._event_name: str = cfg.params["event_name"]
-    self._params = AimdParams(
+    base = dict(
       alpha=cfg.params.get("alpha", 0.002),
       beta=cfg.params.get("beta", 0.7),
-      congest_bar=cfg.params.get("congest_bar", 0.35),
       emergency_bar=cfg.params.get("emergency_bar", 0.55),
       gate_attain=cfg.params.get("gate_attain", 0.40),
       beta_arrest=cfg.params.get("beta_arrest", 0.93),
+    )
+    self._cmd_params = AimdParams(
+      congest_bar=cfg.params.get("congest_bar", 0.35), **base
+    )
+    # Push axis: bar 0.30 on the excess rate (healthy excess measured
+    # 0.15-0.18 at moderate push scales; 0.30 was the v28 burn onset).
+    # gate_fast 0.15 holds push growth while excess is elevated.
+    self._push_params = AimdParams(
+      congest_bar=cfg.params.get("push_congest_bar", 0.30),
+      gate_fast=cfg.params.get("push_gate_excess", 0.15),
+      **base,
     )
     # Envelope extension (v27 postmortem): capacity turned out to be AT or
     # above the L5 table, so d parked at the cap, the sawtooth never
@@ -1163,15 +1193,18 @@ class aimd_difficulty:
     # and AIMD oscillates at capacity instead of at an artificial ceiling.
     # Safe only in combination with arrest mode + ellipsoid geometry.
     self._envelope_scale: float = cfg.params.get("envelope_scale", 1.0)
-    self._controller = AimdController(self._params)
+    self._cmd_ctrl = AimdController(self._cmd_params)
+    self._push_ctrl = AimdController(self._push_params)
     self._tracker = get_competence_tracker(env)
     self._last_check_iter = -1
-    self._apply(env, 0.0)
+    self._apply(env, 0.0, 0.0)
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     del env_ids
 
-  def _apply(self, env: ManagerBasedRlEnv, d: float) -> dict[str, torch.Tensor]:
+  def _apply(
+    self, env: ManagerBasedRlEnv, d_cmd: float, d_push: float
+  ) -> dict[str, torch.Tensor]:
     lo, base_hi = COMMAND_LEVEL_TABLE[0], COMMAND_LEVEL_TABLE[-1]
     es = self._envelope_scale
     hi = {axis: (rng[0] * es, rng[1] * es) for axis, rng in base_hi.items()}
@@ -1179,19 +1212,21 @@ class aimd_difficulty:
     assert command_term is not None
     ccfg = command_term.cfg
     assert isinstance(ccfg, UniformVelocityCommandCfg)
-    ccfg.ranges.lin_vel_x = _lerp_range(lo["lin_vel_x"], hi["lin_vel_x"], d)
-    ccfg.ranges.lin_vel_y = _lerp_range(lo["lin_vel_y"], hi["lin_vel_y"], d)
-    ccfg.ranges.ang_vel_z = _lerp_range(lo["ang_vel_z"], hi["ang_vel_z"], d)
+    ccfg.ranges.lin_vel_x = _lerp_range(lo["lin_vel_x"], hi["lin_vel_x"], d_cmd)
+    ccfg.ranges.lin_vel_y = _lerp_range(lo["lin_vel_y"], hi["lin_vel_y"], d_cmd)
+    ccfg.ranges.ang_vel_z = _lerp_range(lo["ang_vel_z"], hi["ang_vel_z"], d_cmd)
 
     push_scale = (
-      PUSH_LEVEL_SCALES[0] + (PUSH_LEVEL_SCALES[-1] - PUSH_LEVEL_SCALES[0]) * d
+      PUSH_LEVEL_SCALES[0] + (PUSH_LEVEL_SCALES[-1] - PUSH_LEVEL_SCALES[0]) * d_push
     )
     ecfg = env.event_manager.get_term_cfg(self._event_name)
     ecfg.params["velocity_range"] = _scale_push_velocity_range(push_scale)
 
     return {
-      "difficulty": torch.tensor(d),
-      "ssthresh": torch.tensor(self._controller.ssthresh),
+      "difficulty": torch.tensor(d_cmd),
+      "difficulty_push": torch.tensor(d_push),
+      "ssthresh": torch.tensor(self._cmd_ctrl.ssthresh),
+      "ssthresh_push": torch.tensor(self._push_ctrl.ssthresh),
       "lin_vel_x_max": torch.tensor(ccfg.ranges.lin_vel_x[1]),
       "ang_vel_z_max": torch.tensor(ccfg.ranges.ang_vel_z[1]),
       "push_scale": torch.tensor(push_scale),
@@ -1210,21 +1245,34 @@ class aimd_difficulty:
     gate_attain: float = 0.40,
     beta_arrest: float = 0.93,
     envelope_scale: float = 1.0,
+    push_congest_bar: float = 0.30,
+    push_gate_excess: float = 0.15,
   ) -> dict[str, torch.Tensor]:
     del (command_name, event_name, alpha, beta, congest_bar, emergency_bar)
     del (gate_attain, beta_arrest, envelope_scale)
+    del (push_congest_bar, push_gate_excess)
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
+    strat = self._tracker.stratified_means()
     cur_iter = env.common_step_counter // _NUM_STEPS_PER_ENV
     if cur_iter != self._last_check_iter:
       self._last_check_iter = cur_iter
-      self._controller.update(
+      pop_fast = stats["fast_fall_rate"]
+      emergency = pop_fast >= self._cmd_params.emergency_bar
+      excess = max(0.0, strat["fast_fall_pushed"] - strat["fast_fall_clean"])
+      self._cmd_ctrl.update(
         cur_iter=cur_iter,
-        fast_fall_rate=stats["fast_fall_rate"],
-        wobble_ema=stats["wobble"],
-        attain_ema=stats["attain"],
+        fast_fall_rate=max(strat["fast_fall_clean"], pop_fast if emergency else 0.0),
+        wobble_ema=strat["clean_wobble"],
+        attain_ema=strat["clean_attain"],
       )
-    snapshot = self._apply(env, self._controller.d)
+      self._push_ctrl.update(
+        cur_iter=cur_iter,
+        fast_fall_rate=max(excess, pop_fast if emergency else 0.0),
+        wobble_ema=strat["pushed_wobble"],
+        attain_ema=strat["clean_attain"],
+      )
+    snapshot = self._apply(env, self._cmd_ctrl.d, self._push_ctrl.d)
     snapshot.update({f"competence_{k}": torch.tensor(v) for k, v in stats.items()})
     return snapshot
 

@@ -17,6 +17,7 @@ from mjlab.tasks.velocity.mdp.competence import (
   _apply_command_level,
   _apply_push_level,
   _scale_push_velocity_range,
+  aimd_difficulty,
 )
 from mjlab.tasks.velocity.mdp.velocity_command import (
   UniformVelocityCommand,
@@ -948,10 +949,10 @@ def test_aimd_envelope_scale_extends_lerp_target() -> None:
   ecfg.params = {}
   env.event_manager.get_term_cfg.return_value = ecfg
   term = aimd_difficulty(cfg, env)
-  term._apply(env, 1.0)
+  term._apply(env, 1.0, 0.0)
   assert ranges.lin_vel_x == pytest.approx((-0.975, 0.975))
   assert ranges.ang_vel_z == pytest.approx((-1.04, 1.04))
-  term._apply(env, 0.0)
+  term._apply(env, 0.0, 0.0)
   assert ranges.lin_vel_x == pytest.approx((-0.20, 0.20))
 
 
@@ -974,3 +975,77 @@ def test_per_axis_attainment_separates_directions() -> None:
   # EMA direction check on raw tensors (alpha=0.1, one episode).
   assert tracker.attain_x_ema[0].item() == pytest.approx(0.1, rel=0.01)
   assert tracker.attain_y_ema[0].item() == pytest.approx(0.0, abs=1e-6)
+
+
+def _split_aimd_term() -> "tuple[aimd_difficulty, MagicMock]":
+  cfg = MagicMock()
+  cfg.params = {"command_name": "twist", "event_name": "push_robot"}
+  env = _mock_tracked_env(fell=False)
+  env._competence_tracker = CompetenceTracker(env)
+  env._competence_tracker.set_push_cohort(0.5)
+  ranges = UniformVelocityCommandCfg.Ranges(
+    lin_vel_x=(0.0, 0.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0)
+  )
+  ccfg = UniformVelocityCommandCfg(
+    entity_name="robot", resampling_time_range=(3.0, 8.0), ranges=ranges
+  )
+  cterm = env.command_manager.get_term.return_value
+  cterm.cfg = ccfg
+  ecfg = MagicMock()
+  ecfg.params = {}
+  env.event_manager.get_term_cfg.return_value = ecfg
+  return aimd_difficulty(cfg, env), env
+
+
+def test_split_aimd_push_burn_cuts_pushes_not_commands() -> None:
+  """The v28 counterexample: pushed cohort burning (excess 0.30) while the
+  clean cohort is healthy must cut d_push and leave d_cmd climbing."""
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  term._cmd_ctrl.d = 0.9
+  term._push_ctrl.d = 0.9
+  tracker.attain_ema[:] = 0.6
+  tracker.wobble_ema[:] = 0.02
+  tracker.fast_fall_rate = 0.15  # blended: what fooled v28's controller
+  tracker.fast_fall_clean = 0.04
+  tracker.fast_fall_pushed = 0.34
+  env.common_step_counter = 1000 * _NUM_STEPS_PER_ENV
+  tracker._finalized_step = -1
+  out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+  assert out["difficulty_push"].item() == pytest.approx(0.9 * 0.7)
+  assert out["difficulty"].item() >= 0.9  # cmd axis unharmed (rose or held)
+
+
+def test_split_aimd_clean_burn_cuts_commands_not_pushes() -> None:
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  term._cmd_ctrl.d = 0.9
+  term._push_ctrl.d = 0.9
+  tracker.attain_ema[:] = 0.6
+  tracker.wobble_ema[:] = 0.02
+  tracker.fast_fall_rate = 0.42
+  tracker.fast_fall_clean = 0.40
+  tracker.fast_fall_pushed = 0.45  # excess only 0.05: pushes not to blame
+  env.common_step_counter = 1000 * _NUM_STEPS_PER_ENV
+  tracker._finalized_step = -1
+  out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+  assert out["difficulty"].item() == pytest.approx(0.9 * 0.7)
+  assert out["difficulty_push"].item() >= 0.9
+
+
+def test_split_aimd_population_emergency_arrests_both() -> None:
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  term._cmd_ctrl.d = 0.9
+  term._push_ctrl.d = 0.9
+  tracker.attain_ema[:] = 0.3
+  tracker.wobble_ema[:] = 0.4
+  tracker.fast_fall_rate = 0.60
+  tracker.fast_fall_clean = 0.30  # each below its own bar...
+  tracker.fast_fall_pushed = 0.50  # (excess 0.20 below push bar too)
+  env.common_step_counter = 1000 * _NUM_STEPS_PER_ENV
+  tracker._finalized_step = -1
+  out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+  # ...but the population emergency cuts both anyway.
+  assert out["difficulty"].item() < 0.9
+  assert out["difficulty_push"].item() < 0.9
