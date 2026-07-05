@@ -1517,6 +1517,41 @@ gen_v24c() {
 }
 
 
+# BATCH=v32: the endurance test — full stack + landing anneal, 4000 iters,
+# 8 GPUs. The bet: at capacity-plateau the anneal walks the LR to its
+# floor BEFORE the churn fuse burns (v30 replay: factor < 0.15 by the
+# ignition window), so the run converges at its peak instead of dying at
+# ~2100. Success = watchdog never fires, attain holds its plateau to
+# 4000, landing_factor bottoms out. Queue behind the v31 landing pair.
+gen_v32() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.3"
+  export LANDING_ANNEAL="1"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v32-anneal-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v32"
+  export RUN_NAME="clock_owned__v32-landing-anneal__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v32-anneal,landing,per-axis-aimd,ellipsoid,batch-v32,gridsearch"
+  emit_manifest "mj-gs-v32-anneal"
+}
+
+
 # BATCH=v31: the champion-harvest landing pair. v30 closed the book on
 # task-side rot rescue (5th demonstration: even cutting difficulty BEFORE
 # falls rose could not stop the spiral once churn began). The only
@@ -2084,6 +2119,7 @@ case "$BATCH" in
   v29) gen_v29; expected=1 ;;
   v30) gen_v30; expected=1 ;;
   v31) gen_v31; expected=2 ;;
+  v32) gen_v32; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
