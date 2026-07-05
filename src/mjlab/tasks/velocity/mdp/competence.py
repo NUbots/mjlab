@@ -208,6 +208,10 @@ class CompetenceTracker:
     self._track_weight = torch.zeros(n, device=self.device)
     self._attain_sum = torch.zeros(n, device=self.device)
     self._attain_weight = torch.zeros(n, device=self.device)
+    self._attain_x_sum = torch.zeros(n, device=self.device)
+    self._attain_x_weight = torch.zeros(n, device=self.device)
+    self._attain_y_sum = torch.zeros(n, device=self.device)
+    self._attain_y_weight = torch.zeros(n, device=self.device)
     self._wobble_sum = torch.zeros(n, device=self.device)
     self._step_count = torch.zeros(n, device=self.device)
     # Pessimistic init: a fresh policy must EARN competence. Zero-init would
@@ -217,6 +221,8 @@ class CompetenceTracker:
     self.fell_ema = torch.ones(n, device=self.device)
     self.ep_len_frac_ema = torch.zeros(n, device=self.device)
     self.attain_ema = torch.zeros(n, device=self.device)
+    self.attain_x_ema = torch.zeros(n, device=self.device)
+    self.attain_y_ema = torch.zeros(n, device=self.device)
     self.wobble_ema = torch.ones(n, device=self.device)
     self._finalized_step = -1
     # Fast population fall-rate channel: falls / episode-ends accumulated
@@ -359,6 +365,23 @@ class CompetenceTracker:
     self._attain_sum[meaningful] += attain[meaningful]
     self._attain_weight[meaningful] += 1.0
 
+    # Per-axis attainment (doc 15 R12): the level table's axis RATIOS are
+    # vibes-based; these measure achieved/commanded per direction, each
+    # sample weighted by that axis's share of command energy, so "when
+    # commands ask for x, do we deliver x" is answered independently of y.
+    for axis, sums, weights in (
+      (0, self._attain_x_sum, self._attain_x_weight),
+      (1, self._attain_y_sum, self._attain_y_weight),
+    ):
+      c = cmd_xy[:, axis]
+      w = (c * c) / cmd_sq.clamp(min=1e-6)
+      m = meaningful & (c.abs() >= 0.10)
+      # The mask guarantees |c| >= 0.10 so the division is well-defined;
+      # achieved/commanded is signed, so backpedaling reads negative.
+      ax = vel_xy[:, axis][m] / c[m]
+      sums[m] += ax * w[m]
+      weights[m] += w[m]
+
     # Frontier estimator exposure (clean cohort only): bucket walking steps
     # by commanded speed so falls can be attributed to the speed at which
     # they happened (binned Bernoulli estimate of P(fall | speed)).
@@ -431,6 +454,16 @@ class CompetenceTracker:
     updated_attain = alpha * attain + (1.0 - alpha) * self.attain_ema[ids]
     self.attain_ema[ids] = torch.where(has_attain, updated_attain, self.attain_ema[ids])
 
+    for sums, weights, ema in (
+      (self._attain_x_sum, self._attain_x_weight, self.attain_x_ema),
+      (self._attain_y_sum, self._attain_y_weight, self.attain_y_ema),
+    ):
+      val = torch.zeros(len(ids), device=self.device)
+      has = weights[ids] > 0
+      val[has] = sums[ids][has] / weights[ids][has]
+      upd = alpha * val + (1.0 - alpha) * ema[ids]
+      ema[ids] = torch.where(has, upd, ema[ids])
+
     steps = self._step_count[ids].clamp(min=1.0)
     wobble = self._wobble_sum[ids] / steps
     has_steps = self._step_count[ids] > 0
@@ -445,6 +478,10 @@ class CompetenceTracker:
     self._track_weight[ids] = 0.0
     self._attain_sum[ids] = 0.0
     self._attain_weight[ids] = 0.0
+    self._attain_x_sum[ids] = 0.0
+    self._attain_x_weight[ids] = 0.0
+    self._attain_y_sum[ids] = 0.0
+    self._attain_y_weight[ids] = 0.0
     self._wobble_sum[ids] = 0.0
     self._step_count[ids] = 0.0
 
@@ -542,6 +579,8 @@ class CompetenceTracker:
     out: dict[str, float] = {}
     for name, ema in (
       ("attain", self.attain_ema),
+      ("attain_x", self.attain_x_ema),
+      ("attain_y", self.attain_y_ema),
       ("wobble", self.wobble_ema),
       ("fell_ema", self.fell_ema),
       ("track_err_norm", self.track_err_ema),

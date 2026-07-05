@@ -953,3 +953,24 @@ def test_aimd_envelope_scale_extends_lerp_target() -> None:
   assert ranges.ang_vel_z == pytest.approx((-1.04, 1.04))
   term._apply(env, 0.0)
   assert ranges.lin_vel_x == pytest.approx((-0.20, 0.20))
+
+
+def test_per_axis_attainment_separates_directions() -> None:
+  """A robot that delivers x but not y must read high attain_x, low
+  attain_y (doc 15 R12: the table's axis ratios are vibes; measure them)."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  ct = env.command_manager.get_term.return_value
+  # Commanded diagonal; delivered: full x, none of y.
+  ct.vel_command_b = torch.tensor([[0.4, 0.3, 0.0], [0.4, 0.3, 0.0]])
+  ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.4, 0.0], [0.4, 0.0]])
+  for _ in range(5):
+    tracker.record_step(env)
+  env.common_step_counter = 48
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  strat = tracker.stratified_means()
+  assert strat["clean_attain_x"] > 0.05
+  assert abs(strat["clean_attain_y"]) < 0.01
+  # EMA direction check on raw tensors (alpha=0.1, one episode).
+  assert tracker.attain_x_ema[0].item() == pytest.approx(0.1, rel=0.01)
+  assert tracker.attain_y_ema[0].item() == pytest.approx(0.0, abs=1e-6)
