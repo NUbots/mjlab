@@ -1530,13 +1530,15 @@ gen_v28() {
   export CURRICULUM_STYLE="aimd"
   export COMPETENCE_DEMOTE_FAST_FELL="0.35"
   export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.3"
   export MAX_ITERATIONS="4000"
   export PHASE_ITERATIONS="2000"
   export SEED="2"
   export MJLAB_LOG_STAMP="v28-shadow-$(date +%Y%m%d-%H%M%S)"
   export EXPERIMENT_NAME="nugus_gridsearch_v28"
-  export RUN_NAME="clock_owned__v28-aimd-shadowlam__8gpu-6144__s2__${BATCH}"
-  export WANDB_TAGS="clock_owned,v28-shadow-lambda,push-cohort-0.3,std-min-0.13,8gpu,multinode,batch-v28,gridsearch"
+  export RUN_NAME="clock_owned__v28-arrest-ellipsoid__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v28-arrest,ellipsoid,envelope-1.3,shadow-lambda,push-cohort-0.3,std-min-0.13,8gpu,multinode,batch-v28,gridsearch"
   emit_manifest "mj-gs-v28-shadow"
 }
 

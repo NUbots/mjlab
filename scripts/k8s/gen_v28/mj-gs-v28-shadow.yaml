@@ -54,7 +54,7 @@ spec:
                 - name: NNODES
                   value: "2"
                 - name: MJLAB_LOG_STAMP
-                  value: "v28-shadow-20260705-131119"
+                  value: "v28-shadow-20260705-132346"
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
@@ -220,7 +220,11 @@ spec:
                 - name: LAMBDA_RAMP_ITERS
                   value: ""
                 - name: COMMAND_GEOMETRY
+                  value: "ellipsoid"
+                - name: AIMD_BETA_ARREST
                   value: ""
+                - name: AIMD_ENVELOPE_SCALE
+                  value: "1.3"
                 - name: COMPETENCE_COOLDOWN_ITERS
                   value: ""
                 - name: LINK_MASS_SCALE_MIN
@@ -242,11 +246,11 @@ spec:
                 - name: EXPERIMENT_NAME
                   value: "nugus_gridsearch_v28"
                 - name: RUN_NAME
-                  value: "clock_owned__v28-aimd-shadowlam__8gpu-6144__s2__v28"
+                  value: "clock_owned__v28-arrest-ellipsoid__8gpu-6144__s2__v28"
                 - name: WANDB_PROJECT
                   value: "mjlab"
                 - name: WANDB_TAGS
-                  value: "clock_owned,v28-shadow-lambda,push-cohort-0.3,std-min-0.13,8gpu,multinode,batch-v28,gridsearch"
+                  value: "clock_owned,v28-arrest,ellipsoid,envelope-1.3,shadow-lambda,push-cohort-0.3,std-min-0.13,8gpu,multinode,batch-v28,gridsearch"
                 # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
                 - name: GPU_IDS
                   value: "all"
@@ -259,7 +263,7 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "68b2e1f4e44089ef6db8692d5d09c37b0ef20d2c"
+                  value: "9bed0102303b175a7b4fa9346f85c6daf05efb52"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
