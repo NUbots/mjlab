@@ -1495,6 +1495,38 @@ gen_v24c() {
 }
 
 
+# BATCH=v27: v26 + the decoupling layer. AIMD with the ssthresh wart fixed
+# (full-rate climb), 30% push cohort (clean 70% = uncontaminated tracking
+# signal + deployment-matched distribution), frontier estimator and
+# push-to-fall histogram logging. Judge: sawtooth settling speed vs v26's
+# probe-rate crawl; frontier_speed vs the d the sawtooth discovers; the
+# recovery-time histogram calibrates any future horizon-based logic.
+gen_v27() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v27-aimd-cohort-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v27"
+  export RUN_NAME="clock_owned__v27-aimd-cohort30__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v27-aimd,push-cohort-0.3,frontier,std-min-0.13,8gpu,multinode,batch-v27,gridsearch"
+  emit_manifest "mj-gs-v27-aimd"
+}
+
+
 # BATCH=v26: AIMD continuous difficulty (doc 15 R8) — the TCP turn. One
 # scalar d drives command ranges (lerp L0->L5 envelope) and push magnitude
 # (0.75x->2.0x); additive increase 0.002/iter gated on health, 0.7x cut at
@@ -1875,6 +1907,7 @@ case "$BATCH" in
   v24d) gen_v24d; expected=1 ;;
   v25) gen_v25; expected=2 ;;
   v26) gen_v26; expected=1 ;;
+  v27) gen_v27; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
