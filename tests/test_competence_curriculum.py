@@ -18,6 +18,10 @@ from mjlab.tasks.velocity.mdp.competence import (
   _apply_push_level,
   _scale_push_velocity_range,
 )
+from mjlab.tasks.velocity.mdp.velocity_command import (
+  UniformVelocityCommand,
+  UniformVelocityCommandCfg,
+)
 
 _NUM_STEPS_PER_ENV = 24
 
@@ -186,11 +190,14 @@ def test_tracker_excludes_standing_from_track_err() -> None:
 
   command_term = MagicMock()
   command_term.is_standing_env = torch.tensor([True, False])
-  command_term.vel_command_b = torch.tensor([[0.0, 0.0], [0.5, 0.0]])
+  command_term.vel_command_b = torch.tensor([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]])
   command_term.robot.data.root_link_lin_vel_b = torch.tensor([[0.0, 0.0], [0.4, 0.0]])
   command_term.robot.data.projected_gravity_b = torch.tensor(
     [[0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]
   )
+  command_term.cfg.ranges.lin_vel_x = (-0.75, 0.75)
+  command_term.cfg.ranges.lin_vel_y = (-0.45, 0.45)
+  command_term.cfg.ranges.ang_vel_z = (-0.80, 0.80)
   env.command_manager.get_term.return_value = command_term
 
   tracker = CompetenceTracker(env)
@@ -214,11 +221,14 @@ def _mock_tracked_env(
   env.termination_manager.get_term.return_value = torch.tensor([fell, fell])
   command_term = MagicMock()
   command_term.is_standing_env = torch.tensor([False, False])
-  command_term.vel_command_b = torch.tensor([[0.5, 0.0], [0.5, 0.0]])
+  command_term.vel_command_b = torch.tensor([[0.5, 0.0, 0.0], [0.5, 0.0, 0.0]])
   command_term.robot.data.root_link_lin_vel_b = torch.tensor([[0.45, 0.0], [0.45, 0.0]])
   command_term.robot.data.projected_gravity_b = torch.tensor(
     [[0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]
   )
+  command_term.cfg.ranges.lin_vel_x = (-0.75, 0.75)
+  command_term.cfg.ranges.lin_vel_y = (-0.45, 0.45)
+  command_term.cfg.ranges.ang_vel_z = (-0.80, 0.80)
   env.command_manager.get_term.return_value = command_term
   return env
 
@@ -369,7 +379,7 @@ def test_attainment_true_fraction_at_small_commands() -> None:
   (v20 pair 3: attain 0.17-0.25 while every other gate passed)."""
   env = _mock_tracked_env(fell=False)
   ct = env.command_manager.get_term.return_value
-  ct.vel_command_b = torch.tensor([[0.18, 0.0], [0.18, 0.0]])
+  ct.vel_command_b = torch.tensor([[0.18, 0.0, 0.0], [0.18, 0.0, 0.0]])
   ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.18, 0.0], [0.18, 0.0]])
   tracker = CompetenceTracker(env)
   for _ in range(10):
@@ -378,7 +388,7 @@ def test_attainment_true_fraction_at_small_commands() -> None:
   # EMA from pessimistic 0 with alpha 0.1 and a perfect episode -> 0.1.
   assert tracker.attain_ema[0].item() == pytest.approx(0.1, abs=0.01)
   # Commands below the 0.15 filter contribute no attainment weight.
-  ct.vel_command_b = torch.tensor([[0.05, 0.0], [0.05, 0.0]])
+  ct.vel_command_b = torch.tensor([[0.05, 0.0, 0.0], [0.05, 0.0, 0.0]])
   tracker2 = CompetenceTracker(env)
   tracker2.record_step(env)
   assert tracker2._attain_weight.sum().item() == 0.0
@@ -662,7 +672,7 @@ def test_frontier_buckets_charge_falls_to_speed() -> None:
   tracker.set_push_cohort(0.5)  # env 1 is clean
   # Command 0.55 m/s -> bucket 5.
   ct = env.command_manager.get_term.return_value
-  ct.vel_command_b = torch.tensor([[0.55, 0.0], [0.55, 0.0]])
+  ct.vel_command_b = torch.tensor([[0.55, 0.0, 0.0], [0.55, 0.0, 0.0]])
   ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.5, 0.0], [0.5, 0.0]])
   tracker.record_step(env)
   assert tracker._cur_bucket.tolist() == [5, 5]
@@ -791,3 +801,90 @@ def test_joule_shadow_freezes_on_sandbagging() -> None:
   assert out["gates_ok"].item() == 0.0
   assert out["style_broken"].item() == 0.0
   assert term._lam == pytest.approx(0.0)
+
+
+def _ellipsoid_command_term() -> "UniformVelocityCommand":
+  """Build a real UniformVelocityCommand with mocked env internals."""
+  cfg = UniformVelocityCommandCfg(
+    entity_name="robot",
+    resampling_time_range=(3.0, 8.0),
+    ranges=UniformVelocityCommandCfg.Ranges(
+      lin_vel_x=(-0.75, 0.75),
+      lin_vel_y=(-0.45, 0.45),
+      ang_vel_z=(-0.80, 0.80),
+    ),
+    command_geometry="ellipsoid",
+  )
+  env = MagicMock()
+  env.device = "cpu"
+  env.num_envs = 512
+  term = UniformVelocityCommand.__new__(UniformVelocityCommand)
+  term.cfg = cfg
+  term._env = env
+  term.vel_command_b = torch.zeros(512, 3)
+  term.vel_command_w = torch.zeros(512, 3)
+  term.heading_target = torch.zeros(512)
+  term.is_heading_env = torch.zeros(512, dtype=torch.bool)
+  term.is_standing_env = torch.zeros(512, dtype=torch.bool)
+  term.has_stop_tail = torch.zeros(512, dtype=torch.bool)
+  term.is_world_env = torch.zeros(512, dtype=torch.bool)
+  term.is_forward_env = torch.zeros(512, dtype=torch.bool)
+  term.robot = MagicMock()
+  return term
+
+
+def test_ellipsoid_geometry_removes_corners() -> None:
+  """No sample may exceed Mahalanobis radius 1; axis maxima stay in play."""
+  torch.manual_seed(0)
+  term = _ellipsoid_command_term()
+  ids = torch.arange(512)
+  term._resample_command(ids)
+  cmd = term.vel_command_b
+  rho = torch.sqrt(
+    (cmd[:, 0] / 0.75) ** 2 + (cmd[:, 1] / 0.45) ** 2 + (cmd[:, 2] / 0.80) ** 2
+  )
+  assert rho.max().item() <= 1.0 + 1e-5
+  # The ellipsoid must still reach near the axis maxima (radius use > 0.95
+  # somewhere in 512 draws - the surface is populated, not shrunk).
+  assert rho.max().item() > 0.90
+  # And direction is preserved for projected samples: no axis sign flips
+  # relative to a fresh box draw is impossible to check directly, but the
+  # distribution must keep substantial spread in every axis.
+  assert cmd[:, 0].abs().max().item() > 0.55
+  assert cmd[:, 2].abs().max().item() > 0.55
+
+
+def test_box_geometry_unchanged_default() -> None:
+  torch.manual_seed(0)
+  term = _ellipsoid_command_term()
+  term.cfg.command_geometry = "box"
+  ids = torch.arange(512)
+  term._resample_command(ids)
+  cmd = term.vel_command_b
+  rho = torch.sqrt(
+    (cmd[:, 0] / 0.75) ** 2 + (cmd[:, 1] / 0.45) ** 2 + (cmd[:, 2] / 0.80) ** 2
+  )
+  # Box sampling routinely exceeds rho 1 (the corners exist).
+  assert rho.max().item() > 1.2
+
+
+def test_rho_buckets_attribute_corner_falls() -> None:
+  """Under box geometry a corner command lands in a high rho bucket."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(0.5)
+  ct = env.command_manager.get_term.return_value
+  ranges = MagicMock()
+  ranges.lin_vel_x = (-0.75, 0.75)
+  ranges.lin_vel_y = (-0.45, 0.45)
+  ranges.ang_vel_z = (-0.80, 0.80)
+  ct.cfg.ranges = ranges
+  # Corner command: all axes near max -> rho ~ sqrt(3) ~ 1.69 -> bucket 7.
+  ct.vel_command_b = torch.tensor([[0.74, 0.44, 0.79], [0.74, 0.44, 0.79]])
+  ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.3, 0.1], [0.3, 0.1]])
+  tracker.record_step(env)
+  assert tracker._cur_rho_bucket.tolist() == [7, 7]
+  env.termination_manager.get_term.return_value = torch.tensor([True, True])
+  env.common_step_counter = 48
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker._rho_falls[7].item() == pytest.approx(1.0)  # clean env only

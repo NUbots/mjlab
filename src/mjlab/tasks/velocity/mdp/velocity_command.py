@@ -109,6 +109,30 @@ class UniformVelocityCommand(CommandTerm):
     self.vel_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
     self.vel_command_b[env_ids, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
 
+    if self.cfg.command_geometry == "ellipsoid":
+      # Constrain the joint command to the axis-scaled ellipsoid: samples
+      # with Mahalanobis radius rho > 1 (the box corners) are re-placed
+      # along their ray with the uniform-in-ball radial profile
+      # (r ~ u^(1/3)), so axis maxima stay reachable alone while combined
+      # demands trade off. Approximately uniform with mild oversampling
+      # of diagonal directions (the re-placed corner mass).
+      radii = torch.tensor(
+        [
+          max(abs(self.cfg.ranges.lin_vel_x[0]), abs(self.cfg.ranges.lin_vel_x[1])),
+          max(abs(self.cfg.ranges.lin_vel_y[0]), abs(self.cfg.ranges.lin_vel_y[1])),
+          max(abs(self.cfg.ranges.ang_vel_z[0]), abs(self.cfg.ranges.ang_vel_z[1])),
+        ],
+        device=self.device,
+      ).clamp(min=1e-6)
+      cmd = self.vel_command_b[env_ids, :3]
+      rho = torch.norm(cmd / radii, dim=-1)
+      outside = rho > 1.0
+      if outside.any():
+        u = torch.rand(int(outside.sum()), device=self.device)
+        scale = u.pow(1.0 / 3.0) / rho[outside]
+        cmd[outside] *= scale.unsqueeze(-1)
+        self.vel_command_b[env_ids, :3] = cmd
+
     # Sample heading targets if heading control is enabled
     if self.cfg.heading_command:
       assert self.cfg.ranges.heading is not None
@@ -368,6 +392,13 @@ class UniformVelocityCommandCfg(CommandTermCfg):
   lin_vel_x, zero lin_vel_y and ang_vel_z). Increases training coverage for
   straight-line walking, which is important for stair climbing."""
   init_velocity_prob: float = 0.0
+  command_geometry: str = "box"
+  """Joint geometry of (vx, vy, wz) sampling: "box" draws each axis
+  independently (corners demand all axes at max simultaneously — e.g.
+  0.87 m/s diagonal while turning at full rate, beyond what any single
+  axis promises); "ellipsoid" constrains the Mahalanobis radius
+  (vx/Rx)^2 + (vy/Ry)^2 + (wz/Rw)^2 <= 1 so axis maxima stay reachable
+  alone but trade off against each other jointly (doc 15 R11)."""
 
   @dataclass
   class Ranges:

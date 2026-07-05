@@ -251,6 +251,23 @@ feasibility replays: v25-slow's slide must trigger retreat ahead of the
 T4 monitor bar; a healthy plateau must climb at η. Rides along on v28;
 flips live only after one clean shadow run.
 
+### R11 — Command geometry: the box corners were hidden hard tasks
+
+User insight (2026-07-05): (vx, vy, wz) are sampled independently, so
+the box corners demand all axes at max simultaneously — at d=1.0 that is
+0.87 m/s of combined translation while turning at 0.8 rad/s, beyond what
+any single axis promises, sampled as often as anywhere else, plausibly a
+hidden contributor to the L5 burn (every discrete jump also teleported
+the corners outward). Fix: `command_geometry="ellipsoid"` constrains the
+Mahalanobis radius rho = sqrt((vx/Rx)^2+(vy/Ry)^2+(wz/Rw)^2) <= 1 —
+axis maxima stay reachable alone but trade off jointly (corner samples
+re-placed along their ray with the uniform-in-ball radial profile; mild
+diagonal oversampling, documented). The frontier estimator additionally
+buckets hazards by rho, so under box sampling the corner cost is now
+MEASURED (v28 will show it) before ellipsoid sampling removes it (v29).
+Direction-resolved hazards (is x+w easier than y+w?) are the phase-3
+upgrade: sample from the measured capability region + probe shell.
+
 ### Standing safety rails (all runs from v27 on)
 
 - track_reward_watchdog: armed once Episode_Reward/track_linear_velocity

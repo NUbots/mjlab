@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import torch
 
@@ -12,6 +12,7 @@ from mjlab.tasks.velocity.mdp.velocity_command import UniformVelocityCommandCfg
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.managers.curriculum_manager import CurriculumTermCfg
+  from mjlab.tasks.velocity.mdp.velocity_command import UniformVelocityCommand
 
 _NUM_STEPS_PER_ENV = 24
 _MIN_CMD_NORM = 0.2
@@ -256,6 +257,15 @@ class CompetenceTracker:
     self.bucket_hazard = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._cur_bucket = torch.full((n,), -1, dtype=torch.long, device=self.device)
     self._bucket_next_step = 0
+    # Mahalanobis-radius buckets (doc 15 R11): rho normalizes (vx, vy, wz)
+    # by the current per-axis maxima, so hazards are measured in the
+    # geometry that respects axis coupling — under box sampling the high
+    # bins ARE the corners (rho spans up to ~1.7), under ellipsoid
+    # sampling rho <= 1 by construction. 8 bins of width 0.2 over [0, 1.6).
+    self._rho_steps = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self._rho_falls = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self.rho_hazard = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self._cur_rho_bucket = torch.full((n,), -1, dtype=torch.long, device=self.device)
     try:
       self._step_dt = float(env.step_dt)
     except (TypeError, ValueError):
@@ -313,9 +323,10 @@ class CompetenceTracker:
       self.fast_fall_rate = float(state["fast_fall_rate"])
 
   def record_step(self, env: ManagerBasedRlEnv) -> None:
-    command_term = env.command_manager.get_term("twist")
-    if command_term is None:
+    term = env.command_manager.get_term("twist")
+    if term is None:
       return
+    command_term = cast("UniformVelocityCommand", term)
     # Wobble (near-fall precursor): fraction of steps with tilt > ~25deg,
     # counted for ALL envs (a tilting stander is also incompetent).
     grav_xy = command_term.robot.data.projected_gravity_b[:, :2]
@@ -357,6 +368,25 @@ class CompetenceTracker:
     if expose.any():
       self._bucket_steps.scatter_add_(
         0, bucket[expose], torch.ones(int(expose.sum()), device=self.device)
+      )
+
+    # Mahalanobis-radius exposure: normalize by the CURRENT per-axis
+    # maxima from the live command cfg (they move with the curriculum).
+    ranges = command_term.cfg.ranges
+    rx = max(abs(ranges.lin_vel_x[0]), abs(ranges.lin_vel_x[1]), 1e-6)
+    ry = max(abs(ranges.lin_vel_y[0]), abs(ranges.lin_vel_y[1]), 1e-6)
+    rw = max(abs(ranges.ang_vel_z[0]), abs(ranges.ang_vel_z[1]), 1e-6)
+    wz = command_term.vel_command_b[:, 2]
+    rho = torch.sqrt(
+      (cmd_xy[:, 0] / rx) ** 2 + (cmd_xy[:, 1] / ry) ** 2 + (wz / rw) ** 2
+    )
+    rho_bucket = (rho / 0.2).long().clamp(0, self.n_cmd_buckets - 1)
+    self._cur_rho_bucket = torch.where(
+      walking, rho_bucket, torch.full_like(rho_bucket, -1)
+    )
+    if expose.any():
+      self._rho_steps.scatter_add_(
+        0, rho_bucket[expose], torch.ones(int(expose.sum()), device=self.device)
       )
 
   def finalize_episodes(
@@ -450,6 +480,10 @@ class CompetenceTracker:
     if fell_clean_bucketed.any():
       fb = self._cur_bucket[ids][fell_clean_bucketed]
       self._bucket_falls.scatter_add_(0, fb, torch.ones(len(fb), device=self.device))
+    fell_rho = clean & (fell > 0) & (self._cur_rho_bucket[ids] >= 0)
+    if fell_rho.any():
+      rb = self._cur_rho_bucket[ids][fell_rho]
+      self._rho_falls.scatter_add_(0, rb, torch.ones(len(rb), device=self.device))
 
     if env.common_step_counter >= self._fast_next_step:
       # Require ~0.2% of envs to have finished an episode before trusting
@@ -481,6 +515,10 @@ class CompetenceTracker:
         self.bucket_hazard = 0.3 * hazard + 0.7 * self.bucket_hazard
         self._bucket_steps.zero_()
         self._bucket_falls.zero_()
+        rho_hazard = self._rho_falls / self._rho_steps.clamp(min=1.0)
+        self.rho_hazard = 0.3 * rho_hazard + 0.7 * self.rho_hazard
+        self._rho_steps.zero_()
+        self._rho_falls.zero_()
         self._bucket_next_step = env.common_step_counter + 50 * _NUM_STEPS_PER_ENV
 
   def population_means(self) -> dict[str, float]:
@@ -693,6 +731,16 @@ class competence_diagnostics:
       else:
         break
     out["frontier_speed"] = torch.tensor(frontier)
+    rho_hazards = self._tracker.rho_hazard
+    for i in range(self._tracker.n_cmd_buckets):
+      out[f"hazard_rho_{i}"] = rho_hazards[i].clone()
+    frontier_rho = 0.1
+    for i in range(self._tracker.n_cmd_buckets):
+      if rho_hazards[i].item() <= self._hazard_bar:
+        frontier_rho = 0.2 * i + 0.1
+      else:
+        break
+    out["frontier_rho"] = torch.tensor(frontier_rho)
     counts = self._tracker.push_fall_dt_counts
     total = counts.sum().clamp(min=1.0)
     for i, edge in enumerate(self._tracker.push_fall_dt_edges):

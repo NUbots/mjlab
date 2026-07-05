@@ -1011,6 +1011,14 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   twist_cmd = cfg.commands["twist"]
   assert isinstance(twist_cmd, UniformVelocityCommandCfg)
   twist_cmd.viz.z_offset = 1.15
+  # Joint command geometry (doc 15 R11): "ellipsoid" removes the box
+  # corners (combined-axis demands beyond any single axis's promise).
+  twist_cmd.command_geometry = _env_str("COMMAND_GEOMETRY", "box")
+  if twist_cmd.command_geometry not in ("box", "ellipsoid"):
+    raise ValueError(
+      "COMMAND_GEOMETRY must be 'box' or 'ellipsoid'; "
+      f"got {twist_cmd.command_geometry!r}"
+    )
   twist_cmd.rel_stop_envs = 0.5
   twist_cmd.stop_ramp_time = 0.75
   twist_cmd.stop_settle_time = 0.75
