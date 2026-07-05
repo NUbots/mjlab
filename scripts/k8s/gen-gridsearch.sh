@@ -1474,6 +1474,50 @@ gen_v24c() {
 }
 
 
+# BATCH=v25: content-extension A/B on the two free nodes (4 GPUs each,
+# proven single-node path). The era law: runs die ~700-900 iters after the
+# ladder stops moving. Both arms extend content with env knobs only:
+# v25-slow doubles per-rung tenure (cooldown 300; content ~2400; land 2600)
+# testing whether longer rung tenure beats v24d's brief 500-iter L4 stay;
+# v25-push extends the ladder past cmd-L4 with push rungs L3-L5 (scales
+# 1.5/1.75/2.0 — robustness content, the sim2real play; land 2000).
+gen_v25() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="1"
+  export MULTINODE=""
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export ADAPTIVE_CMD_LMAX="4"
+  export COMPETENCE_PROMOTE_ATTAIN="0.50"
+  export COMPETENCE_DEMOTE_ATTAIN="0.35"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export EXPERIMENT_NAME="nugus_gridsearch_v25"
+
+  export COMPETENCE_COOLDOWN_ITERS="300"
+  export MAX_ITERATIONS="2600"
+  export MJLAB_LOG_STAMP="v25-slow-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v25-slow-cd300__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v25-slow,cooldown-300,lmax4,batch-v25,gridsearch"
+  emit_manifest "mj-gs-v25-slow"
+
+  export COMPETENCE_COOLDOWN_ITERS=""
+  export ADAPTIVE_PUSH_LMAX="5"
+  export MAX_ITERATIONS="2000"
+  export MJLAB_LOG_STAMP="v25-push-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v25-push-lmax5__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v25-push,push-lmax5,lmax4,batch-v25,gridsearch"
+  emit_manifest "mj-gs-v25-push"
+}
+
+
 # BATCH=v24d: the planned landing. v24c proved the corridor (bar 0.50:
 # L0->L4 by 1157, attain RECORD 0.701 at 1424, ~800 healthy iters at L4)
 # and then proved the law again: saturation at the capped top rung lit the
@@ -1775,6 +1819,7 @@ case "$BATCH" in
   v24b) gen_v24b; expected=1 ;;
   v24c) gen_v24c; expected=1 ;;
   v24d) gen_v24d; expected=1 ;;
+  v25) gen_v25; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
