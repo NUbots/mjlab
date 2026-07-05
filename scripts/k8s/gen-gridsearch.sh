@@ -1516,6 +1516,43 @@ gen_v24c() {
 }
 
 
+# BATCH=v30: v29 + attain-slide congestion. v29 proved everything else:
+# split governor (push axis sawtoothed independently, no poison), record
+# policy (attain 0.712 / x 0.74 / y 0.58 at the FULL extended envelope
+# with 1.5x pushes), watchdog fail-fast. It died only of d_cmd parking at
+# the cap (over-capacity commands under-track rather than fall under
+# ellipsoid geometry, so fall-congestion never binds). v30 gives the
+# command axis its second congestion signal: attain below 0.95x trailing
+# max = cut. Prediction: d_cmd sawtooths off the attain ceiling around
+# 0.85-1.0, no parking, no fuse, first full-length healthy 4000.
+gen_v30() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.3"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v30-slide-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v30"
+  export RUN_NAME="clock_owned__v30-attain-slide__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v30-slide,per-axis-aimd,ellipsoid,push-cohort-0.3,std-min-0.13,8gpu,multinode,batch-v30,gridsearch"
+  emit_manifest "mj-gs-v30-slide"
+}
+
+
 # BATCH=v29: the split-governor run. v28 proved the stack mechanically
 # (arrest ferocious, ellipsoid+envelope let the CLEAN cohort walk the
 # extended ranges at fast-fall 0.03-0.07, watchdog failed the rot fast)
@@ -2002,6 +2039,7 @@ case "$BATCH" in
   v27) gen_v27; expected=1 ;;
   v28) gen_v28; expected=1 ;;
   v29) gen_v29; expected=1 ;;
+  v30) gen_v30; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
