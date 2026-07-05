@@ -98,6 +98,15 @@ class RslRlBaseRunnerCfg:
   )
   save_interval: int = 50
   """The number of iterations between saves."""
+  obs_norm_freeze_iters: int = 0
+  """Freeze actor/critic observation normalizers after this many
+  iterations' worth of samples (doc 15 R15). rsl-rl's
+  EmpiricalNormalization otherwise chases the policy's own observation
+  distribution for the entire run at a 1/count-lagged rate, immune to
+  the learning rate — the lagged-follower feedback implicated in the
+  ~1600-iteration ignition (v32 killed the optimizer-step theory: the
+  attainment slide rate was identical at LR 1e-5 and 2e-4). 0 = never
+  freeze (legacy rsl-rl behavior)."""
   experiment_name: str = "exp1"
   """Directory name used to group runs under
   ``logs/rsl_rl/{experiment_name}/``."""

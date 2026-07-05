@@ -16,6 +16,11 @@ def _env_bool(name: str, default: bool = False) -> bool:
   return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_int(name: str, default: int) -> int:
+  raw = os.environ.get(name, "")
+  return int(raw) if raw.strip() else default
+
+
 def _env_float(name: str, default: float) -> float:
   raw = os.environ.get(name)
   return default if raw in (None, "") else float(raw)
@@ -79,4 +84,5 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     save_interval=250,
     num_steps_per_env=24,
     max_iterations=20_000,
+    obs_norm_freeze_iters=_env_int("OBS_NORM_FREEZE_ITERS", 500),
   )

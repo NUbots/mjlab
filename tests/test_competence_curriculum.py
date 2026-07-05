@@ -1186,3 +1186,42 @@ def test_runner_wrapper_scales_desired_kl() -> None:
   assert calls[0] == pytest.approx(0.01)
   assert calls[1] == pytest.approx(0.0025)
   assert calls[2] == pytest.approx(2e-4)
+
+
+def test_obs_norm_freeze_sets_until_and_stops_updates() -> None:
+  """R15: the freeze must set `until` on every EmpiricalNormalization in
+  actor/critic, and a normalizer past its budget must stop learning."""
+  from rsl_rl.modules import EmpiricalNormalization
+
+  from mjlab.rl.runner import MjlabOnPolicyRunner
+
+  runner = MjlabOnPolicyRunner.__new__(MjlabOnPolicyRunner)
+  runner.cfg = {"num_steps_per_env": 24}
+  env = MagicMock()
+  env.num_envs = 100
+  runner.env = env
+  norm_a = EmpiricalNormalization(4)
+  norm_c = EmpiricalNormalization(4)
+  actor = torch.nn.Sequential(norm_a)
+  critic = torch.nn.Sequential(norm_c)
+  alg = MagicMock()
+  alg.actor = actor
+  alg.critic = critic
+  runner.alg = alg
+
+  runner._apply_obs_norm_freeze({"obs_norm_freeze_iters": 500})
+  assert norm_a.until == 500 * 24 * 100
+  assert norm_c.until == 500 * 24 * 100
+
+  # Past the budget, update() is a no-op.
+  norm_a.count.fill_(norm_a.until + 1)
+  mean_before = norm_a._mean.clone()
+  norm_a.train()
+  norm_a.update(torch.randn(64, 4) + 5.0)
+  assert torch.allclose(norm_a._mean, mean_before)
+
+  # Zero/absent knob leaves normalizers unfrozen (legacy).
+  norm_b = EmpiricalNormalization(4)
+  alg.actor = torch.nn.Sequential(norm_b)
+  runner._apply_obs_norm_freeze({})
+  assert norm_b.until is None

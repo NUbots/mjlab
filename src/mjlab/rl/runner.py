@@ -31,6 +31,29 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
             train_cfg[key].pop(opt, None)
     super().__init__(env, train_cfg, log_dir, device)
     self._install_landing_anneal()
+    self._apply_obs_norm_freeze(train_cfg)
+
+  def _apply_obs_norm_freeze(self, train_cfg: dict) -> None:
+    """Freeze empirical obs normalizers after a sample budget (R15).
+
+    rsl-rl constructs EmpiricalNormalization without ``until``, so the
+    running mean/var chase the policy's own observation distribution for
+    the whole run - a learning-rate-independent lagged feedback loop.
+    ``until`` is checked dynamically in update(), so setting it after
+    construction takes effect immediately once the count exceeds it.
+    """
+    freeze_iters = int(train_cfg.get("obs_norm_freeze_iters", 0) or 0)
+    if freeze_iters <= 0:
+      return
+    from rsl_rl.modules import EmpiricalNormalization
+
+    until = int(freeze_iters * int(self.cfg["num_steps_per_env"]) * self.env.num_envs)
+    for model in (getattr(self.alg, "actor", None), getattr(self.alg, "critic", None)):
+      if model is None:
+        continue
+      for module in model.modules():
+        if isinstance(module, EmpiricalNormalization):
+          module.until = until
 
   def _install_landing_anneal(self) -> None:
     """Scale desired_kl by the env-computed landing factor before each

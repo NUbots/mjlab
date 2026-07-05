@@ -154,6 +154,18 @@ crashes — that is by design, not a bug).
 - `swing_clock_error_mean` — timing mismatch between actual swing and
   the nominal clock.
 
+## Observation normalizer (R15 — no logged key, but read this)
+
+rsl-rl's EmpiricalNormalization updates its running mean/var every step
+forever by default, at a 1/count-lagged rate — a learning-rate-immune
+feedback loop between the policy's behavior and its own input scaling,
+implicated as the root driver of the ~1600-iteration ignition (v32:
+identical attainment-slide rate at LR 1e-5 and 2e-4 — a frozen policy
+cannot slide; its input normalization can). From R15 on, normalizers
+freeze after OBS_NORM_FREEZE_ITERS (default 500) iterations' worth of
+samples. If a post-R15 run still ignites at ~1600, this hypothesis is
+dead and the next suspect list opens.
+
 ## Core rsl-rl keys (the confusing ones)
 
 - `Episode_Termination/fell_over` — falls per STEP averaged over the
