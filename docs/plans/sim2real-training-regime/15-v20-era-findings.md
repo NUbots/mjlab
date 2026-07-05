@@ -268,6 +268,47 @@ MEASURED (v28 will show it) before ellipsoid sampling removes it (v29).
 Direction-resolved hazards (is x+w easier than y+w?) are the phase-3
 upgrade: sample from the measured capability region + probe shell.
 
+### R12 — The split governor (v28 postmortem) + per-axis attainment
+
+v28 (arrest + ellipsoid + envelope 1.3 + cohort 0.3 + shadow-lambda) died
+at iter 2143 BY WATCHDOG — the first fail-fast execution, exactly per the
+user rule — and its autopsy is the cohort design paying off:
+
+- The pushed cohort burned above the congestion bar for ~1000 iters
+  (fast_fall_pushed 0.34 at iter 970 → 0.62 at 1920) while the single
+  AIMD scalar consumed the BLENDED population rate (~0.15, diluted by
+  the healthy 70% clean cohort). A third of every gradient batch was
+  −10 poison, invisible to the one signal in charge; and the single
+  scalar could not have eased pushes without easing commands anyway.
+- Everything else validated: the clean cohort walked the extended
+  ellipsoid envelope at fast-fall 0.03–0.07 (corners fix + roof-raise
+  both proven — the vibes-based table was indeed conservative for
+  combined-constrained commands); arrest mode was ferocious when it
+  finally fired (d 1.0→0.04 in ~100 iters vs v27's 100+ iters to 0.28);
+  the watchdog called the rot correctly.
+- Recovery-time histogram: only 36% of push-attributed falls occur
+  within 2 s of the push (62% @4 s, 92% @8 s). The damage tail is
+  SECONDS long — cohort attribution was the only correct design; any
+  horizon would have misattributed most of the tail.
+
+Fix (661e46c): control now matches the stratified measurement. d_cmd is
+governed by fast_fall_clean (bar 0.35); d_push by the EXCESS rate
+(fast_fall_pushed − fast_fall_clean, bar 0.30 — healthy excess measured
+0.15–0.18; v28's burn onset read 0.30 exactly when the cut was needed);
+population ≥ 0.55 arrests both. Replay tests encode the v28
+counterexample. Also added: per-axis (x/y) attainment logging — the
+command table's axis ratios are vibes-based (user); these measure the
+robot's real capability anatomy before any ellipsoid shape adaptation
+(phase B: log-normalized per-axis radius multipliers with floors and an
+all-axes gate, built only if the curves justify it).
+
+v29 (running): split governor, same stack. Predictions on record —
+pushes sawtooth around the excess bar (~1.4–1.6×), clean commands hold
+the extended envelope, and if rot still appears with the poison stream
+gone, pure cap-saturation churn is isolated (next lever: landing
+anneal). Contingencies staged env-only at the same pin: v29b-push-soft
+(bars 0.22/0.10), v29-landing (1800), v29-s2 (replicate).
+
 ### Standing safety rails (all runs from v27 on)
 
 - track_reward_watchdog: armed once Episode_Reward/track_linear_velocity
