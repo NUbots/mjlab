@@ -231,6 +231,8 @@ spec:
                   value: "${AIMD_PUSH_CONGEST_BAR}"
                 - name: AIMD_PUSH_GATE_EXCESS
                   value: "${AIMD_PUSH_GATE_EXCESS}"
+                - name: AIMD_ATTAIN_SLIDE_FRAC
+                  value: "${AIMD_ATTAIN_SLIDE_FRAC}"
                 - name: COMPETENCE_COOLDOWN_ITERS
                   value: "${COMPETENCE_COOLDOWN_ITERS}"
                 - name: LINK_MASS_SCALE_MIN

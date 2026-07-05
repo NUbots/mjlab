@@ -24,6 +24,12 @@ prefix as they appear in W&B.
   (fast_fall_pushed − fast_fall_clean, bar 0.30); commands and pushes
   now retreat independently, population emergency arrests both.
 - `ssthresh_push` — high-water mark for the push axis.
+- `attain_trailing_max` — sticky running max of clean attainment
+  (~14k-iter half-life decay). The attain-slide congestion reference
+  (v30+): clean_attain below 95% of this fires a d_cmd cut even with
+  falls quiet — under ellipsoid geometry, over-capacity commands
+  under-track instead of falling, so the churn signature (attain slide)
+  is the command axis's second congestion signal.
 - `competence_*` — copies of the tracker population means (see
   diagnostics below) snapshotted by this term.
 

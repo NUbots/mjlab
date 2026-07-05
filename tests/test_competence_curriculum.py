@@ -1079,3 +1079,35 @@ def test_joule_lambda_live_applies_weight() -> None:
       assert term._lam > 0
     else:
       assert term_cfg.weight == pytest.approx(-1e-5)
+
+
+def test_attain_slide_fires_congestion_at_the_cap() -> None:
+  """v29 replay: parked at the cap with falls quiet, attainment sliding
+  from its peak must cut d_cmd (the churn signature IS the congestion)."""
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  term._cmd_ctrl.d = 1.0
+  term._push_ctrl.d = 0.6
+  tracker.wobble_ema[:] = 0.02
+  tracker.fast_fall_rate = 0.12
+  tracker.fast_fall_clean = 0.11  # falls quiet - v29 at iter ~1810
+  tracker.fast_fall_pushed = 0.30
+
+  def step_at(it: int, attain: float) -> dict:
+    tracker.attain_ema[:] = attain
+    env.common_step_counter = it * _NUM_STEPS_PER_ENV
+    tracker._finalized_step = -1
+    return term(env, torch.tensor([0, 1]), "twist", "push_robot")
+
+  # Healthy plateau establishes the trailing max.
+  out = step_at(1500, 0.712)
+  assert out["difficulty"].item() == pytest.approx(1.0)
+  # 1.4% dip (a healthy push-cut wobble): no fire.
+  out = step_at(1501, 0.702)
+  assert out["difficulty"].item() == pytest.approx(1.0)
+  # 5%+ slide (churn signature): one cut.
+  out = step_at(1502, 0.67)
+  assert out["difficulty"].item() == pytest.approx(0.7)
+  # Refractory: sliding continues but no second cut yet.
+  out = step_at(1503, 0.67)
+  assert out["difficulty"].item() == pytest.approx(0.7)

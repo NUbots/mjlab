@@ -1204,6 +1204,19 @@ class aimd_difficulty:
     # and AIMD oscillates at capacity instead of at an artificial ceiling.
     # Safe only in combination with arrest mode + ellipsoid geometry.
     self._envelope_scale: float = cfg.params.get("envelope_scale", 1.0)
+    # Attainment-slide congestion (v29 postmortem, R13): under ellipsoid
+    # geometry, commands beyond capability UNDER-TRACK instead of causing
+    # falls, so fall-based congestion never binds on the command axis at
+    # high speed - d_cmd parks at the cap and saturation churn returns on
+    # the usual ~800-iter fuse (v29: parked at 1045, attain slid
+    # 0.712->0.66 from 1520, fell-creep from 1615, dead 2106). The churn
+    # signature IS the attain slide, so it becomes the command axis's
+    # second congestion signal: attain below attain_slide_frac of its
+    # trailing max fires one cut per refractory. Replay: bar 0.95 fires
+    # at ~iter 1810 (wd 1.39, fast_clean 0.13 - fully recoverable);
+    # healthy dP-cut wobbles (1.4% dips) stay well inside the band.
+    self._attain_slide_frac: float = cfg.params.get("attain_slide_frac", 0.95)
+    self._attain_max = 0.0
     self._cmd_ctrl = AimdController(self._cmd_params)
     self._push_ctrl = AimdController(self._push_params)
     self._tracker = get_competence_tracker(env)
@@ -1241,6 +1254,7 @@ class aimd_difficulty:
       "lin_vel_x_max": torch.tensor(ccfg.ranges.lin_vel_x[1]),
       "ang_vel_z_max": torch.tensor(ccfg.ranges.ang_vel_z[1]),
       "push_scale": torch.tensor(push_scale),
+      "attain_trailing_max": torch.tensor(self._attain_max),
     }
 
   def __call__(
@@ -1258,10 +1272,11 @@ class aimd_difficulty:
     envelope_scale: float = 1.0,
     push_congest_bar: float = 0.30,
     push_gate_excess: float = 0.15,
+    attain_slide_frac: float = 0.95,
   ) -> dict[str, torch.Tensor]:
     del (command_name, event_name, alpha, beta, congest_bar, emergency_bar)
     del (gate_attain, beta_arrest, envelope_scale)
-    del (push_congest_bar, push_gate_excess)
+    del (push_congest_bar, push_gate_excess, attain_slide_frac)
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
     strat = self._tracker.stratified_means()
@@ -1271,11 +1286,25 @@ class aimd_difficulty:
       pop_fast = stats["fast_fall_rate"]
       emergency = pop_fast >= self._cmd_params.emergency_bar
       excess = max(0.0, strat["fast_fall_pushed"] - strat["fast_fall_clean"])
+      att = strat["clean_attain"]
+      # Sticky short-term, adaptive long-term (~14k-iter half-life).
+      self._attain_max = max(self._attain_max * 0.99995, att)
+      cmd_refractory = (
+        cur_iter - self._cmd_ctrl.last_cut_iter < self._cmd_ctrl.refractory
+      )
+      attain_slide = (
+        self._attain_max > 0.5
+        and att < self._attain_slide_frac * self._attain_max
+        and not cmd_refractory
+      )
+      cmd_signal = max(strat["fast_fall_clean"], pop_fast if emergency else 0.0)
+      if attain_slide:
+        cmd_signal = max(cmd_signal, self._cmd_params.congest_bar + 1e-3)
       self._cmd_ctrl.update(
         cur_iter=cur_iter,
-        fast_fall_rate=max(strat["fast_fall_clean"], pop_fast if emergency else 0.0),
+        fast_fall_rate=cmd_signal,
         wobble_ema=strat["clean_wobble"],
-        attain_ema=strat["clean_attain"],
+        attain_ema=att,
       )
       self._push_ctrl.update(
         cur_iter=cur_iter,
