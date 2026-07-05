@@ -227,6 +227,47 @@ class CompetenceTracker:
     self._fast_next_step = 0
     self.fast_fall_rate = 1.0
     self.fast_alpha = 0.2
+    # Push-cohort stratification (user design 2026-07-05): a fixed slice of
+    # env indices receives pushes; the rest train push-free. Attribution is
+    # by membership - no recovery-horizon guess - and the clean cohort
+    # matches the mostly-push-free deployment distribution. The policy
+    # cannot observe membership. Fraction set via the pushed-cohort event
+    # wrapper / diagnostics term; 1.0 (all pushed) is the legacy behavior.
+    self.push_cohort_frac = 1.0
+    self.push_cohort = torch.ones(n, dtype=torch.bool, device=self.device)
+    self.last_push_step = torch.full((n,), -(10**9), device=self.device)
+    self._win_fell_clean = 0.0
+    self._win_done_clean = 0.0
+    self._win_fell_pushed = 0.0
+    self._win_done_pushed = 0.0
+    self.fast_fall_clean = 1.0
+    self.fast_fall_pushed = 1.0
+    # Time-from-push-to-fall histogram (seconds bins: see edges) - answers
+    # "how long does recovery take" empirically.
+    self.push_fall_dt_edges = (0.5, 1.0, 2.0, 4.0, 8.0)
+    self.push_fall_dt_counts = torch.zeros(
+      len(self.push_fall_dt_edges) + 1, device=self.device
+    )
+    # Frontier estimator (clean cohort only): exposure steps and falls
+    # bucketed by |cmd_xy| in 0.1 m/s bins over [0, 0.8).
+    self.n_cmd_buckets = 8
+    self._bucket_steps = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self._bucket_falls = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self.bucket_hazard = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self._cur_bucket = torch.full((n,), -1, dtype=torch.long, device=self.device)
+    self._bucket_next_step = 0
+    try:
+      self._step_dt = float(env.step_dt)
+    except (TypeError, ValueError):
+      self._step_dt = 0.02
+
+  def set_push_cohort(self, frac: float) -> None:
+    self.push_cohort_frac = frac
+    n_pushed = int(round(frac * self.num_envs))
+    self.push_cohort = torch.arange(self.num_envs, device=self.device) < n_pushed
+
+  def record_push(self, env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> None:
+    self.last_push_step[env_ids] = float(env.common_step_counter)
 
   def state_dict(self) -> dict[str, Any]:
     return {
@@ -283,6 +324,17 @@ class CompetenceTracker:
     attain = (vel_xy * cmd_xy).sum(dim=-1) / cmd_sq.clamp(min=1e-6)
     self._attain_sum[meaningful] += attain[meaningful]
     self._attain_weight[meaningful] += 1.0
+
+    # Frontier estimator exposure (clean cohort only): bucket walking steps
+    # by commanded speed so falls can be attributed to the speed at which
+    # they happened (binned Bernoulli estimate of P(fall | speed)).
+    bucket = (torch.sqrt(cmd_sq) / 0.1).long().clamp(0, self.n_cmd_buckets - 1)
+    self._cur_bucket = torch.where(walking, bucket, torch.full_like(bucket, -1))
+    expose = walking & ~self.push_cohort
+    if expose.any():
+      self._bucket_steps.scatter_add_(
+        0, bucket[expose], torch.ones(int(expose.sum()), device=self.device)
+      )
 
   def finalize_episodes(
     self, env: ManagerBasedRlEnv, env_ids: torch.Tensor | slice
@@ -345,6 +397,37 @@ class CompetenceTracker:
 
     self._win_fell += float(fell.sum().item())
     self._win_done += float(len(ids))
+
+    # Cohort-stratified windows: attribution by membership, not by any
+    # recovery-horizon guess (user design 2026-07-05).
+    pushed = self.push_cohort[ids]
+    self._win_fell_pushed += float(fell[pushed].sum().item())
+    self._win_done_pushed += float(int(pushed.sum()))
+    clean = ~pushed
+    self._win_fell_clean += float(fell[clean].sum().item())
+    self._win_done_clean += float(int(clean.sum()))
+
+    # Time-from-push-to-fall histogram (pushed cohort): answers "how long
+    # does recovery take" empirically instead of assuming a horizon.
+    fell_pushed = pushed & (fell > 0)
+    if fell_pushed.any():
+      dt_s = (
+        env.common_step_counter - self.last_push_step[ids][fell_pushed]
+      ) * self._step_dt
+      bins = torch.bucketize(
+        dt_s, torch.tensor(self.push_fall_dt_edges, device=self.device)
+      )
+      self.push_fall_dt_counts.scatter_add_(
+        0, bins, torch.ones(len(dt_s), device=self.device)
+      )
+
+    # Frontier falls (clean cohort): charge the fall to the speed bucket
+    # the env was walking in when it fell.
+    fell_clean_bucketed = clean & (fell > 0) & (self._cur_bucket[ids] >= 0)
+    if fell_clean_bucketed.any():
+      fb = self._cur_bucket[ids][fell_clean_bucketed]
+      self._bucket_falls.scatter_add_(0, fb, torch.ones(len(fb), device=self.device))
+
     if env.common_step_counter >= self._fast_next_step:
       # Require ~0.2% of envs to have finished an episode before trusting
       # the ratio; below that, keep accumulating into the next window.
@@ -355,6 +438,27 @@ class CompetenceTracker:
         self._win_fell = 0.0
         self._win_done = 0.0
         self._fast_next_step = env.common_step_counter + _NUM_STEPS_PER_ENV
+        if self._win_done_clean >= 4.0:
+          r = self._win_fell_clean / self._win_done_clean
+          self.fast_fall_clean = a * r + (1.0 - a) * self.fast_fall_clean
+          self._win_fell_clean = 0.0
+          self._win_done_clean = 0.0
+        if self._win_done_pushed >= 4.0:
+          r = self._win_fell_pushed / self._win_done_pushed
+          self.fast_fall_pushed = a * r + (1.0 - a) * self.fast_fall_pushed
+          self._win_fell_pushed = 0.0
+          self._win_done_pushed = 0.0
+
+    # Bucket hazards refresh on a slower cadence (falls per bucket are
+    # sparse): ~50 iterations accumulates thousands of exposure steps per
+    # bucket at production env counts.
+    if env.common_step_counter >= self._bucket_next_step:
+      if self._bucket_steps.sum() >= 100.0:
+        hazard = self._bucket_falls / self._bucket_steps.clamp(min=1.0)
+        self.bucket_hazard = 0.3 * hazard + 0.7 * self.bucket_hazard
+        self._bucket_steps.zero_()
+        self._bucket_falls.zero_()
+        self._bucket_next_step = env.common_step_counter + 50 * _NUM_STEPS_PER_ENV
 
   def population_means(self) -> dict[str, float]:
     return {
@@ -365,6 +469,36 @@ class CompetenceTracker:
       "wobble": self.wobble_ema.mean().item(),
       "fast_fall_rate": self.fast_fall_rate,
     }
+
+  def stratified_means(self) -> dict[str, float]:
+    """Per-cohort aggregation of the per-env EMAs plus the fast splits.
+
+    With cohort membership fixed by env index, stratification is pure
+    aggregation - the accumulation machinery is untouched. Falls back to
+    global values when a cohort is empty (legacy all-pushed configs).
+    """
+    clean = ~self.push_cohort
+    out: dict[str, float] = {}
+    for name, ema in (
+      ("attain", self.attain_ema),
+      ("wobble", self.wobble_ema),
+      ("fell_ema", self.fell_ema),
+      ("track_err_norm", self.track_err_ema),
+    ):
+      out[f"clean_{name}"] = (
+        ema[clean].mean().item() if clean.any() else ema.mean().item()
+      )
+      out[f"pushed_{name}"] = (
+        ema[self.push_cohort].mean().item()
+        if self.push_cohort.any()
+        else ema.mean().item()
+      )
+    out["fast_fall_clean"] = self.fast_fall_clean
+    out["fast_fall_pushed"] = self.fast_fall_pushed
+    # Excess fall rate attributable to pushes (difference-in-rates; both
+    # cohorts share the command sampler, so command difficulty cancels).
+    out["push_excess_fall"] = self.fast_fall_pushed - self.fast_fall_clean
+    return out
 
 
 def get_competence_tracker(env: ManagerBasedRlEnv) -> CompetenceTracker:
@@ -382,6 +516,78 @@ def competence_tracker_step(
   tracker = getattr(env, "_competence_tracker", None)
   if tracker is not None:
     tracker.record_step(env)
+
+
+def push_cohort_by_setting_velocity(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  velocity_range: dict[str, tuple[float, float]],
+  cohort_frac: float = 1.0,
+) -> None:
+  """Cohort-filtered push: only env indices < cohort_frac * num_envs are
+  pushed; the rest train push-free (deployment-matched) and serve as the
+  uncontaminated baseline for tracking competence. Also stamps push times
+  on the tracker for the recovery-time histogram."""
+  from mjlab.envs.mdp.events import push_by_setting_velocity
+
+  tracker = get_competence_tracker(env)
+  if tracker.push_cohort_frac != cohort_frac:
+    tracker.set_push_cohort(cohort_frac)
+  mask = tracker.push_cohort[env_ids]
+  pushed_ids = env_ids[mask]
+  if len(pushed_ids) == 0:
+    return
+  tracker.record_push(env, pushed_ids)
+  push_by_setting_velocity(env, pushed_ids, velocity_range)
+
+
+class competence_diagnostics:
+  """Log-only curriculum term: cohort-stratified competence + frontier.
+
+  Publishes the decoupled signals (clean vs pushed attain/wobble/falls,
+  difference-in-rates push effect, per-speed-bucket fall hazards and the
+  estimated frontier speed, push-to-fall timing histogram) so they can be
+  validated against the coupled controllers before any of them drive
+  difficulty. Phase 1 of the frontier-estimator plan (doc 15 R9).
+  """
+
+  def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
+    self._tracker = get_competence_tracker(env)
+    cohort_frac = cfg.params.get("cohort_frac", 1.0)
+    if self._tracker.push_cohort_frac != cohort_frac:
+      self._tracker.set_push_cohort(cohort_frac)
+    self._hazard_bar: float = cfg.params.get("frontier_hazard_bar", 5e-4)
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    del env_ids
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    cohort_frac: float = 1.0,
+    frontier_hazard_bar: float = 5e-4,
+  ) -> dict[str, torch.Tensor]:
+    del cohort_frac, frontier_hazard_bar
+    self._tracker.finalize_episodes(env, env_ids)
+    out = {k: torch.tensor(v) for k, v in self._tracker.stratified_means().items()}
+    hazards = self._tracker.bucket_hazard
+    for i in range(self._tracker.n_cmd_buckets):
+      out[f"hazard_cmd_{i}"] = hazards[i].clone()
+    # Frontier speed: midpoint of the fastest bucket still under the
+    # hazard bar, scanning upward from the slowest.
+    frontier = 0.05
+    for i in range(self._tracker.n_cmd_buckets):
+      if hazards[i].item() <= self._hazard_bar:
+        frontier = 0.1 * i + 0.05
+      else:
+        break
+    out["frontier_speed"] = torch.tensor(frontier)
+    counts = self._tracker.push_fall_dt_counts
+    total = counts.sum().clamp(min=1.0)
+    for i, edge in enumerate(self._tracker.push_fall_dt_edges):
+      out[f"push_fall_within_{edge}s"] = counts[: i + 1].sum() / total
+    return out
 
 
 def _scale_push_velocity_range(scale: float) -> dict[str, tuple[float, float]]:
@@ -690,6 +896,12 @@ class AimdController:
     in_refractory = cur_iter - self.last_cut_iter < self.refractory
 
     if fast_fall_rate >= p.congest_bar:
+      # Nothing to cut near d=0 (early-training chaos under the pessimistic
+      # EMA init): do no bookkeeping, or the meaningless "cuts" pin
+      # ssthresh at its floor and the whole climb runs at probe rate
+      # (observed on v26: alpha/3 from iter ~550).
+      if self.d < 0.05:
+        return None
       if in_refractory:
         return None
       # Exponential backoff at persistent walls (TCP RTO analog): repeat

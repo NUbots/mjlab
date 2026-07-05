@@ -209,6 +209,10 @@ spec:
                   value: "${WATCHDOG_FAIL_BELOW}"
                 - name: WATCHDOG_PERSIST_ITERS
                   value: "${WATCHDOG_PERSIST_ITERS}"
+                - name: PUSH_COHORT_FRAC
+                  value: "${PUSH_COHORT_FRAC}"
+                - name: FRONTIER_HAZARD_BAR
+                  value: "${FRONTIER_HAZARD_BAR}"
                 - name: COMPETENCE_COOLDOWN_ITERS
                   value: "${COMPETENCE_COOLDOWN_ITERS}"
                 - name: LINK_MASS_SCALE_MIN

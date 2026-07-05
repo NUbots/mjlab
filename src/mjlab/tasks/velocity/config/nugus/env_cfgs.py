@@ -1429,6 +1429,28 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   ):
     _add_track_reward_watchdog(cfg)
 
+  # Push-cohort stratification + log-only diagnostics (doc 15 R9). At
+  # frac < 1.0 only the low env indices get pushed; the clean cohort is
+  # the uncontaminated tracking-competence baseline and matches the
+  # mostly-push-free deployment distribution.
+  push_cohort_frac = _env_float("PUSH_COHORT_FRAC", 1.0)
+  if not 0.0 < push_cohort_frac <= 1.0:
+    raise ValueError(f"PUSH_COHORT_FRAC must be in (0, 1]; got {push_cohort_frac!r}")
+  has_tracker = adaptive_commands or adaptive_pushes or penalty_gate == "competence"
+  if not play and has_tracker:
+    if push_cohort_frac < 1.0 and "push_robot" in cfg.events:
+      push_params = dict(cfg.events["push_robot"].params)
+      push_params["cohort_frac"] = push_cohort_frac
+      cfg.events["push_robot"].func = mdp.push_cohort_by_setting_velocity
+      cfg.events["push_robot"].params = push_params
+    cfg.curriculum["competence_diagnostics"] = CurriculumTermCfg(
+      func=mdp.competence_diagnostics,
+      params={
+        "cohort_frac": push_cohort_frac,
+        "frontier_hazard_bar": _env_float("FRONTIER_HAZARD_BAR", 5e-4),
+      },
+    )
+
   # Apply play mode overrides.
   if play:
     # Effectively infinite episode length.

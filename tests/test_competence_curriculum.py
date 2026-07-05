@@ -614,3 +614,106 @@ def test_aimd_and_watchdog_accept_manager_kwargs() -> None:
   }
   sig = set(inspect.signature(track_reward_watchdog.__call__).parameters)
   assert not (wd_params - sig)
+
+
+def test_cohort_stratified_attribution() -> None:
+  """Falls in the pushed cohort must not contaminate clean-cohort stats."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(0.5)  # env 0 pushed, env 1 clean
+  assert tracker.push_cohort.tolist() == [True, False]
+
+  # Env 0 falls (pushed), env 1 healthy: window splits must diverge.
+  env.termination_manager.get_term.return_value = torch.tensor([True, False])
+  step = 24
+  for _ in range(60):
+    env.common_step_counter = step
+    tracker.finalize_episodes(env, torch.tensor([0, 1]))
+    step += 24
+  strat = tracker.stratified_means()
+  assert strat["fast_fall_pushed"] > 0.9
+  assert strat["fast_fall_clean"] < 0.1
+  assert strat["push_excess_fall"] > 0.8
+  # Per-env EMA stratification follows membership.
+  assert strat["pushed_fell_ema"] > 0.9
+  assert strat["clean_fell_ema"] < 0.1
+
+
+def test_push_fall_dt_histogram() -> None:
+  """Push-to-fall timing lands in the right bin (recovery-time question)."""
+  env = _mock_tracked_env(fell=True)
+  env.step_dt = 0.02
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(1.0)
+  env.common_step_counter = 1000
+  tracker.record_push(env, torch.tensor([0, 1]))
+  # Fall 0.72 s later (36 steps at dt=0.02): second bin (0.5-1.0 s).
+  env.common_step_counter = 1036
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  counts = tracker.push_fall_dt_counts
+  assert counts[1].item() == pytest.approx(2.0)
+  assert counts.sum().item() == pytest.approx(2.0)
+
+
+def test_frontier_buckets_charge_falls_to_speed() -> None:
+  """Clean-cohort falls are charged to the commanded-speed bucket."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(0.5)  # env 1 is clean
+  # Command 0.55 m/s -> bucket 5.
+  ct = env.command_manager.get_term.return_value
+  ct.vel_command_b = torch.tensor([[0.55, 0.0], [0.55, 0.0]])
+  ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.5, 0.0], [0.5, 0.0]])
+  tracker.record_step(env)
+  assert tracker._cur_bucket.tolist() == [5, 5]
+  # Only the clean env's exposure counts.
+  assert tracker._bucket_steps[5].item() == pytest.approx(1.0)
+  env.termination_manager.get_term.return_value = torch.tensor([True, True])
+  env.common_step_counter = 48
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  # Only env 1 (clean) charges the bucket; env 0's fall is push-cohort.
+  assert tracker._bucket_falls[5].item() == pytest.approx(1.0)
+  assert tracker._bucket_falls.sum().item() == pytest.approx(1.0)
+
+
+def test_push_cohort_event_filters_and_stamps(monkeypatch: pytest.MonkeyPatch) -> None:
+  from mjlab.tasks.velocity.mdp import competence as comp
+
+  env = _mock_tracked_env(fell=False)
+  env._competence_tracker = CompetenceTracker(env)
+  pushed_ids: list[torch.Tensor] = []
+  monkeypatch.setattr(
+    "mjlab.envs.mdp.events.push_by_setting_velocity",
+    lambda e, ids, vr: pushed_ids.append(ids),
+  )
+  env.common_step_counter = 240
+  comp.push_cohort_by_setting_velocity(
+    env, torch.tensor([0, 1]), {"x": (-0.2, 0.4)}, cohort_frac=0.5
+  )
+  assert len(pushed_ids) == 1
+  assert pushed_ids[0].tolist() == [0]
+  assert env._competence_tracker.last_push_step[0].item() == pytest.approx(240.0)
+  assert env._competence_tracker.last_push_step[1].item() < 0
+
+
+def test_aimd_ignores_congestion_at_zero_difficulty() -> None:
+  """Early-chaos regression (v26): bogus cuts at d=0 must not pin ssthresh."""
+  from mjlab.tasks.velocity.mdp.competence import AimdController, AimdParams
+
+  c = AimdController(AimdParams())
+  assert (
+    c.update(cur_iter=5, fast_fall_rate=1.0, wobble_ema=1.0, attain_ema=0.0) is None
+  )
+  assert c.ssthresh == pytest.approx(1.0)
+  assert c.last_cut_iter < 0
+
+
+def test_push_cohort_wiring(monkeypatch: pytest.MonkeyPatch) -> None:
+  monkeypatch.setenv("ADAPTIVE_COMMANDS", "1")
+  monkeypatch.setenv("PUSH_COHORT_FRAC", "0.3")
+  from mjlab.tasks.velocity import mdp
+
+  cfg = nubots_nugus_flat_env_cfg()
+  assert cfg.events["push_robot"].func is mdp.push_cohort_by_setting_velocity
+  assert cfg.events["push_robot"].params["cohort_frac"] == pytest.approx(0.3)
+  assert "competence_diagnostics" in cfg.curriculum
