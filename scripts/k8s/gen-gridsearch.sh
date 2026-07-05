@@ -252,6 +252,7 @@ export TRACK_WATCHDOG WATCHDOG_ARM_ABOVE WATCHDOG_FAIL_BELOW WATCHDOG_PERSIST_IT
 export PUSH_COHORT_FRAC FRONTIER_HAZARD_BAR
 export JOULE_LAMBDA_SHADOW LAMBDA_CAP LAMBDA_RAMP_ITERS
 export COMMAND_GEOMETRY
+export AIMD_BETA_ARREST AIMD_ENVELOPE_SCALE
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
@@ -1211,6 +1212,10 @@ _competence_defaults() {
   export LAMBDA_RAMP_ITERS=""
   # Command geometry (doc 15 R11); empty = box (legacy).
   export COMMAND_GEOMETRY=""
+  # Arrest-mode decay and envelope extension (v27 postmortem); empty =
+  # code defaults (0.93 / 1.0).
+  export AIMD_BETA_ARREST=""
+  export AIMD_ENVELOPE_SCALE=""
 }
 
 

@@ -524,10 +524,15 @@ def test_aimd_congestion_cut_refractory_and_backoff() -> None:
   )
   assert c.d == pytest.approx(0.8 * 0.7)
   assert c.ssthresh == pytest.approx(0.8 * 0.85)
-  # Refractory: same signal a few iters later must not cut again.
+  # Inside the refractory a sustained signal keeps decaying d (arrest
+  # mode, v27 postmortem) without event bookkeeping.
+  d_before = c.d
   assert (
-    c.update(cur_iter=1005, fast_fall_rate=0.4, wobble_ema=0.1, attain_ema=0.5) is None
+    c.update(cur_iter=1005, fast_fall_rate=0.4, wobble_ema=0.1, attain_ema=0.5)
+    == "arrest"
   )
+  assert c.d == pytest.approx(d_before * 0.93)
+  assert c.ssthresh == pytest.approx(0.8 * 0.85)
   # After refractory, a repeat congestion doubles the refractory (backoff).
   assert (
     c.update(cur_iter=1016, fast_fall_rate=0.4, wobble_ema=0.1, attain_ema=0.5) == "cut"
@@ -888,3 +893,63 @@ def test_rho_buckets_attribute_corner_falls() -> None:
   env.common_step_counter = 48
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
   assert tracker._rho_falls[7].item() == pytest.approx(1.0)  # clean env only
+
+
+def test_aimd_arrest_mode_cuts_every_iteration_above_bar() -> None:
+  """v27 postmortem: one-cut-per-refractory walked d from 1.0 to 0.28 over
+  ~100+ iterations of sustained ignition. Under arrest mode the descent
+  must match the discrete cascade's aggression (halving in ~10 iters)."""
+  from mjlab.tasks.velocity.mdp.competence import AimdController, AimdParams
+
+  c = AimdController(AimdParams())
+  c.d = 1.0
+  it = 1000
+  assert (
+    c.update(cur_iter=it, fast_fall_rate=0.5, wobble_ema=0.2, attain_ema=0.5) == "cut"
+  )
+  d_after_cut = c.d
+  assert d_after_cut == pytest.approx(0.7)
+  # Signal stays above the bar: every subsequent iteration decays d.
+  for k in range(1, 11):
+    r = c.update(cur_iter=it + k, fast_fall_rate=0.5, wobble_ema=0.2, attain_ema=0.5)
+    assert r == "arrest"
+  assert c.d == pytest.approx(0.7 * 0.93**10, rel=1e-4)
+  assert c.d < 0.36  # halved within 10 iterations of sustained signal
+  # Signal clears: increases stay refractory-gated (no instant rebound).
+  assert (
+    c.update(cur_iter=it + 11, fast_fall_rate=0.05, wobble_ema=0.02, attain_ema=0.7)
+    is None
+  )
+
+
+def test_aimd_envelope_scale_extends_lerp_target() -> None:
+  """envelope_scale=1.3 puts the d=1.0 target beyond the L5 table so the
+  sawtooth binds at capacity, not at an artificial cap."""
+  from mjlab.tasks.velocity.mdp.competence import aimd_difficulty
+
+  cfg = MagicMock()
+  cfg.params = {
+    "command_name": "twist",
+    "event_name": "push_robot",
+    "envelope_scale": 1.3,
+  }
+  env = _mock_tracked_env(fell=False)
+  env._competence_tracker = CompetenceTracker(env)
+  ranges = UniformVelocityCommandCfg.Ranges(
+    lin_vel_x=(0.0, 0.0), lin_vel_y=(0.0, 0.0), ang_vel_z=(0.0, 0.0)
+  )
+  ccfg = UniformVelocityCommandCfg(
+    entity_name="robot", resampling_time_range=(3.0, 8.0), ranges=ranges
+  )
+  cterm = MagicMock()
+  cterm.cfg = ccfg
+  env.command_manager.get_term.return_value = cterm
+  ecfg = MagicMock()
+  ecfg.params = {}
+  env.event_manager.get_term_cfg.return_value = ecfg
+  term = aimd_difficulty(cfg, env)
+  term._apply(env, 1.0)
+  assert ranges.lin_vel_x == pytest.approx((-0.975, 0.975))
+  assert ranges.ang_vel_z == pytest.approx((-1.04, 1.04))
+  term._apply(env, 0.0)
+  assert ranges.lin_vel_x == pytest.approx((-0.20, 0.20))

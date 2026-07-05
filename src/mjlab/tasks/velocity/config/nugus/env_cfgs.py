@@ -575,6 +575,8 @@ def _add_aimd_curriculum(cfg: ManagerBasedRlEnvCfg) -> None:
       "congest_bar": _env_float("AIMD_CONGEST_BAR", 0.35),
       "emergency_bar": _env_float("AIMD_EMERGENCY_BAR", 0.55),
       "gate_attain": _env_float("AIMD_GATE_ATTAIN", 0.40),
+      "beta_arrest": _env_float("AIMD_BETA_ARREST", 0.93),
+      "envelope_scale": _env_float("AIMD_ENVELOPE_SCALE", 1.0),
     },
   )
   if "command_vel" in cfg.curriculum:

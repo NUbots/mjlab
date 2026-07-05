@@ -988,6 +988,11 @@ class AimdParams:
   ssthresh_alpha_div: float = 3.0  # probe rate divisor above ssthresh
   beta: float = 0.7  # multiplicative decrease per congestion event
   beta_emergency: float = 0.5  # harder cut while in emergency
+  # Continuous per-iteration decay while the signal stays above the bar
+  # (arrest mode, v27 postmortem): halves d in ~10 iterations, matching
+  # the discrete cascade's aggression instead of waiting out refractories
+  # during an active ignition.
+  beta_arrest: float = 0.93
   congest_bar: float = 0.35  # fast fall rate: congestion event
   emergency_bar: float = 0.55  # fast fall rate: spiral in progress
   refractory_iters: int = 15  # one event = one cut (detection lag + margin)
@@ -1061,7 +1066,14 @@ class AimdController:
       if self.d < 0.05:
         return None
       if in_refractory:
-        return None
+        # ARREST MODE (v27 postmortem): the refractory gates re-entry, not
+        # survival. One-cut-per-refractory walked v27 from d=1.0 to 0.28
+        # over ~100+ iterations of sustained super-bar fall rate while the
+        # -10s poisoned the batch; the discrete cascade this replaced did
+        # its full descent in 5. While the signal STAYS above the bar,
+        # keep cutting every iteration at beta_arrest (halving in ~10).
+        self.d *= p.beta_arrest
+        return "arrest"
       # Exponential backoff at persistent walls (TCP RTO analog): repeat
       # congestion shortly after the last one doubles the refractory.
       if cur_iter - self.last_congest_iter <= p.backoff_window_iters:
@@ -1103,7 +1115,15 @@ class aimd_difficulty:
       congest_bar=cfg.params.get("congest_bar", 0.35),
       emergency_bar=cfg.params.get("emergency_bar", 0.55),
       gate_attain=cfg.params.get("gate_attain", 0.40),
+      beta_arrest=cfg.params.get("beta_arrest", 0.93),
     )
+    # Envelope extension (v27 postmortem): capacity turned out to be AT or
+    # above the L5 table, so d parked at the cap, the sawtooth never
+    # engaged, and saturation churn returned on schedule. The lerp target
+    # is scaled past the table so true capacity always sits BELOW the cap
+    # and AIMD oscillates at capacity instead of at an artificial ceiling.
+    # Safe only in combination with arrest mode + ellipsoid geometry.
+    self._envelope_scale: float = cfg.params.get("envelope_scale", 1.0)
     self._controller = AimdController(self._params)
     self._tracker = get_competence_tracker(env)
     self._last_check_iter = -1
@@ -1113,7 +1133,9 @@ class aimd_difficulty:
     del env_ids
 
   def _apply(self, env: ManagerBasedRlEnv, d: float) -> dict[str, torch.Tensor]:
-    lo, hi = COMMAND_LEVEL_TABLE[0], COMMAND_LEVEL_TABLE[-1]
+    lo, base_hi = COMMAND_LEVEL_TABLE[0], COMMAND_LEVEL_TABLE[-1]
+    es = self._envelope_scale
+    hi = {axis: (rng[0] * es, rng[1] * es) for axis, rng in base_hi.items()}
     command_term = env.command_manager.get_term(self._command_name)
     assert command_term is not None
     ccfg = command_term.cfg
@@ -1147,9 +1169,11 @@ class aimd_difficulty:
     congest_bar: float = 0.35,
     emergency_bar: float = 0.55,
     gate_attain: float = 0.40,
+    beta_arrest: float = 0.93,
+    envelope_scale: float = 1.0,
   ) -> dict[str, torch.Tensor]:
     del (command_name, event_name, alpha, beta, congest_bar, emergency_bar)
-    del gate_attain
+    del (gate_attain, beta_arrest, envelope_scale)
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
     cur_iter = env.common_step_counter // _NUM_STEPS_PER_ENV
