@@ -563,6 +563,39 @@ def _add_competence_tracker_event(cfg: ManagerBasedRlEnvCfg) -> None:
   )
 
 
+def _add_aimd_curriculum(cfg: ManagerBasedRlEnvCfg) -> None:
+  """Continuous TCP-style difficulty (doc 15 R8): one scalar, no levels."""
+  cfg.curriculum["aimd_difficulty"] = CurriculumTermCfg(
+    func=mdp.aimd_difficulty,
+    params={
+      "command_name": "twist",
+      "event_name": "push_robot",
+      "alpha": _env_float("AIMD_ALPHA", 0.002),
+      "beta": _env_float("AIMD_BETA", 0.7),
+      "congest_bar": _env_float("AIMD_CONGEST_BAR", 0.35),
+      "emergency_bar": _env_float("AIMD_EMERGENCY_BAR", 0.55),
+      "gate_attain": _env_float("AIMD_GATE_ATTAIN", 0.40),
+    },
+  )
+  if "command_vel" in cfg.curriculum:
+    del cfg.curriculum["command_vel"]
+
+
+def _add_track_reward_watchdog(cfg: ManagerBasedRlEnvCfg) -> None:
+  """Fail fast on rotted policies (user rule 2026-07-05): armed once the
+  logged track_linear_velocity reward passes 2.0, fires if it sustains
+  below 1.0."""
+  cfg.curriculum["track_reward_watchdog"] = CurriculumTermCfg(
+    func=mdp.track_reward_watchdog,
+    params={
+      "reward_name": "track_linear_velocity",
+      "arm_above": _env_float("WATCHDOG_ARM_ABOVE", 2.0),
+      "fail_below": _env_float("WATCHDOG_FAIL_BELOW", 1.0),
+      "fail_persist_iters": _env_int("WATCHDOG_PERSIST_ITERS", 60),
+    },
+  )
+
+
 def _add_adaptive_command_curriculum(cfg: ManagerBasedRlEnvCfg, *, l_max: int) -> None:
   cfg.curriculum["adaptive_command_level"] = CurriculumTermCfg(
     func=mdp.adaptive_command_level,
@@ -1375,12 +1408,26 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       f"'hard_from_start'; got {training_regime!r}"
     )
 
+  curriculum_style = _env_str("CURRICULUM_STYLE", "levels")
+  if curriculum_style not in ("levels", "aimd"):
+    raise ValueError(
+      f"CURRICULUM_STYLE must be 'levels' or 'aimd'; got {curriculum_style!r}"
+    )
   if adaptive_commands or adaptive_pushes or penalty_gate == "competence":
     _add_competence_tracker_event(cfg)
-  if adaptive_commands:
-    _add_adaptive_command_curriculum(cfg, l_max=adaptive_cmd_lmax)
-  if adaptive_pushes:
-    _add_adaptive_push_curriculum(cfg, l_max=adaptive_push_lmax)
+  if curriculum_style == "aimd" and (adaptive_commands or adaptive_pushes):
+    _add_aimd_curriculum(cfg)
+  else:
+    if adaptive_commands:
+      _add_adaptive_command_curriculum(cfg, l_max=adaptive_cmd_lmax)
+    if adaptive_pushes:
+      _add_adaptive_push_curriculum(cfg, l_max=adaptive_push_lmax)
+  if (
+    not play
+    and _env_bool("TRACK_WATCHDOG", default=True)
+    and (adaptive_commands or adaptive_pushes or penalty_gate == "competence")
+  ):
+    _add_track_reward_watchdog(cfg)
 
   # Apply play mode overrides.
   if play:

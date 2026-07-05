@@ -480,3 +480,137 @@ def test_tracker_fast_window_tracks_crash() -> None:
     tracker.finalize_episodes(crash_env, torch.tensor([0, 1]))
     step += 24
   assert tracker.population_means()["fast_fall_rate"] > 0.5
+
+
+def test_aimd_rises_at_alpha_and_gates_on_stress() -> None:
+  """Healthy iterations add exactly alpha; any unhealthy gate freezes d."""
+  from mjlab.tasks.velocity.mdp.competence import AimdController, AimdParams
+
+  c = AimdController(AimdParams())
+  for i in range(50):
+    c.update(cur_iter=i, fast_fall_rate=0.05, wobble_ema=0.02, attain_ema=0.6)
+  assert c.d == pytest.approx(50 * 0.002)
+  # Stressed-but-not-congested: hold, don't cut.
+  d = c.d
+  assert (
+    c.update(cur_iter=50, fast_fall_rate=0.28, wobble_ema=0.02, attain_ema=0.6) is None
+  )
+  assert c.d == d
+  # Attainment gate below bar: hold (rate gate, not a promote event).
+  assert (
+    c.update(cur_iter=51, fast_fall_rate=0.05, wobble_ema=0.02, attain_ema=0.3) is None
+  )
+  assert c.d == d
+
+
+def test_aimd_congestion_cut_refractory_and_backoff() -> None:
+  """One event = one 0.7x cut; repeats inside the window double refractory."""
+  from mjlab.tasks.velocity.mdp.competence import AimdController, AimdParams
+
+  c = AimdController(AimdParams())
+  c.d = 0.8
+  assert (
+    c.update(cur_iter=1000, fast_fall_rate=0.4, wobble_ema=0.1, attain_ema=0.5) == "cut"
+  )
+  assert c.d == pytest.approx(0.8 * 0.7)
+  assert c.ssthresh == pytest.approx(0.8 * 0.85)
+  # Refractory: same signal a few iters later must not cut again.
+  assert (
+    c.update(cur_iter=1005, fast_fall_rate=0.4, wobble_ema=0.1, attain_ema=0.5) is None
+  )
+  # After refractory, a repeat congestion doubles the refractory (backoff).
+  assert (
+    c.update(cur_iter=1016, fast_fall_rate=0.4, wobble_ema=0.1, attain_ema=0.5) == "cut"
+  )
+  assert c.refractory == 30
+
+
+def test_aimd_emergency_cuts_harder() -> None:
+  from mjlab.tasks.velocity.mdp.competence import AimdController, AimdParams
+
+  c = AimdController(AimdParams())
+  c.d = 0.8
+  c.update(cur_iter=500, fast_fall_rate=0.6, wobble_ema=0.3, attain_ema=0.1)
+  assert c.d == pytest.approx(0.8 * 0.5)
+
+
+def test_aimd_slow_probe_above_ssthresh() -> None:
+  from mjlab.tasks.velocity.mdp.competence import AimdController, AimdParams
+
+  c = AimdController(AimdParams())
+  c.d = 0.6
+  c.ssthresh = 0.5
+  c.update(cur_iter=2000, fast_fall_rate=0.05, wobble_ema=0.02, attain_ema=0.6)
+  assert c.d == pytest.approx(0.6 + 0.002 / 3.0)
+
+
+def test_aimd_lerp_endpoints_match_tables() -> None:
+  """d=0 must reproduce level 0; d=1 must reproduce the full envelope."""
+  from mjlab.tasks.velocity.mdp.competence import _lerp_range
+
+  lo, hi = COMMAND_LEVEL_TABLE[0], COMMAND_LEVEL_TABLE[-1]
+  assert _lerp_range(lo["lin_vel_x"], hi["lin_vel_x"], 0.0) == lo["lin_vel_x"]
+  assert _lerp_range(lo["lin_vel_x"], hi["lin_vel_x"], 1.0) == hi["lin_vel_x"]
+  mid = _lerp_range(lo["lin_vel_x"], hi["lin_vel_x"], 0.5)
+  assert mid == pytest.approx((-0.475, 0.475))
+
+
+def test_watchdog_arms_and_fires_on_sustained_rot() -> None:
+  """Arms above 2.0; fires only after the persistence bar, so v25-push
+  style bounce transients (<=45 iters) never kill a healthy run."""
+  from mjlab.tasks.velocity.mdp.competence import track_reward_watchdog
+
+  cfg = MagicMock()
+  cfg.params = {"fail_persist_iters": 60, "ema_alpha": 1.0}
+  wd = track_reward_watchdog(cfg, MagicMock())
+
+  def step(env_step: int, value: float) -> None:
+    env = MagicMock()
+    env.max_episode_length_s = 20.0
+    env.common_step_counter = env_step * _NUM_STEPS_PER_ENV
+    env.reward_manager._episode_sums = {
+      "track_linear_velocity": torch.tensor([value * 20.0, value * 20.0])
+    }
+    wd(env, torch.tensor([0, 1]))
+
+  step(1, 2.5)  # arms
+  assert wd._armed
+  # Transient dip (40 iters below 1.0): no fire.
+  for i in range(2, 42):
+    step(i, 0.8)
+  # Recovery resets the counter.
+  step(42, 1.5)
+  assert wd._below_count == 0
+  # Sustained rot: fires at the 60th consecutive iteration below 1.0.
+  with pytest.raises(RuntimeError, match="failing fast"):
+    for i in range(43, 43 + 61):
+      step(i, 0.6)
+
+
+def test_aimd_and_watchdog_accept_manager_kwargs() -> None:
+  import inspect
+
+  from mjlab.tasks.velocity.mdp.competence import (
+    aimd_difficulty,
+    track_reward_watchdog,
+  )
+
+  aimd_params = {
+    "command_name",
+    "event_name",
+    "alpha",
+    "beta",
+    "congest_bar",
+    "emergency_bar",
+    "gate_attain",
+  }
+  sig = set(inspect.signature(aimd_difficulty.__call__).parameters)
+  assert not (aimd_params - sig)
+  wd_params = {
+    "reward_name",
+    "arm_above",
+    "fail_below",
+    "fail_persist_iters",
+  }
+  sig = set(inspect.signature(track_reward_watchdog.__call__).parameters)
+  assert not (wd_params - sig)

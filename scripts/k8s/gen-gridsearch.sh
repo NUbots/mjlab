@@ -246,6 +246,9 @@ export COMPETENCE_PROMOTE_ATTAIN COMPETENCE_DEMOTE_ATTAIN
 export COMPETENCE_PROMOTE_WOBBLE COMPETENCE_DEMOTE_WOBBLE
 export COMPETENCE_PROMOTE_FELL COMPETENCE_DEMOTE_FELL COMPETENCE_COOLDOWN_ITERS
 export COMPETENCE_DEMOTE_FAST_FELL COMPETENCE_TOP_STREAK
+export CURRICULUM_STYLE AIMD_ALPHA AIMD_BETA AIMD_CONGEST_BAR
+export AIMD_EMERGENCY_BAR AIMD_GATE_ATTAIN
+export TRACK_WATCHDOG WATCHDOG_ARM_ABOVE WATCHDOG_FAIL_BELOW WATCHDOG_PERSIST_ITERS
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
@@ -1181,6 +1184,19 @@ _competence_defaults() {
   # uses code defaults (0.5 / 5).
   export COMPETENCE_DEMOTE_FAST_FELL=""
   export COMPETENCE_TOP_STREAK=""
+  # AIMD continuous difficulty (doc 15 R8) + rot watchdog; empty = code
+  # defaults (alpha 0.002, beta 0.7, bars 0.35/0.55, gate 0.40; watchdog
+  # arm 2.0 / fail 1.0 / persist 60).
+  export CURRICULUM_STYLE=""
+  export AIMD_ALPHA=""
+  export AIMD_BETA=""
+  export AIMD_CONGEST_BAR=""
+  export AIMD_EMERGENCY_BAR=""
+  export AIMD_GATE_ATTAIN=""
+  export TRACK_WATCHDOG=""
+  export WATCHDOG_ARM_ABOVE=""
+  export WATCHDOG_FAIL_BELOW=""
+  export WATCHDOG_PERSIST_ITERS=""
 }
 
 
@@ -1471,6 +1487,39 @@ gen_v24c() {
   export RUN_NAME="clock_owned__v24c-attain050-ph2k__8gpu-6144__s1__${BATCH}"
   export WANDB_TAGS="clock_owned,v24c,attain-0.50,phase-2k,lmax4,std-min-0.13,8gpu,multinode,batch-v24,gridsearch"
   emit_manifest "mj-gs-v24c-prod"
+}
+
+
+# BATCH=v26: AIMD continuous difficulty (doc 15 R8) — the TCP turn. One
+# scalar d drives command ranges (lerp L0->L5 envelope) and push magnitude
+# (0.75x->2.0x); additive increase 0.002/iter gated on health, 0.7x cut at
+# fast-fall 0.35, 0.5x at 0.55, ssthresh slow-probe, refractory doubling at
+# walls. No levels, no promote bars to get wrong: gates modulate the RATE.
+# The rot watchdog fails the run fast if trkLin (>2.0 once) sustains <1.0
+# for 60 iters. 8-GPU for rapid feedback; judge vs v25-push oscillator on
+# time-at-difficulty, mean d, and best-checkpoint eval.
+gen_v26() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v26-aimd-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v26"
+  export RUN_NAME="clock_owned__v26-aimd__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v26-aimd,continuous-difficulty,std-min-0.13,8gpu,multinode,batch-v26,gridsearch"
+  emit_manifest "mj-gs-v26-aimd"
 }
 
 
@@ -1820,6 +1869,7 @@ case "$BATCH" in
   v24c) gen_v24c; expected=1 ;;
   v24d) gen_v24d; expected=1 ;;
   v25) gen_v25; expected=2 ;;
+  v26) gen_v26; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

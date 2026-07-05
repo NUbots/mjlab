@@ -189,6 +189,26 @@ spec:
                   value: "${COMPETENCE_DEMOTE_FAST_FELL}"
                 - name: COMPETENCE_TOP_STREAK
                   value: "${COMPETENCE_TOP_STREAK}"
+                - name: CURRICULUM_STYLE
+                  value: "${CURRICULUM_STYLE}"
+                - name: AIMD_ALPHA
+                  value: "${AIMD_ALPHA}"
+                - name: AIMD_BETA
+                  value: "${AIMD_BETA}"
+                - name: AIMD_CONGEST_BAR
+                  value: "${AIMD_CONGEST_BAR}"
+                - name: AIMD_EMERGENCY_BAR
+                  value: "${AIMD_EMERGENCY_BAR}"
+                - name: AIMD_GATE_ATTAIN
+                  value: "${AIMD_GATE_ATTAIN}"
+                - name: TRACK_WATCHDOG
+                  value: "${TRACK_WATCHDOG}"
+                - name: WATCHDOG_ARM_ABOVE
+                  value: "${WATCHDOG_ARM_ABOVE}"
+                - name: WATCHDOG_FAIL_BELOW
+                  value: "${WATCHDOG_FAIL_BELOW}"
+                - name: WATCHDOG_PERSIST_ITERS
+                  value: "${WATCHDOG_PERSIST_ITERS}"
                 - name: COMPETENCE_COOLDOWN_ITERS
                   value: "${COMPETENCE_COOLDOWN_ITERS}"
                 - name: LINK_MASS_SCALE_MIN

@@ -594,6 +594,279 @@ class adaptive_push_level:
     return snapshot
 
 
+def _lerp_range(
+  lo: tuple[float, float], hi: tuple[float, float], d: float
+) -> tuple[float, float]:
+  return (lo[0] + (hi[0] - lo[0]) * d, lo[1] + (hi[1] - lo[1]) * d)
+
+
+@dataclass
+class AimdParams:
+  """AIMD (TCP-style) continuous difficulty control law.
+
+  Every constant is calibrated against measured v20-v25 data; see doc 15
+  R8. The congestion signal is the fast windowed fall rate (detection
+  latency ~11 iters at its 0.2/iter EMA), so the additive rate is chosen
+  so the controller cannot travel meaningfully past capacity within the
+  detection lag: 0.002/iter x 11 iters = 0.022 in d = ~0.01 m/s of
+  lin_vel_x (lerp span 0.5). Congestion cut 0.7 takes the burn zone
+  (d~0.85, +-0.68 m/s) to +-0.55 in one event - below every observed
+  ignition - instead of the level-cascade's trip to baby commands.
+  Bars: 0.35 proved recoverable twice (v25-push bounces), 0.5 proved
+  fatal (v24); healthy band is ~0.26. Increase gates hold difficulty
+  while stressed and are feasibility-checked per the R3 standing rule
+  (worst observed healthy values: fast 0.02-0.15, wobble 0.011-0.02,
+  attain ceiling 0.543): they gate the RATE, not a promote event, so an
+  infeasible gate freezes d rather than blocking a jump.
+  """
+
+  alpha: float = 0.002  # additive increase per healthy iteration
+  ssthresh_alpha_div: float = 3.0  # probe rate divisor above ssthresh
+  beta: float = 0.7  # multiplicative decrease per congestion event
+  beta_emergency: float = 0.5  # harder cut while in emergency
+  congest_bar: float = 0.35  # fast fall rate: congestion event
+  emergency_bar: float = 0.55  # fast fall rate: spiral in progress
+  refractory_iters: int = 15  # one event = one cut (detection lag + margin)
+  backoff_window_iters: int = 100  # repeat congestion inside this doubles
+  refractory_max_iters: int = 60  # cap for doubled refractory
+  backoff_reset_iters: int = 300  # clean streak restoring base refractory
+  ssthresh_factor: float = 0.85  # high-water mark below the congestion d
+  gate_fast: float = 0.20  # below healthy-band ceiling (0.26) w/ margin
+  gate_wobble: float = 0.10  # healthy 0.011-0.02; 5x margin
+  gate_attain: float = 0.40  # worst ceiling 0.543; 26% margin
+
+
+class AimdDifficultyState(TypedDict):
+  d: float
+  ssthresh: float
+  refractory: int
+  last_cut_iter: int
+  last_congest_iter: int
+
+
+class AimdController:
+  """Additive-increase / multiplicative-decrease difficulty controller.
+
+  Chiu-Jain: AIMD is the control law that converges to a stable sawtooth
+  around an unknown capacity under binary congestion feedback. Difficulty
+  is a single scalar d in [0, 1] so command width and push magnitude move
+  together (v25-push showed independent ladders co-promote into the same
+  wall).
+  """
+
+  def __init__(self, params: AimdParams):
+    self.p = params
+    self.d = 0.0
+    self.ssthresh = 1.0
+    self.refractory = params.refractory_iters
+    self.last_cut_iter = -(10**9)
+    self.last_congest_iter = -(10**9)
+
+  def state_dict(self) -> AimdDifficultyState:
+    return {
+      "d": self.d,
+      "ssthresh": self.ssthresh,
+      "refractory": self.refractory,
+      "last_cut_iter": self.last_cut_iter,
+      "last_congest_iter": self.last_congest_iter,
+    }
+
+  def load_state_dict(self, state: AimdDifficultyState) -> None:
+    self.d = float(state["d"])
+    self.ssthresh = float(state["ssthresh"])
+    self.refractory = int(state["refractory"])
+    self.last_cut_iter = int(state["last_cut_iter"])
+    self.last_congest_iter = int(state["last_congest_iter"])
+
+  def update(
+    self,
+    *,
+    cur_iter: int,
+    fast_fall_rate: float,
+    wobble_ema: float,
+    attain_ema: float,
+  ) -> str | None:
+    p = self.p
+    in_refractory = cur_iter - self.last_cut_iter < self.refractory
+
+    if fast_fall_rate >= p.congest_bar:
+      if in_refractory:
+        return None
+      # Exponential backoff at persistent walls (TCP RTO analog): repeat
+      # congestion shortly after the last one doubles the refractory.
+      if cur_iter - self.last_congest_iter <= p.backoff_window_iters:
+        self.refractory = min(self.refractory * 2, p.refractory_max_iters)
+      elif cur_iter - self.last_congest_iter >= p.backoff_reset_iters:
+        self.refractory = p.refractory_iters
+      beta = p.beta_emergency if fast_fall_rate >= p.emergency_bar else p.beta
+      self.ssthresh = max(self.d * p.ssthresh_factor, 0.05)
+      self.d *= beta
+      self.last_cut_iter = cur_iter
+      self.last_congest_iter = cur_iter
+      return "cut"
+
+    if in_refractory:
+      return None
+    healthy = (
+      fast_fall_rate < p.gate_fast
+      and wobble_ema < p.gate_wobble
+      and attain_ema > p.gate_attain
+    )
+    if not healthy:
+      return None
+    alpha = p.alpha
+    if self.d >= self.ssthresh:
+      alpha /= p.ssthresh_alpha_div
+    self.d = min(self.d + alpha, 1.0)
+    return "increase"
+
+
+class aimd_difficulty:
+  """Continuous TCP-style difficulty: one scalar drives commands + pushes."""
+
+  def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
+    self._command_name: str = cfg.params["command_name"]
+    self._event_name: str = cfg.params["event_name"]
+    self._params = AimdParams(
+      alpha=cfg.params.get("alpha", 0.002),
+      beta=cfg.params.get("beta", 0.7),
+      congest_bar=cfg.params.get("congest_bar", 0.35),
+      emergency_bar=cfg.params.get("emergency_bar", 0.55),
+      gate_attain=cfg.params.get("gate_attain", 0.40),
+    )
+    self._controller = AimdController(self._params)
+    self._tracker = get_competence_tracker(env)
+    self._last_check_iter = -1
+    self._apply(env, 0.0)
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    del env_ids
+
+  def _apply(self, env: ManagerBasedRlEnv, d: float) -> dict[str, torch.Tensor]:
+    lo, hi = COMMAND_LEVEL_TABLE[0], COMMAND_LEVEL_TABLE[-1]
+    command_term = env.command_manager.get_term(self._command_name)
+    assert command_term is not None
+    ccfg = command_term.cfg
+    assert isinstance(ccfg, UniformVelocityCommandCfg)
+    ccfg.ranges.lin_vel_x = _lerp_range(lo["lin_vel_x"], hi["lin_vel_x"], d)
+    ccfg.ranges.lin_vel_y = _lerp_range(lo["lin_vel_y"], hi["lin_vel_y"], d)
+    ccfg.ranges.ang_vel_z = _lerp_range(lo["ang_vel_z"], hi["ang_vel_z"], d)
+
+    push_scale = (
+      PUSH_LEVEL_SCALES[0] + (PUSH_LEVEL_SCALES[-1] - PUSH_LEVEL_SCALES[0]) * d
+    )
+    ecfg = env.event_manager.get_term_cfg(self._event_name)
+    ecfg.params["velocity_range"] = _scale_push_velocity_range(push_scale)
+
+    return {
+      "difficulty": torch.tensor(d),
+      "ssthresh": torch.tensor(self._controller.ssthresh),
+      "lin_vel_x_max": torch.tensor(ccfg.ranges.lin_vel_x[1]),
+      "ang_vel_z_max": torch.tensor(ccfg.ranges.ang_vel_z[1]),
+      "push_scale": torch.tensor(push_scale),
+    }
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    command_name: str,
+    event_name: str,
+    alpha: float = 0.002,
+    beta: float = 0.7,
+    congest_bar: float = 0.35,
+    emergency_bar: float = 0.55,
+    gate_attain: float = 0.40,
+  ) -> dict[str, torch.Tensor]:
+    del (command_name, event_name, alpha, beta, congest_bar, emergency_bar)
+    del gate_attain
+    self._tracker.finalize_episodes(env, env_ids)
+    stats = self._tracker.population_means()
+    cur_iter = env.common_step_counter // _NUM_STEPS_PER_ENV
+    if cur_iter != self._last_check_iter:
+      self._last_check_iter = cur_iter
+      self._controller.update(
+        cur_iter=cur_iter,
+        fast_fall_rate=stats["fast_fall_rate"],
+        wobble_ema=stats["wobble"],
+        attain_ema=stats["attain"],
+      )
+    snapshot = self._apply(env, self._controller.d)
+    snapshot.update({f"competence_{k}": torch.tensor(v) for k, v in stats.items()})
+    return snapshot
+
+
+class track_reward_watchdog:
+  """Fail fast when a once-good policy rots (user rule, 2026-07-05).
+
+  Signal: the exact quantity logged as Episode_Reward/<reward_name>
+  (episodic sums are read BEFORE the reward manager zeroes them - the
+  curriculum manager runs first in _reset_idx), smoothed with a 0.05/iter
+  EMA (~20-iter response). Arms once the EMA exceeds arm_above (every
+  healthy corrected-physics run passed 2.0 by iter ~800; observed
+  2.26-2.43); fires when the EMA stays below fail_below for
+  fail_persist_iters consecutive iterations. Persistence is calibrated
+  against the v25-push bounce traces: transient dips reach ~0.85 for
+  <=45 iters and the EMA barely crosses 1.0, while v25-slow's rot (a
+  600-iter slide) exceeds any plausible persistence bar. Firing raises
+  RuntimeError: the pod fails, torchrun tears down the gang, and the job
+  fails fast instead of burning GPU-hours on an unrecoverable policy.
+  """
+
+  def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
+    del env
+    self._reward_name: str = cfg.params.get("reward_name", "track_linear_velocity")
+    self._arm_above: float = cfg.params.get("arm_above", 2.0)
+    self._fail_below: float = cfg.params.get("fail_below", 1.0)
+    self._persist_iters: int = cfg.params.get("fail_persist_iters", 60)
+    self._ema_alpha: float = cfg.params.get("ema_alpha", 0.05)
+    self._ema: float = 0.0
+    self._armed = False
+    self._below_count = 0
+    self._last_iter = -1
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    del env_ids
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    reward_name: str = "track_linear_velocity",
+    arm_above: float = 2.0,
+    fail_below: float = 1.0,
+    fail_persist_iters: int = 60,
+    ema_alpha: float = 0.05,
+  ) -> dict[str, torch.Tensor]:
+    del (reward_name, arm_above, fail_below, fail_persist_iters, ema_alpha)
+    sums = env.reward_manager._episode_sums.get(self._reward_name)
+    if sums is not None and not isinstance(env_ids, slice) and len(env_ids) > 0:
+      window = sums[env_ids].mean().item() / env.max_episode_length_s
+      self._ema += self._ema_alpha * (window - self._ema)
+
+    cur_iter = env.common_step_counter // _NUM_STEPS_PER_ENV
+    if cur_iter != self._last_iter:
+      self._last_iter = cur_iter
+      if self._ema > self._arm_above:
+        self._armed = True
+      if self._armed and self._ema < self._fail_below:
+        self._below_count += 1
+      else:
+        self._below_count = 0
+      if self._below_count >= self._persist_iters:
+        raise RuntimeError(
+          f"track_reward_watchdog: {self._reward_name} EMA "
+          f"{self._ema:.3f} below {self._fail_below} for "
+          f"{self._below_count} iters after peaking above "
+          f"{self._arm_above} - policy is rotting, failing fast."
+        )
+    return {
+      "ema": torch.tensor(self._ema),
+      "armed": torch.tensor(1.0 if self._armed else 0.0),
+      "below_count": torch.tensor(float(self._below_count)),
+    }
+
+
 class staged_on_competence:
   """Ramp penalty weights when stability competence holds; back off on loss.
 
