@@ -137,6 +137,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `14-v16e-analysis-v16f.md` | v16e: entropy fix confirmed, disease #2 isolated (nonstationary-objective height ratchet), probable first gate-pass checkpoint (`0hlgni3s` @750–1000), v16f stationarity cells + decision rules |
 | `15-v20-era-findings.md` | v20-era chronicle: clock_owned promoted (10x resilience, p95 usage under stress), feet fix validated, controller bug chronicle + threshold-feasibility rule, attainment/wobble gating, std<0.15 destabilizer hypothesis (v22), multi-GPU program + batch-size economics |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
+| `references/metrics-glossary.md` | every logged W&B key explained with units and measured healthy/alarm bands (AIMD, cohort diagnostics, hazards/frontier, watchdog, shadow-lambda, core rsl-rl gotchas) + 30-second run-reading checklist |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |
 | `references/systematic-sim2real-pace.md` | Identification-over-randomization study; delay/friction/armature guidance |
