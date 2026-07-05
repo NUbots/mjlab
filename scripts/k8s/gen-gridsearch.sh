@@ -1520,6 +1520,44 @@ gen_v24c() {
 }
 
 
+# BATCH=v33: THE root-cause test (R15). Full stack + landing anneal +
+# frozen obs normalizers (500 iters). v32 proved the rot is
+# learning-rate-independent (identical slide at LR 1e-5 vs 2e-4); the
+# remaining iteration-clocked, LR-immune updater is the empirical obs
+# normalizer chasing the policy's own observation distribution. If v33
+# holds its plateau past ~1700 without the slide, root cause confirmed
+# and long-horizon training opens; if it ignites at ~1600 again, the
+# hypothesis is dead. 4000 iters, 8 GPUs.
+gen_v33() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.3"
+  export LANDING_ANNEAL="1"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v33-normfreeze-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v33"
+  export RUN_NAME="clock_owned__v33-normfreeze__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v33-normfreeze,obs-norm-freeze,landing,batch-v33,gridsearch"
+  emit_manifest "mj-gs-v33-normfreeze"
+}
+
+
 # BATCH=v32: the endurance test — full stack + landing anneal, 4000 iters,
 # 8 GPUs. The bet: at capacity-plateau the anneal walks the LR to its
 # floor BEFORE the churn fuse burns (v30 replay: factor < 0.15 by the
@@ -2123,6 +2161,7 @@ case "$BATCH" in
   v30) gen_v30; expected=1 ;;
   v31) gen_v31; expected=2 ;;
   v32) gen_v32; expected=1 ;;
+  v33) gen_v33; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
