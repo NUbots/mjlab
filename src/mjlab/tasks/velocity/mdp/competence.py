@@ -1217,6 +1217,19 @@ class aimd_difficulty:
     # healthy dP-cut wobbles (1.4% dips) stay well inside the band.
     self._attain_slide_frac: float = cfg.params.get("attain_slide_frac", 0.95)
     self._attain_max = 0.0
+    # Landing anneal (R14): task-side relief cannot stop churn once begun
+    # (five demonstrations, v24-v30); the only lever left for runs longer
+    # than ~1800 iters is optimizer-side. Once the run is AT CAPACITY
+    # (d_cmd >= at_capacity_d sustained) AND PLATEAUED (attain within 2%
+    # of its trailing max sustained), there is nothing left to learn at
+    # this difficulty - so the landing factor decays monotonically and
+    # the runner scales desired_kl by it (the adaptive schedule then
+    # walks the LR to its floor): convergence instead of churn fuel.
+    # Churn onset despite the anneal (attain slide) hard-freezes faster.
+    self._landing_enabled: bool = bool(cfg.params.get("landing_anneal", False))
+    self._landing_factor = 1.0
+    self._at_capacity_since = -1
+    self._plateau_since = -1
     self._cmd_ctrl = AimdController(self._cmd_params)
     self._push_ctrl = AimdController(self._push_params)
     self._tracker = get_competence_tracker(env)
@@ -1255,6 +1268,7 @@ class aimd_difficulty:
       "ang_vel_z_max": torch.tensor(ccfg.ranges.ang_vel_z[1]),
       "push_scale": torch.tensor(push_scale),
       "attain_trailing_max": torch.tensor(self._attain_max),
+      "landing_factor": torch.tensor(self._landing_factor),
     }
 
   def __call__(
@@ -1273,10 +1287,11 @@ class aimd_difficulty:
     push_congest_bar: float = 0.30,
     push_gate_excess: float = 0.15,
     attain_slide_frac: float = 0.95,
+    landing_anneal: bool = False,
   ) -> dict[str, torch.Tensor]:
     del (command_name, event_name, alpha, beta, congest_bar, emergency_bar)
     del (gate_attain, beta_arrest, envelope_scale)
-    del (push_congest_bar, push_gate_excess, attain_slide_frac)
+    del (push_congest_bar, push_gate_excess, attain_slide_frac, landing_anneal)
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
     strat = self._tracker.stratified_means()
@@ -1300,6 +1315,29 @@ class aimd_difficulty:
       cmd_signal = max(strat["fast_fall_clean"], pop_fast if emergency else 0.0)
       if attain_slide:
         cmd_signal = max(cmd_signal, self._cmd_params.congest_bar + 1e-3)
+      if self._landing_enabled:
+        if self._cmd_ctrl.d >= 0.95:
+          if self._at_capacity_since < 0:
+            self._at_capacity_since = cur_iter
+        else:
+          self._at_capacity_since = -1
+        plateaued = self._attain_max > 0.5 and att >= 0.98 * self._attain_max
+        if plateaued:
+          if self._plateau_since < 0:
+            self._plateau_since = cur_iter
+        else:
+          self._plateau_since = -1
+        ready = (
+          self._at_capacity_since >= 0
+          and cur_iter - self._at_capacity_since >= 200
+          and self._plateau_since >= 0
+          and cur_iter - self._plateau_since >= 150
+        )
+        if attain_slide:
+          self._landing_factor = max(self._landing_factor * 0.9, 0.02)
+        elif ready:
+          self._landing_factor = max(self._landing_factor * 0.995, 0.02)
+        env._landing_factor = self._landing_factor
       self._cmd_ctrl.update(
         cur_iter=cur_iter,
         fast_fall_rate=cmd_signal,

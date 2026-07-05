@@ -579,6 +579,7 @@ def _add_aimd_curriculum(cfg: ManagerBasedRlEnvCfg) -> None:
       "envelope_scale": _env_float("AIMD_ENVELOPE_SCALE", 1.0),
       "push_congest_bar": _env_float("AIMD_PUSH_CONGEST_BAR", 0.30),
       "attain_slide_frac": _env_float("AIMD_ATTAIN_SLIDE_FRAC", 0.95),
+      "landing_anneal": _env_bool("LANDING_ANNEAL", default=False),
       "push_gate_excess": _env_float("AIMD_PUSH_GATE_EXCESS", 0.15),
     },
   )

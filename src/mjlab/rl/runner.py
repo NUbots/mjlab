@@ -30,6 +30,33 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
           for opt in ("rnn_type", "rnn_hidden_dim", "rnn_num_layers"):
             train_cfg[key].pop(opt, None)
     super().__init__(env, train_cfg, log_dir, device)
+    self._install_landing_anneal()
+
+  def _install_landing_anneal(self) -> None:
+    """Scale desired_kl by the env-computed landing factor before each
+    PPO update (doc 15 R14).
+
+    Task-side relief cannot stop optimizer churn once it begins (five
+    demonstrations, v24-v30); the landing anneal is the optimizer-side
+    lever: when the curriculum reports at-capacity + plateaued, the env
+    sets ``_landing_factor`` < 1 and the adaptive-KL schedule chases the
+    shrinking target, walking the learning rate to its floor -
+    convergence instead of churn fuel. No-op unless the env publishes a
+    factor and the algorithm uses an adaptive KL schedule.
+    """
+    alg = getattr(self, "alg", None)
+    if alg is None or getattr(alg, "desired_kl", None) is None:
+      return
+    base_kl = float(alg.desired_kl)
+    orig_update = alg.update
+    unwrapped = getattr(self.env, "unwrapped", None)
+
+    def update_with_landing(*args, **kwargs):
+      factor = getattr(unwrapped, "_landing_factor", 1.0)
+      alg.desired_kl = max(base_kl * float(factor), 2e-4)
+      return orig_update(*args, **kwargs)
+
+    alg.update = update_with_landing
 
   def export_policy_to_onnx(
     self, path: str, filename: str = "policy.onnx", verbose: bool = False

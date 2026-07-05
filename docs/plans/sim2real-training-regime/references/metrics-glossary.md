@@ -24,6 +24,15 @@ prefix as they appear in W&B.
   (fast_fall_pushed − fast_fall_clean, bar 0.30); commands and pushes
   now retreat independently, population emergency arrests both.
 - `ssthresh_push` — high-water mark for the push axis.
+- `landing_factor` — the optimizer-anneal multiplier (R14, LANDING_ANNEAL
+  runs). 1.0 = full learning; once the run is at capacity (d >= 0.95
+  sustained 200 iters) AND plateaued (attain within 2% of trailing max
+  for 150 iters) it decays 0.995/iter (0.9/iter if the attain-slide
+  fires anyway), and the runner scales desired_kl by it — the adaptive
+  schedule then walks the LR to its floor. Monotone within a run.
+  Watch: should reach ~0.1 within ~450 iters of plateau, BEFORE the
+  historical ignition window; a run dying with factor still at 1.0
+  means the trigger conditions never aged (check d and attain flatness).
 - `attain_trailing_max` — sticky running max of clean attainment
   (~14k-iter half-life decay). The attain-slide congestion reference
   (v30+): clean_attain below 95% of this fires a d_cmd cut even with

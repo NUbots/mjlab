@@ -1111,3 +1111,78 @@ def test_attain_slide_fires_congestion_at_the_cap() -> None:
   # Refractory: sliding continues but no second cut yet.
   out = step_at(1503, 0.67)
   assert out["difficulty"].item() == pytest.approx(0.7)
+
+
+def test_landing_anneal_triggers_at_capacity_plateau() -> None:
+  """v30 replay: at capacity from ~1100, plateaued from ~1400 -> the
+  landing factor must begin decaying around 1600 and be well below 1 by
+  the historical ignition window (~1750), monotone throughout."""
+  term, env = _split_aimd_term()
+  term._landing_enabled = True
+  tracker = env._competence_tracker
+  term._cmd_ctrl.d = 1.0
+  term._push_ctrl.d = 0.6
+  tracker.wobble_ema[:] = 0.02
+  tracker.fast_fall_rate = 0.10
+  tracker.fast_fall_clean = 0.08
+  tracker.fast_fall_pushed = 0.28
+
+  factors = {}
+  for it in range(1100, 1800):
+    tracker.attain_ema[:] = 0.615  # flat plateau
+    env.common_step_counter = it * _NUM_STEPS_PER_ENV
+    tracker._finalized_step = -1
+    out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+    factors[it] = out["landing_factor"].item()
+
+  # Conditions age from 1100: capacity needs 200 iters, plateau 150.
+  assert factors[1250] == pytest.approx(1.0)
+  assert factors[1299] == pytest.approx(1.0)
+  assert factors[1350] < 1.0  # anneal underway after both aged
+  assert factors[1500] < 0.5  # 0.995^200
+  assert factors[1750] < 0.15  # well down before the ignition window
+  vals = [factors[k] for k in sorted(factors)]
+  assert all(b <= a + 1e-9 for a, b in zip(vals, vals[1:], strict=False))  # monotone
+  assert env._landing_factor == pytest.approx(vals[-1])
+
+
+def test_landing_anneal_off_by_default() -> None:
+  term, env = _split_aimd_term()
+  term._cmd_ctrl.d = 1.0
+  tracker = env._competence_tracker
+  tracker.attain_ema[:] = 0.615
+  tracker.wobble_ema[:] = 0.02
+  tracker.fast_fall_rate = 0.10
+  tracker.fast_fall_clean = 0.08
+  tracker.fast_fall_pushed = 0.28
+  for it in range(1100, 1800, 50):
+    env.common_step_counter = it * _NUM_STEPS_PER_ENV
+    tracker._finalized_step = -1
+    out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+  assert out["landing_factor"].item() == pytest.approx(1.0)
+
+
+def test_runner_wrapper_scales_desired_kl() -> None:
+  from mjlab.rl.runner import MjlabOnPolicyRunner
+
+  runner = MjlabOnPolicyRunner.__new__(MjlabOnPolicyRunner)
+  alg = MagicMock()
+  alg.desired_kl = 0.01
+  calls = []
+  alg.update = lambda *a, **k: calls.append(alg.desired_kl)
+  runner.alg = alg
+  inner_env = MagicMock()
+  inner_env._landing_factor = 1.0
+  wrapper_env = MagicMock()
+  wrapper_env.unwrapped = inner_env
+  runner.env = wrapper_env
+  runner._install_landing_anneal()
+
+  alg.update()
+  inner_env._landing_factor = 0.25
+  alg.update()
+  inner_env._landing_factor = 0.001  # floor clamps
+  alg.update()
+  assert calls[0] == pytest.approx(0.01)
+  assert calls[1] == pytest.approx(0.0025)
+  assert calls[2] == pytest.approx(2e-4)
