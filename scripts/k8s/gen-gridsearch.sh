@@ -1501,6 +1501,38 @@ gen_v24c() {
 }
 
 
+# BATCH=v28: v27 + the shadow Lagrangian energy multiplier riding along
+# (log-only; joule stays staged). Same AIMD+cohort stack at the 5986850
+# pin. Launch AFTER v27 lands: judge v27's sawtooth-vs-frontier agreement
+# first; if the estimator cross-validates, v28's successor hands command
+# difficulty to it. Shadow-lambda validation: climbs while style healthy,
+# freezes on peak-height dips, retreats before T4 would fire.
+gen_v28() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="2"
+  export MJLAB_LOG_STAMP="v28-shadow-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v28"
+  export RUN_NAME="clock_owned__v28-aimd-shadowlam__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v28-shadow-lambda,push-cohort-0.3,std-min-0.13,8gpu,multinode,batch-v28,gridsearch"
+  emit_manifest "mj-gs-v28-shadow"
+}
+
+
 # BATCH=v27: v26 + the decoupling layer. AIMD with the ssthresh wart fixed
 # (full-rate climb), 30% push cohort (clean 70% = uncontaminated tracking
 # signal + deployment-matched distribution), frontier estimator and
@@ -1914,6 +1946,7 @@ case "$BATCH" in
   v25) gen_v25; expected=2 ;;
   v26) gen_v26; expected=1 ;;
   v27) gen_v27; expected=1 ;;
+  v28) gen_v28; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

@@ -196,6 +196,70 @@ Structural exits for the next code cycle (in order):
 4. Per-|cmd| binned attainment (population mean dilutes high-command
    failure; would also make L5 gate honest before re-attempting ±0.75).
 
+### R8 — AIMD continuous difficulty (the TCP turn, v26/v27)
+
+User insight (2026-07-05): the level ladder's jumps are visible in every
+trace, and TCP congestion control solves formally the same problem —
+probe an unknown, drifting capacity from a binary distress signal. The
+control law (commit 633d5f6, wart-fixed 1b4e71c): one difficulty scalar
+d lerps command ranges across the full L0→L5 envelope and push magnitude
+0.75×→2.0×; additive increase 0.002/iter (overshoot inside the ~11-iter
+detection lag ≈ 0.01 m/s), multiplicative cut 0.7 at fast-fall 0.35
+(proven recoverable twice, v25-push) and 0.5 at 0.55 (proven fatal,
+v24), ssthresh high-water slow-probe, refractory doubling as backoff at
+persistent walls. Chiu-Jain: AIMD converges to a stable sawtooth around
+capacity; the sawtooth doubles as intrinsic anti-churn (the objective
+never fully freezes). Structural win: increase gates modulate the RATE,
+so the R3 bug species (infeasible bar silently blocks a jump) cannot
+recur — an infeasible gate freezes d visibly. Wart found live on v26:
+early-chaos "cuts" at d≈0 pinned ssthresh to its floor and the climb ran
+at probe rate; fixed (ignore congestion at d<0.05) + regression test.
+
+### R9 — Push-cohort stratification + frontier estimator (v27)
+
+User design: fixed env-index cohorts — 30% pushed, 70% push-free — so
+competence attribution is by membership, with no recovery-horizon guess.
+Clean cohort = uncontaminated tracking/attainment signal (sandbagging
+detector) AND deployment-matched distribution (matches are mostly
+push-free); pushed cohort = push competence, with difference-in-rates
+(fall_rate_pushed − fall_rate_clean) isolating the push effect including
+delayed falls (both cohorts share the command sampler, so command
+difficulty cancels). Plus: clean-cohort falls bucketed by commanded
+speed (binned Bernoulli, ~1k samples/bucket per 50-iter window → ±3%)
+give P(fail | speed) and a live frontier_speed estimate — the measured
+version of what AIMD discovers by collision; and a push-to-fall timing
+histogram answers "how long does recovery take" empirically. Phase 1 is
+log-only on v27; the estimator earns control (fall-rate setpoint solved
+against the measured curve) only if frontier_speed cross-validates
+against the AIMD sawtooth's settling point.
+
+### R10 — Penalties are Lagrangian, not AIMD (shadow pilot ready)
+
+Taxonomy settled with the user: AIMD is for binary-catastrophic
+feedback (falls) probing unknown capacity; penalties have a continuous
+measurable cost and physically meaningful budgets, so they are
+constrained-RL multipliers (RCPO / PID-Lagrangian). Inverted per the
+user's framing — minimize energy SUBJECT TO competence: λ_joule rises
+(additive, full ramp ≥1000 iters for timescale separation — the
+disease-#2 lesson) only while swing peak height ≥ 85% of a trailing max
+(foot-lift collapse gate: v16c, v25-slow), clean attainment ≥ 0.50
+(sandbagging gate), clean fast-fall < 0.20 (shared governor); retreats
+×0.8 when peak height breaks 70%. The two historical joule failure
+modes ARE the gates, so the live controller cannot reproduce them
+silently. Shadow (log-only) implementation shipped (5986850) with
+feasibility replays: v25-slow's slide must trigger retreat ahead of the
+T4 monitor bar; a healthy plateau must climb at η. Rides along on v28;
+flips live only after one clean shadow run.
+
+### Standing safety rails (all runs from v27 on)
+
+- track_reward_watchdog: armed once Episode_Reward/track_linear_velocity
+  EMA > 2.0; sustained < 1.0 for 60 iters → RuntimeError → job fails
+  fast (user rule after v25-slow burned GPU-hours rotting). Calibrated:
+  v25-push bounce transients must not fire it.
+- Fast fall-rate reflex (0.35), σ floor STD_MIN=0.13, feet_min_sep,
+  best-checkpoint harvesting.
+
 ## Multi-GPU program (user-driven, latency-first)
 
 Reframe: while the lineage is still being debugged, single-run latency
