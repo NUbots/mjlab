@@ -1516,6 +1516,48 @@ gen_v24c() {
 }
 
 
+# BATCH=v31: the champion-harvest landing pair. v30 closed the book on
+# task-side rot rescue (5th demonstration: even cutting difficulty BEFORE
+# falls rose could not stop the spiral once churn began). The only
+# intervention with a perfect record is landing before the wall (v24d,
+# v25). Two 4-GPU seeds in parallel (ceiling variance is large: v29 attain
+# 0.712 vs v30 0.618 on identical config); land at 1800; best checkpoint
+# of the pair goes to eval/sim2sim. Optimizer-side anneal is the next
+# build for anything longer.
+gen_v31() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="1"
+  export MULTINODE=""
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.3"
+  export MAX_ITERATIONS="1800"
+  export PHASE_ITERATIONS="2000"
+  export EXPERIMENT_NAME="nugus_gridsearch_v31"
+
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v31-land-s1-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v31-landing__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v31-landing,harvest,ellipsoid,push-cohort-0.3,batch-v31,gridsearch"
+  emit_manifest "mj-gs-v31-land-s1"
+
+  export SEED="2"
+  export MJLAB_LOG_STAMP="v31-land-s2-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v31-landing__4gpu-6144__s2__${BATCH}"
+  emit_manifest "mj-gs-v31-land-s2"
+}
+
+
 # BATCH=v30: v29 + attain-slide congestion. v29 proved everything else:
 # split governor (push axis sawtoothed independently, no poison), record
 # policy (attain 0.712 / x 0.74 / y 0.58 at the FULL extended envelope
@@ -2040,6 +2082,7 @@ case "$BATCH" in
   v28) gen_v28; expected=1 ;;
   v29) gen_v29; expected=1 ;;
   v30) gen_v30; expected=1 ;;
+  v31) gen_v31; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
