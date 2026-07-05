@@ -250,6 +250,7 @@ export CURRICULUM_STYLE AIMD_ALPHA AIMD_BETA AIMD_CONGEST_BAR
 export AIMD_EMERGENCY_BAR AIMD_GATE_ATTAIN
 export TRACK_WATCHDOG WATCHDOG_ARM_ABOVE WATCHDOG_FAIL_BELOW WATCHDOG_PERSIST_ITERS
 export PUSH_COHORT_FRAC FRONTIER_HAZARD_BAR
+export JOULE_LAMBDA_SHADOW LAMBDA_CAP LAMBDA_RAMP_ITERS
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
@@ -1202,6 +1203,11 @@ _competence_defaults() {
   # legacy all-pushed, no diagnostics term knobs overridden.
   export PUSH_COHORT_FRAC=""
   export FRONTIER_HAZARD_BAR=""
+  # Shadow Lagrangian energy multiplier (doc 15 R10); empty = on with code
+  # defaults (log-only either way).
+  export JOULE_LAMBDA_SHADOW=""
+  export LAMBDA_CAP=""
+  export LAMBDA_RAMP_ITERS=""
 }
 
 

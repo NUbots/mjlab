@@ -1450,6 +1450,18 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "frontier_hazard_bar": _env_float("FRONTIER_HAZARD_BAR", 5e-4),
       },
     )
+    # Shadow Lagrangian energy multiplier (doc 15 R10): log-only pilot of
+    # the constrained penalty controller; validates against the staged
+    # weights before ever taking the wheel.
+    if _env_bool("JOULE_LAMBDA_SHADOW", default=True):
+      cfg.curriculum["joule_lambda_shadow"] = CurriculumTermCfg(
+        func=mdp.joule_lambda_shadow,
+        params={
+          "reward_name": "joule_heating",
+          "lambda_cap": _env_float("LAMBDA_CAP", 2e-5),
+          "ramp_iters": _env_int("LAMBDA_RAMP_ITERS", 1000),
+        },
+      )
 
   # Apply play mode overrides.
   if play:

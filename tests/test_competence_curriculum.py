@@ -717,3 +717,77 @@ def test_push_cohort_wiring(monkeypatch: pytest.MonkeyPatch) -> None:
   assert cfg.events["push_robot"].func is mdp.push_cohort_by_setting_velocity
   assert cfg.events["push_robot"].params["cohort_frac"] == pytest.approx(0.3)
   assert "competence_diagnostics" in cfg.curriculum
+
+
+def _shadow_env(*, peak: float, step: int) -> MagicMock:
+  env = _mock_tracked_env(fell=False, step_counter=step)
+  env.extras = {"log": {"Metrics/peak_height_mean": torch.tensor(peak)}}
+  env.reward_manager.get_term_cfg.return_value = MagicMock(weight=-1e-5)
+  return env
+
+
+def test_joule_shadow_climbs_when_healthy_and_retreats_on_style_collapse() -> None:
+  """Feasibility replays: a healthy plateau must climb lambda; a
+  v25-slow-style swing-height slide (0.0128 -> 0.0072, 44% drop) must
+  freeze at 85% and retreat before 60% decay (ahead of the T4 monitor)."""
+  from mjlab.tasks.velocity.mdp.competence import joule_lambda_shadow
+
+  cfg = MagicMock()
+  cfg.params = {"lambda_cap": 2e-5, "ramp_iters": 100}
+  env0 = _shadow_env(peak=0.0128, step=0)
+  env0._competence_tracker = CompetenceTracker(env0)
+  term = joule_lambda_shadow(cfg, env0)
+  tracker = env0._competence_tracker
+  tracker.set_push_cohort(0.5)
+  # Mark competence healthy (the gates read the clean cohort).
+  tracker.attain_ema[:] = 0.7
+  tracker.fast_fall_clean = 0.05
+
+  def run_iters(n: int, peak: float, start: int) -> int:
+    step = start
+    for _ in range(n):
+      env = _shadow_env(peak=peak, step=step)
+      env._competence_tracker = tracker
+      for _ in range(30):  # settle the slow peak EMA at this level
+        tracker.record_peak_height(env)
+      tracker._finalized_step = -1
+      term(env, torch.tensor([0, 1]))
+      step += _NUM_STEPS_PER_ENV
+    return step
+
+  # Warm up the EMA to the healthy level, then climb.
+  for _ in range(200):
+    tracker.record_peak_height(_shadow_env(peak=0.0128, step=0))
+  step = run_iters(50, peak=0.0128, start=24)
+  lam_healthy = term._lam
+  assert lam_healthy == pytest.approx(50 * 2e-7, rel=0.05)
+
+  # Style slide: EMA sinks toward 0.0072 while trailing max holds ~0.0128.
+  step = run_iters(60, peak=0.0072, start=step)
+  assert term._lam < lam_healthy  # retreat fired (peak_frac < 0.70)
+  # And it fired hard: multiplicative unwind, not a freeze.
+  assert term._lam < 0.5 * lam_healthy
+
+
+def test_joule_shadow_freezes_on_sandbagging() -> None:
+  from mjlab.tasks.velocity.mdp.competence import joule_lambda_shadow
+
+  cfg = MagicMock()
+  cfg.params = {"lambda_cap": 2e-5, "ramp_iters": 100}
+  env0 = _shadow_env(peak=0.012, step=0)
+  env0._competence_tracker = CompetenceTracker(env0)
+  term = joule_lambda_shadow(cfg, env0)
+  tracker = env0._competence_tracker
+  tracker.set_push_cohort(0.5)
+  tracker.fast_fall_clean = 0.05
+  for _ in range(200):
+    tracker.record_peak_height(_shadow_env(peak=0.012, step=0))
+  # Sandbagging: clean attain below floor -> hold, not retreat.
+  tracker.attain_ema[:] = 0.3
+  env = _shadow_env(peak=0.012, step=24)
+  env._competence_tracker = tracker
+  tracker._finalized_step = -1
+  out = term(env, torch.tensor([0, 1]))
+  assert out["gates_ok"].item() == 0.0
+  assert out["style_broken"].item() == 0.0
+  assert term._lam == pytest.approx(0.0)

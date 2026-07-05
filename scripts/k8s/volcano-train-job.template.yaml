@@ -213,6 +213,12 @@ spec:
                   value: "${PUSH_COHORT_FRAC}"
                 - name: FRONTIER_HAZARD_BAR
                   value: "${FRONTIER_HAZARD_BAR}"
+                - name: JOULE_LAMBDA_SHADOW
+                  value: "${JOULE_LAMBDA_SHADOW}"
+                - name: LAMBDA_CAP
+                  value: "${LAMBDA_CAP}"
+                - name: LAMBDA_RAMP_ITERS
+                  value: "${LAMBDA_RAMP_ITERS}"
                 - name: COMPETENCE_COOLDOWN_ITERS
                   value: "${COMPETENCE_COOLDOWN_ITERS}"
                 - name: LINK_MASS_SCALE_MIN

@@ -260,6 +260,13 @@ class CompetenceTracker:
       self._step_dt = float(env.step_dt)
     except (TypeError, ValueError):
       self._step_dt = 0.02
+    # Swing peak height population EMA, ingested from the per-step
+    # Metrics/peak_height_mean the feet_swing_height reward publishes
+    # (noisy per step - few landings per step - so a slow EMA), plus a
+    # slowly-decaying trailing max used as the style-regression reference
+    # by the Lagrangian penalty gates (doc 15 R10).
+    self.peak_height_ema = 0.0
+    self.peak_height_trailing_max = 0.0
 
   def set_push_cohort(self, frac: float) -> None:
     self.push_cohort_frac = frac
@@ -268,6 +275,22 @@ class CompetenceTracker:
 
   def record_push(self, env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> None:
     self.last_push_step[env_ids] = float(env.common_step_counter)
+
+  def record_peak_height(self, env: ManagerBasedRlEnv) -> None:
+    log = env.extras.get("log", {}) if isinstance(env.extras, dict) else {}
+    val = log.get("Metrics/peak_height_mean")
+    if val is None:
+      return
+    v = float(val)
+    if v <= 0.0:
+      return
+    self.peak_height_ema += 0.01 * (v - self.peak_height_ema)
+    # Sticky short-term, adaptive long-term: decays with ~1400-iter
+    # half-life so a config-level shift in healthy swing height does not
+    # permanently pin the reference.
+    self.peak_height_trailing_max = max(
+      self.peak_height_trailing_max * 0.99998, self.peak_height_ema
+    )
 
   def state_dict(self) -> dict[str, Any]:
     return {
@@ -516,6 +539,7 @@ def competence_tracker_step(
   tracker = getattr(env, "_competence_tracker", None)
   if tracker is not None:
     tracker.record_step(env)
+    tracker.record_peak_height(env)
 
 
 def push_cohort_by_setting_velocity(
@@ -539,6 +563,92 @@ def push_cohort_by_setting_velocity(
     return
   tracker.record_push(env, pushed_ids)
   push_by_setting_velocity(env, pushed_ids, velocity_range)
+
+
+class joule_lambda_shadow:
+  """Log-only pilot of the inverted-Lagrangian energy multiplier (R10).
+
+  Design (user, 2026-07-05): minimize energy SUBJECT TO competence - the
+  multiplier rises only while every style/competence gate holds, and
+  retreats multiplicatively the moment the squeeze starts eating them.
+  The two historical failure modes of the joule penalty are the two
+  gates, so the live version cannot reproduce them silently:
+    - foot-lift collapse: peak_height EMA >= peak_floor_frac of its
+      trailing max (v16c dragged feet; v25-slow slid 0.0128 -> 0.0072);
+    - sandbagging: clean-cohort attainment >= attain_floor (attainment
+      was built to make command-avoidance visible; the cohort split
+      decontaminated it);
+    - plus the shared governor: clean fast fall rate < fall_bar.
+  eta is sized for timescale separation (full ramp over ~1000 iters -
+  the disease-#2 lesson: the policy must track the objective
+  quasi-statically). This SHADOW version computes and logs the lambda
+  trajectory alongside the staged weight actually in charge; it changes
+  nothing. Validation: lambda climbs while style is healthy, freezes on
+  a peak-height dip, retreats before a T4-style decay would fire.
+  """
+
+  def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
+    self._tracker = get_competence_tracker(env)
+    self._reward_name: str = cfg.params.get("reward_name", "joule_heating")
+    self._lambda_cap: float = cfg.params.get("lambda_cap", 2e-5)
+    self._eta: float = self._lambda_cap / cfg.params.get("ramp_iters", 1000)
+    self._retreat: float = cfg.params.get("retreat", 0.8)
+    self._peak_floor_frac: float = cfg.params.get("peak_floor_frac", 0.85)
+    self._peak_retreat_frac: float = cfg.params.get("peak_retreat_frac", 0.70)
+    self._attain_floor: float = cfg.params.get("attain_floor", 0.50)
+    self._fall_bar: float = cfg.params.get("fall_bar", 0.20)
+    self._lam = 0.0
+    self._last_iter = -1
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    del env_ids
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    reward_name: str = "joule_heating",
+    lambda_cap: float = 2e-5,
+    ramp_iters: int = 1000,
+    retreat: float = 0.8,
+    peak_floor_frac: float = 0.85,
+    peak_retreat_frac: float = 0.70,
+    attain_floor: float = 0.50,
+    fall_bar: float = 0.20,
+  ) -> dict[str, torch.Tensor]:
+    del (reward_name, lambda_cap, ramp_iters, retreat, peak_floor_frac)
+    del (peak_retreat_frac, attain_floor, fall_bar)
+    self._tracker.finalize_episodes(env, env_ids)
+    t = self._tracker
+    strat = t.stratified_means()
+    cur_iter = env.common_step_counter // _NUM_STEPS_PER_ENV
+    peak_ref = max(t.peak_height_trailing_max, 1e-6)
+    peak_frac = t.peak_height_ema / peak_ref
+    style_broken = peak_frac < self._peak_retreat_frac
+    gates_ok = (
+      peak_frac >= self._peak_floor_frac
+      and strat["clean_attain"] >= self._attain_floor
+      and strat["fast_fall_clean"] < self._fall_bar
+    )
+    if cur_iter != self._last_iter:
+      self._last_iter = cur_iter
+      if style_broken:
+        self._lam *= self._retreat
+      elif gates_ok:
+        self._lam = min(self._lam + self._eta, self._lambda_cap)
+      # else: hold.
+    try:
+      live_weight = float(env.reward_manager.get_term_cfg(self._reward_name).weight)
+    except (KeyError, AttributeError, TypeError, ValueError):
+      live_weight = 0.0
+    return {
+      "lambda": torch.tensor(self._lam),
+      "live_weight": torch.tensor(live_weight),
+      "peak_frac": torch.tensor(peak_frac),
+      "peak_ema": torch.tensor(t.peak_height_ema),
+      "gates_ok": torch.tensor(1.0 if gates_ok else 0.0),
+      "style_broken": torch.tensor(1.0 if style_broken else 0.0),
+    }
 
 
 class competence_diagnostics:
