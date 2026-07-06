@@ -1535,6 +1535,43 @@ gen_v24c() {
 }
 
 
+# BATCH=v40: R27 stack - fold gate 0.15, fast stale expiry, true floor
+# release, stress-scaled headroom. v39 held 1800 healthy iterations; its
+# three slow guards and the fixed-headroom poison drip are corrected.
+# Prediction: the fall-rate creep relieves itself via the headroom valve
+# before any crash machinery engages, and the run sawtooths indefinitely
+# around the ~0.68 m/s ceiling.
+gen_v40() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.6"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export JOINT_ACC_W="0"
+  export TORQUE_RATE_PEAK_W="0"
+  export MAX_ITERATIONS="3000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v40-valve-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v40"
+  export RUN_NAME="clock_owned__v40-valve__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v40-valve,stress-headroom,batch-v40,gridsearch"
+  emit_manifest "mj-gs-v40-valve"
+}
+
+
 # BATCH=v39: symmetric frontiers (R23) - the push axis gets the same
 # treatment as commands: per-event shove magnitudes, horizon-free
 # survival outcomes (survived = no fall before the next push or
@@ -2426,6 +2463,7 @@ case "$BATCH" in
   v37) gen_v37; expected=1 ;;
   v38) gen_v38; expected=1 ;;
   v39) gen_v39; expected=1 ;;
+  v40) gen_v40; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
