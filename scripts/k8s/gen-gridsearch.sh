@@ -1535,6 +1535,55 @@ gen_v24c() {
 }
 
 
+# BATCH=v42: the sim-state probe. v41 pincer: ignition is schedule-
+# independent (v41a: PHASE=3000 moved nothing) AND training-independent
+# (v41b: bit-frozen policy rotted faster, in an easing env). The rot is
+# a function of accumulated sim time itself. v42 removes the last
+# moving parts: fully static env definition (fixed commands/pushes,
+# all penalty stages zero) - v42a bit-freezes the policy at 1200 and
+# observes (watchdog off: we want the full rot curve); v42b keeps
+# training on the same static env (watchdog on). Rot in v42a = pure
+# simulator-state accumulation -> mjwarp reset_data audit. Flat = the
+# rot needs a moving part; bisect by re-adding.
+gen_v42() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS=""
+  export ADAPTIVE_PUSHES=""
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="1"
+  export MULTINODE=""
+  export PUSH_COHORT_FRAC="0.3"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export JOULE_W="0"
+  export JOINT_ACC_W="0"
+  export TORQUE_RATE_PEAK_W="0"
+  export SOFT_LANDING_PEAK_W="0"
+  export MAX_ITERATIONS="3000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export EXPERIMENT_NAME="nugus_gridsearch_v42"
+
+  export FREEZE_POLICY_AFTER="1200"
+  export TRACK_WATCHDOG="0"
+  export MJLAB_LOG_STAMP="v42a-static-frozen-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v42a-static-frozen__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v42a,static-frozen,sim-state-probe,batch-v42,gridsearch"
+  emit_manifest "mj-gs-v42a-frozen"
+
+  export FREEZE_POLICY_AFTER=""
+  export TRACK_WATCHDOG=""
+  export MJLAB_LOG_STAMP="v42b-static-train-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v42b-static-train__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v42b,static-train,sim-state-probe,batch-v42,gridsearch"
+  emit_manifest "mj-gs-v42b-train"
+}
+
+
 # BATCH=v41: the two-suspect discriminator pair. v40 proved the
 # controller blameless (valve compressed exposure to exactly 1.000 and
 # the rot accelerated through it; release followed capability down and
@@ -2514,6 +2563,7 @@ case "$BATCH" in
   v39) gen_v39; expected=1 ;;
   v40) gen_v40; expected=1 ;;
   v41) gen_v41; expected=2 ;;
+  v42) gen_v42; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
