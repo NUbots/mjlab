@@ -255,6 +255,7 @@ export COMMAND_GEOMETRY
 export AIMD_BETA_ARREST AIMD_ENVELOPE_SCALE
 export AIMD_PUSH_CONGEST_BAR AIMD_PUSH_GATE_EXCESS AIMD_ATTAIN_SLIDE_FRAC LANDING_ANNEAL
 export OBS_NORM_FREEZE_ITERS FREEZE_POLICY_AFTER
+export TORQUE_RATE_PEAK_W SOFT_LANDING_PEAK_W
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
@@ -1229,6 +1230,9 @@ _competence_defaults() {
   export OBS_NORM_FREEZE_ITERS=""
   # Bit-freeze probe (R16); empty = off.
   export FREEZE_POLICY_AFTER=""
+  # Penalty peak weights (R17); empty = legacy constants (-1e-3 / -1e-2).
+  export TORQUE_RATE_PEAK_W=""
+  export SOFT_LANDING_PEAK_W=""
 }
 
 
@@ -1519,6 +1523,56 @@ gen_v24c() {
   export RUN_NAME="clock_owned__v24c-attain050-ph2k__8gpu-6144__s1__${BATCH}"
   export WANDB_TAGS="clock_owned,v24c,attain-0.50,phase-2k,lmax4,std-min-0.13,8gpu,multinode,batch-v24,gridsearch"
   emit_manifest "mj-gs-v24c-prod"
+}
+
+
+# BATCH=v35: the penalty-cocktail discrimination pair (user hypothesis,
+# R17). Stage-4 arrival precedes every slide onset by 150-300 iters and
+# moved WITH the ladder in v33 - the first variable that shifts the
+# ignition. joint_acc_l2 dominates the energy pressure (~ -0.6..-1.0 ER
+# at stage 4 vs tracking +1.7..2.1; ~10x torque_rate, ~600x joule).
+# v35a drops joint_acc entirely (redundant kinematic proxy, convicted in
+# v16c); v35b keeps all four at HALF peak pressure. Slide gone in a ->
+# redundancy kill confirmed; slide gone only in b -> total pressure is
+# the knob; slide in both -> penalty theory weakened, v34 verdict rules.
+# 4-GPU each, 3000 iters, no landing anneal (unconfounded).
+gen_v35() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="1"
+  export MULTINODE=""
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.3"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export MAX_ITERATIONS="3000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export EXPERIMENT_NAME="nugus_gridsearch_v35"
+
+  export JOINT_ACC_W="0"
+  export MJLAB_LOG_STAMP="v35a-nojacc-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v35a-no-jointacc__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v35a,no-joint-acc,penalty-discrim,batch-v35,gridsearch"
+  emit_manifest "mj-gs-v35a-nojacc"
+
+  export JOINT_ACC_W="-5e-5"
+  export JOULE_W="-1.5e-4"
+  export TORQUE_RATE_PEAK_W="-5e-4"
+  export SOFT_LANDING_PEAK_W="-5e-3"
+  export MJLAB_LOG_STAMP="v35b-half-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v35b-half-penalties__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v35b,half-penalties,penalty-discrim,batch-v35,gridsearch"
+  emit_manifest "mj-gs-v35b-half"
 }
 
 
@@ -2205,6 +2259,7 @@ case "$BATCH" in
   v32) gen_v32; expected=1 ;;
   v33) gen_v33; expected=1 ;;
   v34) gen_v34; expected=1 ;;
+  v35) gen_v35; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

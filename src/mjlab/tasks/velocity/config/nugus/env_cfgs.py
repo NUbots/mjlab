@@ -633,13 +633,22 @@ def _add_competence_penalty_gating(
   joule_w: float,
   joint_acc_w: float,
 ) -> None:
-  """Ramp movement penalties when stability competence holds (doc 13 axis 3)."""
+  """Ramp movement penalties when stability competence holds (doc 13 axis 3).
+
+  Peak weights are env-tunable (R17): the stage ladder's arrival at max
+  pressure precedes every attainment-slide onset by 150-300 iters across
+  v29/v32/v33, and joint_acc_l2's effective pressure at stage 4 (episode
+  reward -0.6 to -1.0 vs tracking's +1.7-2.1) dominates the energy
+  cocktail ~10x over torque_rate and ~600x over joule.
+  """
   cfg.rewards["base_height"].weight = _PHASE_C_BASE_HEIGHT_W
+  torque_rate_w = _env_float("TORQUE_RATE_PEAK_W", _PHASE_C_TORQUE_RATE_W)
+  soft_landing_w = _env_float("SOFT_LANDING_PEAK_W", _PHASE_C_SOFT_LANDING_W)
   for reward_name, peak_weight in (
     ("joule_heating", joule_w),
     ("joint_acc_l2", joint_acc_w),
-    ("torque_rate", _PHASE_C_TORQUE_RATE_W),
-    ("soft_landing", _PHASE_C_SOFT_LANDING_W),
+    ("torque_rate", torque_rate_w),
+    ("soft_landing", soft_landing_w),
   ):
     cfg.curriculum[f"{reward_name}_competence"] = CurriculumTermCfg(
       func=mdp.staged_on_competence,

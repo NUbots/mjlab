@@ -239,6 +239,10 @@ spec:
                   value: "${OBS_NORM_FREEZE_ITERS}"
                 - name: FREEZE_POLICY_AFTER
                   value: "${FREEZE_POLICY_AFTER}"
+                - name: TORQUE_RATE_PEAK_W
+                  value: "${TORQUE_RATE_PEAK_W}"
+                - name: SOFT_LANDING_PEAK_W
+                  value: "${SOFT_LANDING_PEAK_W}"
                 - name: COMPETENCE_COOLDOWN_ITERS
                   value: "${COMPETENCE_COOLDOWN_ITERS}"
                 - name: LINK_MASS_SCALE_MIN
