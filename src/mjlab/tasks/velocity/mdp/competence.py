@@ -1057,6 +1057,28 @@ class competence_diagnostics:
       _binned_quantile(t.push_fall_dt_counts, t.dt_bin_width, 0.75)
     )
     self._log_histograms(env)
+    # Sim-model drift telemetry (R28): v42a proved the simulator's state
+    # itself degrades under a bit-frozen policy in a static env. These
+    # ratios against pristine defaults make any in-place model-field
+    # ratchet directly visible (the class of bug that per-reset DR
+    # restore is supposed to prevent).
+    try:
+      model = env.sim.model
+      for field in (
+        "actuator_forcerange",
+        "dof_damping",
+        "dof_armature",
+        "dof_frictionloss",
+      ):
+        cur = getattr(model, field, None)
+        if cur is None:
+          continue
+        default = env.sim.get_default_field(field)
+        denom = torch.as_tensor(default, device=cur.device).abs().clamp(min=1e-9)
+        ratio = (cur.abs() / denom).mean()
+        out[f"simstate_{field}_ratio"] = ratio.cpu()
+    except Exception:
+      pass
     return out
 
   def _log_histograms(self, env: ManagerBasedRlEnv) -> None:
