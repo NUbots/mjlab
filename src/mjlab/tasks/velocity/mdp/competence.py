@@ -1303,6 +1303,22 @@ class aimd_difficulty:
     # at ~iter 1810 (wd 1.39, fast_clean 0.13 - fully recoverable);
     # healthy dP-cut wobbles (1.4% dips) stay well inside the band.
     self._attain_slide_frac: float = cfg.params.get("attain_slide_frac", 0.95)
+    # Band controller + attained floor (R19, user design after v35/v36
+    # falsified the penalty theory): the open-loop climb overshot
+    # demonstrated capability by 40-50% in every dead run (vmax 0.98 at
+    # attained ~0.64-0.70), and the arrest cascade then cut commands FAR
+    # below attainment (0.98 -> 0.24 vs attained 0.66) - which is when
+    # falls actually exploded (0.14 -> 0.6): the descent was iatrogenic.
+    # Now: climb only while clean attain > band_hi, glide down at a
+    # bounded slew when attain < band_lo (no halving cascades), and
+    # NEVER command below floor_frac of the best recently attained
+    # speed - fall cuts and emergencies clamp to the floor; the watchdog
+    # remains the catastrophe escape.
+    self._band_hi: float = cfg.params.get("attain_band_hi", 0.66)
+    self._band_lo: float = cfg.params.get("attain_band_lo", 0.60)
+    self._glide_mult: float = cfg.params.get("glide_mult", 2.0)
+    self._floor_frac: float = cfg.params.get("floor_frac", 0.95)
+    self._attained_best_v = 0.0
     self._attain_max = 0.0
     # Landing anneal (R14): task-side relief cannot stop churn once begun
     # (five demonstrations, v24-v30); the only lever left for runs longer
@@ -1375,10 +1391,15 @@ class aimd_difficulty:
     push_gate_excess: float = 0.15,
     attain_slide_frac: float = 0.95,
     landing_anneal: bool = False,
+    attain_band_hi: float = 0.66,
+    attain_band_lo: float = 0.60,
+    glide_mult: float = 2.0,
+    floor_frac: float = 0.95,
   ) -> dict[str, torch.Tensor]:
     del (command_name, event_name, alpha, beta, congest_bar, emergency_bar)
     del (gate_attain, beta_arrest, envelope_scale)
     del (push_congest_bar, push_gate_excess, attain_slide_frac, landing_anneal)
+    del (attain_band_hi, attain_band_lo, glide_mult, floor_frac)
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
     strat = self._tracker.stratified_means()
@@ -1391,17 +1412,18 @@ class aimd_difficulty:
       att = strat["clean_attain"]
       # Sticky short-term, adaptive long-term (~14k-iter half-life).
       self._attain_max = max(self._attain_max * 0.99995, att)
-      cmd_refractory = (
-        cur_iter - self._cmd_ctrl.last_cut_iter < self._cmd_ctrl.refractory
-      )
       attain_slide = (
-        self._attain_max > 0.5
-        and att < self._attain_slide_frac * self._attain_max
-        and not cmd_refractory
+        self._attain_max > 0.5 and att < self._attain_slide_frac * self._attain_max
+      )
+      # Attained-speed memory (slow decay) and its floor in d-units (R19).
+      lo_v = COMMAND_LEVEL_TABLE[0]["lin_vel_x"][1]
+      hi_v = COMMAND_LEVEL_TABLE[-1]["lin_vel_x"][1] * self._envelope_scale
+      vmax_now = lo_v + (hi_v - lo_v) * self._cmd_ctrl.d
+      self._attained_best_v = max(self._attained_best_v * 0.999, att * vmax_now)
+      floor_d = max(
+        0.0, (self._floor_frac * self._attained_best_v - lo_v) / (hi_v - lo_v)
       )
       cmd_signal = max(strat["fast_fall_clean"], pop_fast if emergency else 0.0)
-      if attain_slide:
-        cmd_signal = max(cmd_signal, self._cmd_params.congest_bar + 1e-3)
       if self._landing_enabled:
         if self._cmd_ctrl.d >= 0.95:
           if self._at_capacity_since < 0:
@@ -1425,12 +1447,20 @@ class aimd_difficulty:
         elif ready:
           self._landing_factor = max(self._landing_factor * 0.995, 0.02)
         env._landing_factor = self._landing_factor
+      # Fall cuts keep the AIMD machinery; attain_ema=0 blocks its own
+      # additive path (the band below owns all upward movement).
       self._cmd_ctrl.update(
         cur_iter=cur_iter,
         fast_fall_rate=cmd_signal,
         wobble_ema=strat["clean_wobble"],
-        attain_ema=att,
+        attain_ema=0.0,
       )
+      if cmd_signal < self._cmd_params.congest_bar:
+        if att > self._band_hi and strat["clean_wobble"] < self._cmd_params.gate_wobble:
+          self._cmd_ctrl.d = min(self._cmd_ctrl.d + self._cmd_params.alpha, 1.0)
+        elif att < self._band_lo:
+          self._cmd_ctrl.d -= self._glide_mult * self._cmd_params.alpha
+      self._cmd_ctrl.d = max(self._cmd_ctrl.d, floor_d)
       self._push_ctrl.update(
         cur_iter=cur_iter,
         fast_fall_rate=max(excess, pop_fast if emergency else 0.0),

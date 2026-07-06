@@ -256,6 +256,7 @@ export AIMD_BETA_ARREST AIMD_ENVELOPE_SCALE
 export AIMD_PUSH_CONGEST_BAR AIMD_PUSH_GATE_EXCESS AIMD_ATTAIN_SLIDE_FRAC LANDING_ANNEAL
 export OBS_NORM_FREEZE_ITERS FREEZE_POLICY_AFTER
 export TORQUE_RATE_PEAK_W SOFT_LANDING_PEAK_W
+export AIMD_ATTAIN_BAND_HI AIMD_ATTAIN_BAND_LO AIMD_FLOOR_FRAC
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
@@ -1233,6 +1234,11 @@ _competence_defaults() {
   # Penalty peak weights (R17); empty = legacy constants (-1e-3 / -1e-2).
   export TORQUE_RATE_PEAK_W=""
   export SOFT_LANDING_PEAK_W=""
+  # Band controller + attained floor (R19); empty = code defaults
+  # (0.66 / 0.60 / 0.95).
+  export AIMD_ATTAIN_BAND_HI=""
+  export AIMD_ATTAIN_BAND_LO=""
+  export AIMD_FLOOR_FRAC=""
 }
 
 
@@ -1523,6 +1529,47 @@ gen_v24c() {
   export RUN_NAME="clock_owned__v24c-attain050-ph2k__8gpu-6144__s1__${BATCH}"
   export WANDB_TAGS="clock_owned,v24c,attain-0.50,phase-2k,lmax4,std-min-0.13,8gpu,multinode,batch-v24,gridsearch"
   emit_manifest "mj-gs-v24c-prod"
+}
+
+
+# BATCH=v37: the band-controller run (R19, user design). v35a/v36 died
+# identically to every predecessor despite penalty removal - falsifying
+# R17 and exposing the real two-sided controller flaw: the open-loop
+# climb overshot attained capability by 40-50%, and the arrest cascade
+# then cut commands far below attainment (0.98 -> 0.24 vs attained
+# 0.66), which is exactly when falls exploded. Now the difficulty
+# trajectory is owned by a band controller on measured clean attainment
+# (climb > 0.66, hold in band, glide at bounded slew < 0.60) with a hard
+# floor at 95% of best-attained speed that fall cuts cannot pierce.
+# Envelope 1.6 so the band, not a cap, binds. 8 GPUs, fast feedback.
+gen_v37() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.6"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export JOINT_ACC_W="0"
+  export TORQUE_RATE_PEAK_W="0"
+  export MAX_ITERATIONS="3000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v37-band-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v37"
+  export RUN_NAME="clock_owned__v37-band-floor__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v37-band,attained-floor,minimal-penalties,batch-v37,gridsearch"
+  emit_manifest "mj-gs-v37-band"
 }
 
 
@@ -2297,6 +2344,7 @@ case "$BATCH" in
   v34) gen_v34; expected=1 ;;
   v35) gen_v35; expected=2 ;;
   v36) gen_v36; expected=1 ;;
+  v37) gen_v37; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

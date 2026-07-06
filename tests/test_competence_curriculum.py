@@ -1014,7 +1014,7 @@ def test_split_aimd_push_burn_cuts_pushes_not_commands() -> None:
   tracker._finalized_step = -1
   out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
   assert out["difficulty_push"].item() == pytest.approx(0.9 * 0.7)
-  assert out["difficulty"].item() >= 0.9  # cmd axis unharmed (rose or held)
+  assert out["difficulty"].item() >= 0.89  # cmd axis unharmed (held, fp32)
 
 
 def test_split_aimd_clean_burn_cuts_commands_not_pushes() -> None:
@@ -1083,8 +1083,9 @@ def test_joule_lambda_live_applies_weight() -> None:
 
 
 def test_attain_slide_fires_congestion_at_the_cap() -> None:
-  """v29 replay: parked at the cap with falls quiet, attainment sliding
-  from its peak must cut d_cmd (the churn signature IS the congestion)."""
+  """R19 semantics: at the cap with falls quiet, an attainment sag below
+  the band glides d_cmd down at bounded slew (no multiplicative cut),
+  and a small dip inside the band holds."""
   term, env = _split_aimd_term()
   tracker = env._competence_tracker
   term._cmd_ctrl.d = 1.0
@@ -1100,18 +1101,17 @@ def test_attain_slide_fires_congestion_at_the_cap() -> None:
     tracker._finalized_step = -1
     return term(env, torch.tensor([0, 1]), "twist", "push_robot")
 
-  # Healthy plateau establishes the trailing max.
+  # Healthy plateau: holds at the cap.
   out = step_at(1500, 0.712)
   assert out["difficulty"].item() == pytest.approx(1.0)
-  # 1.4% dip (a healthy push-cut wobble): no fire.
-  out = step_at(1501, 0.702)
+  # Dip inside the band: holds (no twitchy response).
+  out = step_at(1501, 0.63)
   assert out["difficulty"].item() == pytest.approx(1.0)
-  # 5%+ slide (churn signature): one cut.
-  out = step_at(1502, 0.67)
-  assert out["difficulty"].item() == pytest.approx(0.7)
-  # Refractory: sliding continues but no second cut yet.
-  out = step_at(1503, 0.67)
-  assert out["difficulty"].item() == pytest.approx(0.7)
+  # Sag below the band: gentle glide, 2*alpha per iteration.
+  out = step_at(1502, 0.55)
+  assert out["difficulty"].item() == pytest.approx(1.0 - 0.004)
+  out = step_at(1503, 0.55)
+  assert out["difficulty"].item() == pytest.approx(1.0 - 0.008)
 
 
 def test_landing_anneal_triggers_at_capacity_plateau() -> None:
@@ -1287,3 +1287,48 @@ def test_interp_crossing_and_binned_quantile() -> None:
   assert _binned_quantile(counts, 0.5, 0.50) == pytest.approx(1.0)
   assert _binned_quantile(counts, 0.5, 0.75) == pytest.approx(1.5)
   assert _binned_quantile(torch.zeros(32), 0.5, 0.75) == pytest.approx(0.0)
+
+
+def test_band_controller_climbs_glides_and_floors() -> None:
+  """R19 replay: climb only while attaining, glide (not halve) on sag,
+  and never command below the attained floor even under fall cuts."""
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  tracker.wobble_ema[:] = 0.02
+  tracker.fast_fall_rate = 0.05
+  tracker.fast_fall_clean = 0.05
+  tracker.fast_fall_pushed = 0.20
+
+  def step(it: int, att: float, f_clean: float = 0.05) -> float:
+    tracker.attain_ema[:] = att
+    tracker.fast_fall_clean = f_clean
+    tracker.fast_fall_rate = f_clean
+    env.common_step_counter = it * _NUM_STEPS_PER_ENV
+    tracker._finalized_step = -1
+    out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+    return out["difficulty"].item()
+
+  # Attaining well: climbs at alpha per iter.
+  term._cmd_ctrl.d = 0.5
+  d1 = step(1000, att=0.70)
+  assert d1 == pytest.approx(0.5 + 0.002)
+  # In-band: holds.
+  d2 = step(1001, att=0.63)
+  assert d2 == pytest.approx(d1)
+  # Sagging: glides at 2*alpha - no cascade.
+  d3 = step(1002, att=0.55)
+  assert d3 == pytest.approx(d2 - 0.004)
+
+  # Attained floor: with attained_best_v established at d~0.5 and
+  # att 0.7 (v ~ 0.7*0.7=0.49... via envelope 1.0: vmax=0.2+0.55*0.502),
+  # a fall-cut cascade must stop at the floor, not at ~0.
+  # Establish memory, then hammer with fall signal.
+  for it in range(1003, 1010):
+    step(it, att=0.70)
+  for it in range(1010, 1080):
+    d_after = step(it, att=0.70, f_clean=0.60)  # sustained crash signal
+  # Floor from the (slowly decaying) attained memory at the end.
+  lo_v, hi_v = 0.20, 0.75 * term._envelope_scale
+  floor_d = (0.95 * term._attained_best_v - lo_v) / (hi_v - lo_v)
+  assert d_after == pytest.approx(max(floor_d, 0.0), abs=1e-6)
+  assert d_after > 0.05  # emphatically NOT the old collapse-to-zero
