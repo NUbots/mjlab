@@ -1315,3 +1315,33 @@ def test_frontier_controller_climbs_glides_and_floors() -> None:
   floor_d = (0.95 * term._attained_best_v - lo_v) / (hi_v - lo_v)
   assert d_crash == pytest.approx(max(floor_d, 0.0), abs=0.01)
   assert d_crash > 0.05  # NOT the old collapse-to-zero
+
+
+def test_survivor_conditioning_gates_capability_credit() -> None:
+  """R21: a sprint that ends in a fall contributes nothing to attain(v);
+  a timed-out episode deposits its duration-weighted samples."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(0.0)  # both envs clean... 0 pushed
+  ct = env.command_manager.get_term.return_value
+  ct.vel_command_b = torch.tensor([[0.5, 0.0, 0.0], [0.5, 0.0, 0.0]])
+  ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.45, 0.0], [0.45, 0.0]])
+  for _ in range(3):  # duration weighting: three steps buffered
+    tracker.record_step(env)
+  b = int(0.5 / tracker.speed_bin_width)
+
+  # Episode ends in a FALL: buffered credit is discarded.
+  env.termination_manager.get_term.return_value = torch.tensor([True, True])
+  env.common_step_counter = 48
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker._attain_bin_weight[b].item() == pytest.approx(0.0)
+  assert tracker._attain_ep_weight.sum().item() == pytest.approx(0.0)
+
+  # Same steps, episode TIMES OUT: credit lands, weighted by duration.
+  for _ in range(3):
+    tracker.record_step(env)
+  env.termination_manager.get_term.return_value = torch.tensor([False, False])
+  env.common_step_counter = 96
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker._attain_bin_weight[b].item() == pytest.approx(6.0)  # 2 envs x 3 steps
+  assert tracker._attain_bin_sum[b].item() == pytest.approx(6.0 * 0.9, rel=1e-3)

@@ -271,6 +271,16 @@ class CompetenceTracker:
     # hypersensitive at small commands and blind to WHERE failure lives.
     self._attain_bin_sum = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._attain_bin_weight = torch.zeros(self.n_cmd_buckets, device=self.device)
+    # Survivor conditioning (R21, user rule): attainment credit toward
+    # the capability curve buffers PER EPISODE and folds into the window
+    # bins only when the episode ends by TIMEOUT - a lunge that attains
+    # a speed and then falls contributes nothing, so the frontier cannot
+    # ratchet on stunts. Duration weighting is inherent (per-step
+    # samples). The population-mean attain EMA deliberately still counts
+    # all episodes: it is the degradation/sandbag detector and must not
+    # freeze during crashes.
+    self._attain_ep_sum = torch.zeros((n, self.n_cmd_buckets), device=self.device)
+    self._attain_ep_weight = torch.zeros((n, self.n_cmd_buckets), device=self.device)
     self.attain_by_speed = torch.zeros(self.n_cmd_buckets, device=self.device)
     self.attain_by_speed_weight = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._cur_bucket = torch.full((n,), -1, dtype=torch.long, device=self.device)
@@ -407,9 +417,14 @@ class CompetenceTracker:
       )
     m_attain = meaningful & ~self.push_cohort
     if m_attain.any():
-      self._attain_bin_sum.scatter_add_(0, bucket[m_attain], attain[m_attain])
-      self._attain_bin_weight.scatter_add_(
-        0, bucket[m_attain], torch.ones(int(m_attain.sum()), device=self.device)
+      env_idx = torch.arange(self.num_envs, device=self.device)[m_attain]
+      self._attain_ep_sum.index_put_(
+        (env_idx, bucket[m_attain]), attain[m_attain], accumulate=True
+      )
+      self._attain_ep_weight.index_put_(
+        (env_idx, bucket[m_attain]),
+        torch.ones(len(env_idx), device=self.device),
+        accumulate=True,
       )
 
     # Mahalanobis-radius exposure: normalize by the CURRENT per-axis
@@ -505,6 +520,15 @@ class CompetenceTracker:
     self._attain_y_weight[ids] = 0.0
     self._wobble_sum[ids] = 0.0
     self._step_count[ids] = 0.0
+
+    # Survivor conditioning (R21): only timed-out episodes deposit their
+    # buffered attainment into the capability-curve window.
+    survivors = ids[fell < 0.5]
+    if len(survivors) > 0:
+      self._attain_bin_sum += self._attain_ep_sum[survivors].sum(dim=0)
+      self._attain_bin_weight += self._attain_ep_weight[survivors].sum(dim=0)
+    self._attain_ep_sum[ids] = 0.0
+    self._attain_ep_weight[ids] = 0.0
 
     self._win_fell += float(fell.sum().item())
     self._win_done += float(len(ids))

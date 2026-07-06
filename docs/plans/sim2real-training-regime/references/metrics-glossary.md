@@ -85,7 +85,12 @@ pushes. Bare `fast_fall_*` names carry the same split.
 - `attained_frontier` (and `Curriculum/aimd_difficulty/attained_frontier_v`,
   its ratcheted memory) — THE R20 control signal: the highest speed at
   which the conditional attainment curve attain(v) still clears 0.60,
-  interpolated, scanned from the fastest bin with real exposure. The
+  interpolated, scanned from the fastest bin with real exposure.
+  SURVIVOR-CONDITIONED (R21): only episodes that end by timeout deposit
+  attainment credit, duration-weighted per step — a lunge-and-crash
+  contributes nothing, so the frontier cannot ratchet on stunts. (The
+  population-mean attain deliberately still counts all episodes; it is
+  the degradation detector.) The
   commanded max slews toward attained_frontier x 1.15 and may never fall
   below 95% of its trailing max. attain(v) itself is logged as the
   `frontier/attain_by_speed` histogram.
