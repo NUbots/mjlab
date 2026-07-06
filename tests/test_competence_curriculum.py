@@ -676,19 +676,19 @@ def test_frontier_buckets_charge_falls_to_speed() -> None:
   env = _mock_tracked_env(fell=False)
   tracker = CompetenceTracker(env)
   tracker.set_push_cohort(0.5)  # env 1 is clean
-  # Command 0.55 m/s -> bucket 5.
+  # Command 0.55 m/s -> bin 22 of 32 (0.025 m/s bins, R18).
   ct = env.command_manager.get_term.return_value
   ct.vel_command_b = torch.tensor([[0.55, 0.0, 0.0], [0.55, 0.0, 0.0]])
   ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.5, 0.0], [0.5, 0.0]])
   tracker.record_step(env)
-  assert tracker._cur_bucket.tolist() == [5, 5]
+  assert tracker._cur_bucket.tolist() == [22, 22]
   # Only the clean env's exposure counts.
-  assert tracker._bucket_steps[5].item() == pytest.approx(1.0)
+  assert tracker._bucket_steps[22].item() == pytest.approx(1.0)
   env.termination_manager.get_term.return_value = torch.tensor([True, True])
   env.common_step_counter = 48
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  # Only env 1 (clean) charges the bucket; env 0's fall is push-cohort.
-  assert tracker._bucket_falls[5].item() == pytest.approx(1.0)
+  # Only env 1 (clean) charges the bin; env 0's fall is push-cohort.
+  assert tracker._bucket_falls[22].item() == pytest.approx(1.0)
   assert tracker._bucket_falls.sum().item() == pytest.approx(1.0)
 
 
@@ -885,15 +885,16 @@ def test_rho_buckets_attribute_corner_falls() -> None:
   ranges.lin_vel_y = (-0.45, 0.45)
   ranges.ang_vel_z = (-0.80, 0.80)
   ct.cfg.ranges = ranges
-  # Corner command: all axes near max -> rho ~ sqrt(3) ~ 1.69 -> bucket 7.
+  # Corner command: all axes near max -> rho ~ sqrt(3) ~ 1.69 -> top bin
+  # (clamped) of 32 x 0.05-wide bins (R18).
   ct.vel_command_b = torch.tensor([[0.74, 0.44, 0.79], [0.74, 0.44, 0.79]])
   ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.3, 0.1], [0.3, 0.1]])
   tracker.record_step(env)
-  assert tracker._cur_rho_bucket.tolist() == [7, 7]
+  assert tracker._cur_rho_bucket.tolist() == [31, 31]
   env.termination_manager.get_term.return_value = torch.tensor([True, True])
   env.common_step_counter = 48
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  assert tracker._rho_falls[7].item() == pytest.approx(1.0)  # clean env only
+  assert tracker._rho_falls[31].item() == pytest.approx(1.0)  # clean env only
 
 
 def test_aimd_arrest_mode_cuts_every_iteration_above_bar() -> None:
@@ -1262,3 +1263,27 @@ def test_freeze_policy_probe_noops_optimizer_after_threshold() -> None:
   alg.update()
   alg.update()
   assert param[0].item() == pytest.approx(after_third)  # bit-frozen
+
+
+def test_interp_crossing_and_binned_quantile() -> None:
+  """R18: the curriculum consumes interpolated statistics, not buckets."""
+  from mjlab.tasks.velocity.mdp.competence import (
+    _binned_quantile,
+    _interp_crossing,
+  )
+
+  # Linear hazard ramp: h(bin i) = i * 1e-4 over 0.025-wide bins.
+  hazards = torch.arange(32, dtype=torch.float32) * 1e-4
+  bar = 5e-4
+  x = _interp_crossing(hazards, 0.025, bar)
+  # Crossing near bin 5 (h=5e-4), interpolated - continuous, not a
+  # 0.1-quantized stair step.
+  assert 0.10 < x < 0.16
+  # Never crossed: returns full range.
+  assert _interp_crossing(torch.zeros(32), 0.025, bar) == pytest.approx(0.8)
+
+  # Quantiles of a binned distribution: uniform mass in bins 0..3.
+  counts = torch.tensor([10.0, 10.0, 10.0, 10.0] + [0.0] * 28)
+  assert _binned_quantile(counts, 0.5, 0.50) == pytest.approx(1.0)
+  assert _binned_quantile(counts, 0.5, 0.75) == pytest.approx(1.5)
+  assert _binned_quantile(torch.zeros(32), 0.5, 0.75) == pytest.approx(0.0)

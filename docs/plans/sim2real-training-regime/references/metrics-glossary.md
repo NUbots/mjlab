@@ -76,31 +76,25 @@ pushes. Bare `fast_fall_*` names carry the same split.
   rate attributable to pushes alone (both cohorts share the command
   sampler, so command difficulty cancels). Healthy: small positive.
   Rising while clean stays flat = push difficulty is the binding axis.
-- `hazard_cmd_0..7` — clean-cohort fall hazard bucketed by commanded
-  SPEED |v_xy|: bucket i covers [0.1·i, 0.1·(i+1)) m/s. Value = falls
-  per exposure step in that bucket (EMA over ~50-iter windows).
-  5e-4 ≈ one fall per 2000 steps ≈ one per ~40 s walking at that speed.
-- `frontier_speed` — midpoint of the fastest speed bucket still under
-  the hazard bar (default 5e-4), scanning up from slow. The measured
-  "how fast can it reliably go". Cross-validate against where the AIMD
-  sawtooth settles; agreement is what earns the estimator control.
-- `hazard_rho_0..7` — same hazard, bucketed by Mahalanobis radius
-  ρ = √((vx/Rx)² + (vy/Ry)² + (ω/Rω)²) with R the CURRENT per-axis
-  range maxima: bucket i covers [0.2·i, 0.2·(i+1)). ρ ≈ 1 is the
-  ellipsoid surface; under box sampling ρ > 1 exists (the corners, up
-  to ~1.7) and those buckets measure the corner cost directly (R11).
-  If hazard_rho rises with ρ while hazard_cmd is flat across speed,
-  falls are driven by axis COMBINATIONS, not raw speed.
-- `frontier_rho` — the ρ-version of frontier_speed.
+- `frontier_speed` — the speed (m/s) at which the clean-cohort fall
+  hazard first crosses the bar (default 5e-4 per step ≈ one fall per
+  ~40 s at that speed), computed as a LINEARLY INTERPOLATED crossing of
+  32 densely-binned hazards with light smoothing (R18: the statistic is
+  the metric; bins are internal). Continuous, not stair-stepped. Cross-
+  validate against where the AIMD sawtooth settles.
+- `frontier_rho` — same crossing in Mahalanobis radius
+  ρ = √((vx/Rx)²+(vy/Ry)²+(ω/Rω)²) over 32 bins spanning [0, 1.6).
+  ρ ≈ 1 is the ellipsoid surface; under box sampling ρ > 1 is corner
+  territory (R11). frontier_rho low while frontier_speed high = axis
+  COMBINATIONS bind, not raw speed.
+- `push_fall_t50`, `push_fall_t75` — interpolated quantiles (s) of the
+  push→fall delay distribution (0.5 s bins over [0, 16 s)): "half /
+  three-quarters of push-attributed falls happen within this long."
+  THE recovery-horizon numbers (v28 measured t75 ≈ 5-6 s — any 1 s
+  horizon would misattribute most of the tail).
 - `frontier/hazard_by_speed`, `frontier/hazard_by_rho`,
-  `frontier/push_fall_dt` — W&B Histogram renderings of the same bucket
-  data (heatmap over training steps; the human view). The per-bucket
-  scalars remain the programmatic source of truth.
-- `push_fall_within_{0.5,1.0,2.0,4.0,8.0}s` — cumulative fraction of
-  pushed-cohort falls that happened within that many seconds of the
-  last push. The empirical recovery-time distribution (answers the
-  "how long is a recovery horizon" question; v27 measured only 20%
-  within 1 s — a 1 s horizon would misattribute 80%).
+  `frontier/push_fall_dt` — W&B Histogram heatmaps of the dense bins
+  (the human view; no per-bin scalars are logged).
 
 ## Curriculum/track_reward_watchdog/* (fail-fast, user rule)
 

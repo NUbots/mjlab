@@ -251,13 +251,15 @@ class CompetenceTracker:
     self.fast_fall_pushed = 1.0
     # Time-from-push-to-fall histogram (seconds bins: see edges) - answers
     # "how long does recovery take" empirically.
-    self.push_fall_dt_edges = (0.5, 1.0, 2.0, 4.0, 8.0)
-    self.push_fall_dt_counts = torch.zeros(
-      len(self.push_fall_dt_edges) + 1, device=self.device
-    )
+    # 0.5 s bins over [0, 16 s); quantiles (t50/t75) are the outputs.
+    self.n_dt_bins = 32
+    self.dt_bin_width = 0.5
+    self.push_fall_dt_counts = torch.zeros(self.n_dt_bins, device=self.device)
     # Frontier estimator (clean cohort only): exposure steps and falls
-    # bucketed by |cmd_xy| in 0.1 m/s bins over [0, 0.8).
-    self.n_cmd_buckets = 8
+    # densely binned (R18: bins are the sufficient statistic; the
+    # curriculum consumes interpolated level-crossings/quantiles, which
+    # integrate across bins and are robust to fine binning).
+    self.n_cmd_buckets = 32
     self._bucket_steps = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._bucket_falls = torch.zeros(self.n_cmd_buckets, device=self.device)
     self.bucket_hazard = torch.zeros(self.n_cmd_buckets, device=self.device)
@@ -385,7 +387,11 @@ class CompetenceTracker:
     # Frontier estimator exposure (clean cohort only): bucket walking steps
     # by commanded speed so falls can be attributed to the speed at which
     # they happened (binned Bernoulli estimate of P(fall | speed)).
-    bucket = (torch.sqrt(cmd_sq) / 0.1).long().clamp(0, self.n_cmd_buckets - 1)
+    bucket = (
+      (torch.sqrt(cmd_sq) / (0.8 / self.n_cmd_buckets))
+      .long()
+      .clamp(0, self.n_cmd_buckets - 1)
+    )
     self._cur_bucket = torch.where(walking, bucket, torch.full_like(bucket, -1))
     expose = walking & ~self.push_cohort
     if expose.any():
@@ -403,7 +409,9 @@ class CompetenceTracker:
     rho = torch.sqrt(
       (cmd_xy[:, 0] / rx) ** 2 + (cmd_xy[:, 1] / ry) ** 2 + (wz / rw) ** 2
     )
-    rho_bucket = (rho / 0.2).long().clamp(0, self.n_cmd_buckets - 1)
+    rho_bucket = (
+      (rho / (1.6 / self.n_cmd_buckets)).long().clamp(0, self.n_cmd_buckets - 1)
+    )
     self._cur_rho_bucket = torch.where(
       walking, rho_bucket, torch.full_like(rho_bucket, -1)
     )
@@ -504,9 +512,7 @@ class CompetenceTracker:
       dt_s = (
         env.common_step_counter - self.last_push_step[ids][fell_pushed]
       ) * self._step_dt
-      bins = torch.bucketize(
-        dt_s, torch.tensor(self.push_fall_dt_edges, device=self.device)
-      )
+      bins = (dt_s / self.dt_bin_width).long().clamp(0, self.n_dt_bins - 1)
       self.push_fall_dt_counts.scatter_add_(
         0, bins, torch.ones(len(dt_s), device=self.device)
       )
@@ -739,6 +745,47 @@ class joule_lambda_shadow:
     }
 
 
+def _interp_crossing(hazards: torch.Tensor, bin_width: float, bar: float) -> float:
+  """First up-crossing of the hazard bar, linearly interpolated (R18).
+
+  Light 3-bin smoothing first: quantiles/crossings integrate noise, but
+  a single hot fine bin should not snap the frontier. Returns the
+  bin-center-based crossing position; the full range if never crossed.
+  """
+  n = len(hazards)
+  sm = hazards.clone()
+  if n >= 3:
+    sm[1:-1] = (hazards[:-2] + hazards[1:-1] + hazards[2:]) / 3.0
+  prev_c = 0.5 * bin_width
+  prev_h = float(sm[0])
+  if prev_h > bar:
+    return prev_c
+  for i in range(1, n):
+    c = (i + 0.5) * bin_width
+    h = float(sm[i])
+    if h > bar:
+      frac = (bar - prev_h) / max(h - prev_h, 1e-12)
+      return prev_c + frac * (c - prev_c)
+    prev_c, prev_h = c, h
+  return n * bin_width
+
+
+def _binned_quantile(counts: torch.Tensor, bin_width: float, q: float) -> float:
+  """Interpolated quantile of a binned distribution (R18)."""
+  total = float(counts.sum())
+  if total <= 0:
+    return 0.0
+  target = q * total
+  cum = 0.0
+  for i in range(len(counts)):
+    c = float(counts[i])
+    if cum + c >= target:
+      frac = (target - cum) / max(c, 1e-12)
+      return (i + frac) * bin_width
+    cum += c
+  return len(counts) * bin_width
+
+
 class competence_diagnostics:
   """Log-only curriculum term: cohort-stratified competence + frontier.
 
@@ -770,32 +817,23 @@ class competence_diagnostics:
     del cohort_frac, frontier_hazard_bar
     self._tracker.finalize_episodes(env, env_ids)
     out = {k: torch.tensor(v) for k, v in self._tracker.stratified_means().items()}
-    hazards = self._tracker.bucket_hazard
-    for i in range(self._tracker.n_cmd_buckets):
-      out[f"hazard_cmd_{i}"] = hazards[i].clone()
-    # Frontier speed: midpoint of the fastest bucket still under the
-    # hazard bar, scanning upward from the slowest.
-    frontier = 0.05
-    for i in range(self._tracker.n_cmd_buckets):
-      if hazards[i].item() <= self._hazard_bar:
-        frontier = 0.1 * i + 0.05
-      else:
-        break
-    out["frontier_speed"] = torch.tensor(frontier)
-    rho_hazards = self._tracker.rho_hazard
-    for i in range(self._tracker.n_cmd_buckets):
-      out[f"hazard_rho_{i}"] = rho_hazards[i].clone()
-    frontier_rho = 0.1
-    for i in range(self._tracker.n_cmd_buckets):
-      if rho_hazards[i].item() <= self._hazard_bar:
-        frontier_rho = 0.2 * i + 0.1
-      else:
-        break
-    out["frontier_rho"] = torch.tensor(frontier_rho)
-    counts = self._tracker.push_fall_dt_counts
-    total = counts.sum().clamp(min=1.0)
-    for i, edge in enumerate(self._tracker.push_fall_dt_edges):
-      out[f"push_fall_within_{edge}s"] = counts[: i + 1].sum() / total
+    t = self._tracker
+    speed_bw = 0.8 / t.n_cmd_buckets
+    rho_bw = 1.6 / t.n_cmd_buckets
+    # R18: the statistics ARE the metrics; dense bins feed the
+    # interpolated crossings/quantiles and the histogram views only.
+    out["frontier_speed"] = torch.tensor(
+      _interp_crossing(t.bucket_hazard, speed_bw, self._hazard_bar)
+    )
+    out["frontier_rho"] = torch.tensor(
+      _interp_crossing(t.rho_hazard, rho_bw, self._hazard_bar)
+    )
+    out["push_fall_t50"] = torch.tensor(
+      _binned_quantile(t.push_fall_dt_counts, t.dt_bin_width, 0.50)
+    )
+    out["push_fall_t75"] = torch.tensor(
+      _binned_quantile(t.push_fall_dt_counts, t.dt_bin_width, 0.75)
+    )
     self._log_histograms(env)
     return out
 
@@ -824,19 +862,19 @@ class competence_diagnostics:
           "frontier/hazard_by_speed": wandb.Histogram(
             np_histogram=(
               t.bucket_hazard.cpu().numpy(),
-              np.linspace(0.0, 0.1 * n, n + 1),
+              np.linspace(0.0, 0.8, n + 1),
             )
           ),
           "frontier/hazard_by_rho": wandb.Histogram(
             np_histogram=(
               t.rho_hazard.cpu().numpy(),
-              np.linspace(0.0, 0.2 * n, n + 1),
+              np.linspace(0.0, 1.6, n + 1),
             )
           ),
           "frontier/push_fall_dt": wandb.Histogram(
             np_histogram=(
               t.push_fall_dt_counts.cpu().numpy(),
-              np.array([0.0, *t.push_fall_dt_edges, 16.0]),
+              np.linspace(0.0, t.n_dt_bins * t.dt_bin_width, t.n_dt_bins + 1),
             )
           ),
         },
