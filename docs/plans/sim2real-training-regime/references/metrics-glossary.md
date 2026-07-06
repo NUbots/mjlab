@@ -97,7 +97,10 @@ pushes. Bare `fast_fall_*` names carry the same split.
 - `Curriculum/aimd_difficulty/push_survival_frontier` — R23/R24: the
   highest shove magnitude (|dv_xy|, m/s) with per-event survival >= 0.85
   under CENSORED accounting: survival requires the full observation
-  window (PUSH_OBS_WINDOW_S, default 6 s ~ measured t75) to elapse
+  window (adaptive, R25: tracks the live measured t75 of the push→fall delay
+  distribution once ≥50 fall events exist, clamped to [2, 12] s;
+  PUSH_OBS_WINDOW_S is only the bootstrap — logged as
+  `push_obs_window`) to elapse
   cleanly; a fall inside the window is a failure for the LATEST push;
   an intervening push or a timeout inside the window censors the event
   (no credit — hard-then-easy sequences cannot launder the hard push,

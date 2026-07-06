@@ -266,6 +266,12 @@ class CompetenceTracker:
     # CENSORED: an intervening push inside the window discards the
     # earlier event (hard-then-easy must not launder the hard one), and
     # a timeout inside the window is observation ending, not survival.
+    # Adaptive (R25): tracks the live t75 of the measured push->fall
+    # delay distribution once >= 50 fall events exist (the histogram is
+    # measured independently of the attribution window, so this is a
+    # clean closed loop, not self-reference). The configured value is
+    # only the bootstrap; clamped to [2, 12] s so a stretched tail
+    # cannot censor everything at 3-10 s push intervals.
     self.push_obs_window_s = 6.0
     self._pending_push_mag = torch.full((n,), -1.0, device=self.device)
     self._pending_push_step = torch.full((n,), -1.0, device=self.device)
@@ -685,6 +691,9 @@ class CompetenceTracker:
         )
         self._attain_bin_sum.zero_()
         self._attain_bin_weight.zero_()
+        if float(self.push_fall_dt_counts.sum()) >= 50.0:
+          t75 = _binned_quantile(self.push_fall_dt_counts, self.dt_bin_width, 0.75)
+          self.push_obs_window_s = min(max(t75, 2.0), 12.0)
         events = self._push_bin_survive + self._push_bin_fall
         has_ev = events > 8.0
         win_surv = self._push_bin_survive / events.clamp(min=1e-6)
@@ -995,6 +1004,8 @@ class competence_diagnostics:
     cohort_frac = cfg.params.get("cohort_frac", 1.0)
     if self._tracker.push_cohort_frac != cohort_frac:
       self._tracker.set_push_cohort(cohort_frac)
+    # Bootstrap value only (R25): the tracker adapts it to the live t75
+    # once the delay histogram has evidence.
     self._tracker.push_obs_window_s = cfg.params.get("push_obs_window_s", 6.0)
     self._hazard_bar: float = cfg.params.get("frontier_hazard_bar", 5e-4)
 
@@ -1028,6 +1039,7 @@ class competence_diagnostics:
         t.attain_by_speed, t.attain_by_speed_weight, t.speed_bin_width, 0.60
       )
     )
+    out["push_obs_window"] = torch.tensor(t.push_obs_window_s)
     out["push_fall_t50"] = torch.tensor(
       _binned_quantile(t.push_fall_dt_counts, t.dt_bin_width, 0.50)
     )

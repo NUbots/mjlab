@@ -1442,3 +1442,33 @@ def test_push_survival_censoring() -> None:
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
   assert tracker._push_bin_fall[b_easy].item() == pytest.approx(1.0)  # unchanged
   assert tracker._push_bin_survive[b_easy].item() == pytest.approx(1.0)
+
+
+def test_adaptive_obs_window_tracks_t75() -> None:
+  """R25: the observation window follows the measured push->fall t75
+  (clamped), and holds the bootstrap value until evidence accumulates."""
+  env = _mock_tracked_env(fell=True, ep_len=200)
+  env.step_dt = 0.02
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(1.0)
+  assert tracker.push_obs_window_s == pytest.approx(6.0)  # bootstrap
+
+  # 60 falls at ~3.6 s and ~4.4 s after the push -> t75 ~ 4.3 s.
+  step = 1000
+  for _k in range(30):
+    for dt_steps in (180, 220):
+      env.common_step_counter = step
+      tracker.record_push(env, torch.tensor([0, 1]), torch.tensor([0.3, 0.3]))
+      env.termination_manager.get_term.return_value = torch.tensor([True, True])
+      env.common_step_counter = step + dt_steps
+      tracker._finalized_step = -1
+      tracker.finalize_episodes(env, torch.tensor([0, 1]))
+      step += 2000
+  # Trigger the cadence refresh.
+  env.common_step_counter = step + 50 * _NUM_STEPS_PER_ENV
+  tracker._bucket_next_step = 0
+  tracker._bucket_steps[0] = 200.0  # satisfy the refresh precondition
+  tracker._finalized_step = -1
+  env.termination_manager.get_term.return_value = torch.tensor([False, False])
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert 3.5 < tracker.push_obs_window_s < 5.0  # adapted to measured t75
