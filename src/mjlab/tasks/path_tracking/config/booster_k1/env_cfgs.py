@@ -13,6 +13,7 @@ import math
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.path_tracking import mdp
 from mjlab.tasks.path_tracking.mdp import PathCommandCfg
 from mjlab.tasks.velocity.config.booster_k1.env_cfgs import (
@@ -91,6 +92,58 @@ def _convert_to_path_tracking(cfg: ManagerBasedRlEnvCfg) -> None:
     func=mdp.track_path_heading,
     weight=1.0,
     params={"command_name": "path", "std": 0.5},
+  )
+
+  # Relax the inherited walking constraints for the path-tracking task. The
+  # velocity config's reward structure was tuned for the Nugus, which needed
+  # heavy posture/orientation/foot shaping to stay on its feet; the K1 is a
+  # more capable platform and the base gait is already learned in the velocity
+  # task this fine-tunes from, so these regularizers can be loosened. Doing it
+  # here leaves the K1 velocity task's tuning untouched. Starting points; tune
+  # against the logged reward values.
+  #
+  # - pose/upright: posture and base-tilt shaping. Halved -- the K1 can be
+  #   trusted with more freedom, and the `fell_over` termination (50 deg)
+  #   already backstops orientation.
+  # - foot_flat: swing-foot leveling, tuned to stop the Nugus toe digging in.
+  #   The K1's flat box feet need far less; keep a light nudge against
+  #   toe-catching.
+  # - feet_distance: narrow-stance / self-collision guard. Dropped -- the
+  #   capable K1 keeps a sensible stance without it.
+  cfg.rewards["pose"].weight = 0.5
+  cfg.rewards["upright"].weight = 0.5
+  cfg.rewards["foot_flat"].weight = -0.1
+  cfg.rewards["feet_distance"].weight = 0.0
+
+  # Energy shaping to discourage wasteful motion (notably arm flailing) and
+  # bias toward an efficient gait. Two complementary terms:
+  #
+  # 1. Cost-of-transport proxy (energy per distance traveled). Enabled here for
+  #    the first time (weight 0.0 by default everywhere else). The default proxy
+  #    only counts positive mechanical work, understating true motor energy, so
+  #    it is switched to a total-electrical-power model: `include_negative_work`
+  #    charges for braking (these servos dissipate it, not regen), and
+  #    `resistive_coeff` adds the I^2 R copper loss (~tau^2) that dominates at
+  #    high torque / low speed. Start small; tune against Metrics/cot_proxy_mean.
+  cfg.rewards["cot_proxy"].weight = -0.001
+  cfg.rewards["cot_proxy"].params["include_negative_work"] = True
+  cfg.rewards["cot_proxy"].params["resistive_coeff"] = 0.5
+
+  # 2. Kinetic-energy penalty scoped to the arms. Oscillatory flailing does
+  #    little net mechanical work over a cycle (accelerate then decelerate
+  #    cancel), so the power/CoT term barely sees it, but it carries real
+  #    kinetic energy the whole time. Penalizing that energy directly targets
+  #    the flail. Scoped to the arm/hand bodies so it does not tax the legs and
+  #    torso, which must move to walk. Start small; tune against
+  #    Metrics/kinetic_energy_mean.
+  cfg.rewards["arm_kinetic_energy"] = RewardTermCfg(
+    func=mdp.kinetic_energy,
+    weight=-0.02,
+    params={
+      "asset_cfg": SceneEntityCfg(
+        "robot", body_names=(r"^(Left|Right)_Arm_\d+$", r".*hand_link$")
+      ),
+    },
   )
 
   # Retarget every term that referenced the twist command.

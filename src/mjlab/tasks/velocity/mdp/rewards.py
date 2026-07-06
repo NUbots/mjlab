@@ -535,7 +535,25 @@ class cost_of_transport_proxy:
 
   This computes an online CoT proxy:
 
-    sum(max(0, tau * qd)) / max(horizontal_speed, speed_floor)
+    sum(P_joint) / max(horizontal_speed, speed_floor)
+
+  where the per-joint power ``P_joint`` models actuator energy use. By default
+  it is the positive mechanical power ``max(0, tau * qd)`` -- the energy the
+  motor delivers when doing work -- which is the classic mechanical CoT.
+
+  Two options extend this toward the *total* electrical energy the motor draws,
+  which the mechanical term alone understates:
+
+  - ``include_negative_work``: also charge for braking (``|tau * qd|`` instead
+    of ``max(0, tau * qd)``). Geared hobby servos dissipate negative work as
+    heat rather than recovering it, so decelerating a limb still costs energy.
+  - ``resistive_coeff``: add ``resistive_coeff * tau**2``, the resistive (I^2 R)
+    copper loss. Winding heat scales with current^2, and current is
+    proportional to torque, so it scales with ``tau**2``. This loss is present
+    even when the joint is static and dominates at high torque / low speed --
+    the regime the pure-mechanical term misses entirely. ``resistive_coeff``
+    is the lumped ``R / kt**2`` motor constant (units reconcile W with N^2 m^2);
+    treat it as a tunable relative weight and set it from the logged CoT value.
 
   For a fixed robot, true CoT differs by a constant factor (mass * gravity),
   so this proxy is sufficient for reward shaping.
@@ -560,16 +578,22 @@ class cost_of_transport_proxy:
     speed_floor: float = 0.1,
     command_name: str | None = None,
     command_threshold: float = 0.05,
+    include_negative_work: bool = False,
+    resistive_coeff: float = 0.0,
   ) -> torch.Tensor:
     asset: Entity = env.scene[asset_cfg.name]
 
     tau = asset.data.actuator_force[:, self._actuator_ids]
     qd = asset.data.joint_vel[:, self._joint_ids]
-    mech_pos = torch.clamp(tau * qd, min=0.0)
-    mechanical_power = torch.sum(mech_pos, dim=1)
+    mech = tau * qd
+    mech = torch.abs(mech) if include_negative_work else torch.clamp(mech, min=0.0)
+    power = mech
+    if resistive_coeff != 0.0:
+      power = power + resistive_coeff * torch.square(tau)
+    total_power = torch.sum(power, dim=1)
 
     horizontal_speed = torch.norm(asset.data.root_link_lin_vel_w[:, :2], dim=1)
-    cot_proxy = mechanical_power / torch.clamp(horizontal_speed, min=speed_floor)
+    cot_proxy = total_power / torch.clamp(horizontal_speed, min=speed_floor)
 
     if command_name is not None:
       command = env.command_manager.get_command(command_name)
@@ -583,6 +607,62 @@ class cost_of_transport_proxy:
     env.extras["log"]["Metrics/cot_proxy_mean"] = torch.mean(cot_proxy)
     env.extras["log"]["Metrics/locomotion_speed_mean"] = torch.mean(horizontal_speed)
     return cot_proxy
+
+
+class kinetic_energy:
+  """Penalize whole-body kinetic energy to damp wasteful, flailing motion.
+
+  Sums the rigid-body kinetic energy over the selected bodies,
+
+    KE = 0.5 * sum_b ( m_b * ||v_b||**2  +  w_b^T I_b w_b )
+
+  where ``v_b`` is the body's COM linear velocity, ``w_b`` its angular
+  velocity, ``m_b`` its mass, and ``I_b`` its inertia (principal moments).
+
+  Unlike the mechanical-power / CoT terms, this charges for *motion itself*
+  regardless of whether the actuator does net work. A limb that swings back and
+  forth -- flailing arms being the motivating case -- does little net
+  mechanical work over a cycle (the accelerate and decelerate phases roughly
+  cancel), so a power term barely sees it, but it carries real kinetic energy
+  the whole time. Penalizing that energy directly removes the flailing.
+
+  Scope with ``asset_cfg.body_names`` to target specific limbs (e.g. the arms)
+  rather than taxing the legs and torso, which must move to locomote.
+  """
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    asset: Entity = env.scene[cfg.params["asset_cfg"].name]
+    body_ids, _ = asset.find_bodies(cfg.params["asset_cfg"].body_names)
+    # Entity-local ids index the per-body velocity tensors; the matching global
+    # model ids read mass/inertia (read live each step so startup mass/inertia
+    # domain randomization is respected).
+    self._local_body_ids = torch.tensor(body_ids, device=env.device, dtype=torch.long)
+    self._global_body_ids = asset.data.indexing.body_ids[self._local_body_ids]
+
+  def __call__(self, env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    data = asset.data
+
+    v = data.body_com_lin_vel_w[:, self._local_body_ids]  # [B, N, 3]
+    w = data.body_com_ang_vel_w[:, self._local_body_ids]  # [B, N, 3]
+    body_quat_w = data.body_link_quat_w[:, self._local_body_ids]  # [B, N, 4]
+
+    mass = data.model.body_mass[:, self._global_body_ids]  # [B, N]
+    inertia = data.model.body_inertia[:, self._global_body_ids]  # [B, N, 3]
+    body_iquat = data.model.body_iquat[:, self._global_body_ids]  # [B, N, 4]
+
+    ke_trans = 0.5 * mass * torch.sum(torch.square(v), dim=-1)  # [B, N]
+
+    # Rotate angular velocity from world into each body's principal-inertia
+    # frame so the diagonal principal moments apply:
+    #   w_principal = R(iquat)^-1 R(body_quat_w)^-1 w_world.
+    w_body = quat_apply_inverse(body_quat_w, w)
+    w_principal = quat_apply_inverse(body_iquat, w_body)
+    ke_rot = 0.5 * torch.sum(inertia * torch.square(w_principal), dim=-1)  # [B, N]
+
+    ke = torch.sum(ke_trans + ke_rot, dim=1)  # [B]
+    env.extras["log"]["Metrics/kinetic_energy_mean"] = torch.mean(ke)
+    return ke
 
 
 def gait_phase_regularity_cost(

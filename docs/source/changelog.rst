@@ -8,6 +8,20 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added a ``kinetic_energy`` velocity-task reward that penalizes the summed
+  rigid-body kinetic energy (translational plus rotational, using body masses
+  and principal inertias) over a configurable set of bodies. Unlike the
+  mechanical-power / cost-of-transport terms, it charges for motion itself
+  regardless of net actuator work, so scoping it to a limb (e.g. the arms)
+  directly damps oscillatory flailing that does little net work but carries
+  real energy.
+- Extended the ``cost_of_transport_proxy`` reward with ``include_negative_work``
+  and ``resistive_coeff`` options that move it from positive-mechanical-work
+  only toward the total electrical power a motor draws: ``include_negative_work``
+  also charges for braking (dissipated, not recovered, on geared servos), and
+  ``resistive_coeff`` adds the ``tau**2`` copper (I^2 R) loss that dominates at
+  high torque / low speed. Defaults preserve the previous behavior.
+
 - Added the Booster K1 humanoid to the asset zoo
   (``mjlab.asset_zoo.robots.booster_k1``) along with velocity and path
   tracking task configurations
@@ -99,6 +113,17 @@ Added
 Changed
 ^^^^^^^
 
+- Simplified the Booster K1 path tracking reward structure relative to the
+  Nugus-derived defaults it inherits. The K1 is a more capable platform and
+  refines an already-learned base gait, so the posture (``pose``) and
+  base-upright (``upright``) shaping rewards are halved, the swing-foot
+  leveling penalty (``foot_flat``) is reduced to a light nudge, and the
+  lateral feet-separation guard (``feet_distance``) is dropped. Energy-use
+  penalties are added to keep the freed-up gait efficient and to stop the arms
+  flailing: the cost-of-transport proxy (``cot_proxy``) is enabled with its
+  total-electrical-power options (braking and resistive loss, see below), and a
+  new arm-scoped kinetic-energy penalty is added. These changes apply only to
+  the K1 path tracking task; the K1 velocity task's tuning is unchanged.
 - Added ``power`` and ``only_below`` parameters to the ``feet_clearance``
   velocity reward. ``power=2`` uses a squared height error (stronger gradient
   far below target) and ``only_below=True`` penalizes only feet below the

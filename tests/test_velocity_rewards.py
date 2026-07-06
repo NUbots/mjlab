@@ -14,7 +14,9 @@ from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
 from mjlab.tasks.velocity.mdp.observations import gait_clock
 from mjlab.tasks.velocity.mdp.rewards import (
   _swing_height_profile,
+  cost_of_transport_proxy,
   feet_swing_height_clock,
+  kinetic_energy,
   upright,
 )
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
@@ -298,3 +300,114 @@ def test_gait_clock_ungated_without_command_name():
   clock = gait_clock(_make_clock_obs_env(2, still), period=0.8)
   assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
   assert math.isclose(clock[0, 1].item(), 0.0, abs_tol=1e-6)
+
+
+def _make_cot_env(tau: torch.Tensor, qd: torch.Tensor, speed: float):
+  """Mock env + cost_of_transport_proxy over two joints/actuators."""
+  asset = MagicMock()
+  asset.find_joints = MagicMock(return_value=([0, 1], ["j0", "j1"]))
+  asset.find_actuators = MagicMock(return_value=([0, 1], ["j0", "j1"]))
+  asset.data.actuator_force = tau
+  asset.data.joint_vel = qd
+  B = tau.shape[0]
+  vel = torch.zeros(B, 3)
+  vel[:, 0] = speed
+  asset.data.root_link_lin_vel_w = vel
+  env = MagicMock()
+  env.device = torch.device("cpu")
+  env.scene.__getitem__ = MagicMock(return_value=asset)
+  env.command_manager.get_command = MagicMock(return_value=None)
+  env.extras = {"log": {}}
+  cfg = MagicMock(spec=RewardTermCfg)
+  cfg.params = {"asset_cfg": SceneEntityCfg("robot")}
+  return env, cost_of_transport_proxy(cfg, env)
+
+
+def test_cot_positive_mechanical_only_by_default():
+  # tau*qd = [+2, -3]. Default counts only positive work: 2 / speed(1) = 2.
+  env, cot = _make_cot_env(
+    torch.tensor([[2.0, -3.0]]), torch.tensor([[1.0, 1.0]]), speed=1.0
+  )
+  r = cot(env, asset_cfg=SceneEntityCfg("robot"), speed_floor=0.1)
+  assert math.isclose(r.item(), 2.0, rel_tol=1e-6)
+
+
+def test_cot_include_negative_work_charges_braking():
+  # |2| + |-3| = 5, so braking is now counted.
+  env, cot = _make_cot_env(
+    torch.tensor([[2.0, -3.0]]), torch.tensor([[1.0, 1.0]]), speed=1.0
+  )
+  r = cot(
+    env, asset_cfg=SceneEntityCfg("robot"), speed_floor=0.1, include_negative_work=True
+  )
+  assert math.isclose(r.item(), 5.0, rel_tol=1e-6)
+
+
+def test_cot_resistive_term_adds_torque_squared():
+  # Positive work 2 plus resistive 0.5 * (2^2 + 3^2) = 6.5 -> 8.5.
+  env, cot = _make_cot_env(
+    torch.tensor([[2.0, -3.0]]), torch.tensor([[1.0, 1.0]]), speed=1.0
+  )
+  r = cot(env, asset_cfg=SceneEntityCfg("robot"), speed_floor=0.1, resistive_coeff=0.5)
+  assert math.isclose(r.item(), 2.0 + 6.5, rel_tol=1e-6)
+
+
+def _make_ke_env(
+  mass: torch.Tensor,
+  inertia: torch.Tensor,
+  lin_vel: torch.Tensor,
+  ang_vel: torch.Tensor,
+  body_quat: torch.Tensor,
+  iquat: torch.Tensor,
+):
+  """Mock env + kinetic_energy over ``mass.shape`` bodies (identity indexing)."""
+  n = mass.shape[1]
+  asset = MagicMock()
+  asset.find_bodies = MagicMock(
+    return_value=(list(range(n)), [f"b{i}" for i in range(n)])
+  )
+  asset.data.indexing.body_ids = torch.arange(n)
+  asset.data.body_com_lin_vel_w = lin_vel
+  asset.data.body_com_ang_vel_w = ang_vel
+  asset.data.body_link_quat_w = body_quat
+  asset.data.model.body_mass = mass
+  asset.data.model.body_inertia = inertia
+  asset.data.model.body_iquat = iquat
+  env = MagicMock()
+  env.device = torch.device("cpu")
+  env.scene.__getitem__ = MagicMock(return_value=asset)
+  env.extras = {"log": {}}
+  cfg = MagicMock(spec=RewardTermCfg)
+  cfg.params = {"asset_cfg": SceneEntityCfg("robot", body_names=(r".*",))}
+  return env, kinetic_energy(cfg, env)
+
+
+def test_kinetic_energy_translational():
+  # KE = 0.5 * (m0*|v0|^2 + m1*|v1|^2) = 0.5 * (1*9 + 2*16) = 20.5.
+  ident = _identity_quat(1).unsqueeze(1).expand(1, 2, 4)
+  env, ke = _make_ke_env(
+    mass=torch.tensor([[1.0, 2.0]]),
+    inertia=torch.zeros(1, 2, 3),
+    lin_vel=torch.tensor([[[3.0, 0.0, 0.0], [0.0, 4.0, 0.0]]]),
+    ang_vel=torch.zeros(1, 2, 3),
+    body_quat=ident,
+    iquat=ident,
+  )
+  r = ke(env, asset_cfg=SceneEntityCfg("robot", body_names=(r".*",)))
+  assert math.isclose(r.item(), 20.5, rel_tol=1e-6)
+
+
+def test_kinetic_energy_rotational_uses_principal_moments():
+  # Single body, no translation. KE_rot = 0.5 * sum(I .* w^2) with identity
+  # frames = 0.5 * (1*1 + 2*1 + 3*1) = 3.0.
+  ident = _identity_quat(1).unsqueeze(1)  # [1, 1, 4]
+  env, ke = _make_ke_env(
+    mass=torch.tensor([[5.0]]),
+    inertia=torch.tensor([[[1.0, 2.0, 3.0]]]),
+    lin_vel=torch.zeros(1, 1, 3),
+    ang_vel=torch.tensor([[[1.0, 1.0, 1.0]]]),
+    body_quat=ident,
+    iquat=ident,
+  )
+  r = ke(env, asset_cfg=SceneEntityCfg("robot", body_names=(r".*",)))
+  assert math.isclose(r.item(), 3.0, rel_tol=1e-6)
