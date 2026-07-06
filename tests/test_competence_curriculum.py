@@ -1166,6 +1166,7 @@ def test_runner_wrapper_scales_desired_kl() -> None:
   from mjlab.rl.runner import MjlabOnPolicyRunner
 
   runner = MjlabOnPolicyRunner.__new__(MjlabOnPolicyRunner)
+  runner.cfg = {}
   alg = MagicMock()
   alg.desired_kl = 0.01
   calls = []
@@ -1225,3 +1226,39 @@ def test_obs_norm_freeze_sets_until_and_stops_updates() -> None:
   alg.actor = torch.nn.Sequential(norm_b)
   runner._apply_obs_norm_freeze({})
   assert norm_b.until is None
+
+
+def test_freeze_policy_probe_noops_optimizer_after_threshold() -> None:
+  """R16 probe: after N updates the optimizer step must become a no-op
+  while update() itself keeps running (losses/logging intact)."""
+  from mjlab.rl.runner import MjlabOnPolicyRunner
+
+  runner = MjlabOnPolicyRunner.__new__(MjlabOnPolicyRunner)
+  runner.cfg = {"freeze_policy_after": 3}
+  param = torch.nn.Parameter(torch.zeros(2))
+  opt = torch.optim.SGD([param], lr=1.0)
+  alg = MagicMock()
+  alg.desired_kl = 0.01
+  alg.optimizer = opt
+
+  def fake_update(*a, **k):
+    param.grad = torch.ones_like(param)
+    opt.step()
+    return {}
+
+  alg.update = fake_update
+  env = MagicMock()
+  env.unwrapped = MagicMock()
+  env.unwrapped._landing_factor = 1.0
+  runner.env = env
+  runner.alg = alg
+  runner._install_landing_anneal()
+
+  alg.update()
+  alg.update()
+  assert param[0].item() == pytest.approx(-2.0)  # two real steps
+  alg.update()  # threshold reached: frozen from this update on
+  after_third = param[0].item()
+  alg.update()
+  alg.update()
+  assert param[0].item() == pytest.approx(after_third)  # bit-frozen

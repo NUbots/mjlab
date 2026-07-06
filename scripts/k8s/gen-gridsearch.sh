@@ -254,7 +254,7 @@ export JOULE_LAMBDA_SHADOW LAMBDA_CAP LAMBDA_RAMP_ITERS JOULE_LAMBDA_LIVE
 export COMMAND_GEOMETRY
 export AIMD_BETA_ARREST AIMD_ENVELOPE_SCALE
 export AIMD_PUSH_CONGEST_BAR AIMD_PUSH_GATE_EXCESS AIMD_ATTAIN_SLIDE_FRAC LANDING_ANNEAL
-export OBS_NORM_FREEZE_ITERS
+export OBS_NORM_FREEZE_ITERS FREEZE_POLICY_AFTER
 export LINK_MASS_SCALE_MIN LINK_MASS_SCALE_MAX
 export PAYLOAD_KG_MIN PAYLOAD_KG_MAX
 
@@ -1227,6 +1227,8 @@ _competence_defaults() {
   export LANDING_ANNEAL=""
   # Obs-normalizer freeze (R15); empty = code default 500 iters.
   export OBS_NORM_FREEZE_ITERS=""
+  # Bit-freeze probe (R16); empty = off.
+  export FREEZE_POLICY_AFTER=""
 }
 
 
@@ -1517,6 +1519,46 @@ gen_v24c() {
   export RUN_NAME="clock_owned__v24c-attain050-ph2k__8gpu-6144__s1__${BATCH}"
   export WANDB_TAGS="clock_owned,v24c,attain-0.50,phase-2k,lmax4,std-min-0.13,8gpu,multinode,batch-v24,gridsearch"
   emit_manifest "mj-gs-v24c-prod"
+}
+
+
+# BATCH=v34: the R16 discriminating probe - a MEASUREMENT, not a fix.
+# Three falsifications stand (task relief, LR floor, frozen obs
+# normalizers - v30/v32/v33 all slid on the same ~1700 schedule). Two
+# suspects remain: (A) residual training-side updates below LR 1e-5, or
+# (B) env/measurement-side drift. This run trains normally to 1400
+# (healthy plateau) then BIT-FREEZES the policy (optimizer.step no-op)
+# and simply watches for 1600 more iterations. Slide appears anyway ->
+# (B): the environment or the metric drifts under a constant policy.
+# Flat -> (A): sub-floor updates are the residue. Either answer halves
+# the space; no interpretation ambiguity.
+gen_v34() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.3"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export FREEZE_POLICY_AFTER="1400"
+  export MAX_ITERATIONS="3000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v34-probe-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v34"
+  export RUN_NAME="clock_owned__v34-freeze-probe__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v34-probe,freeze-policy,batch-v34,gridsearch"
+  emit_manifest "mj-gs-v34-probe"
 }
 
 
@@ -2162,6 +2204,7 @@ case "$BATCH" in
   v31) gen_v31; expected=2 ;;
   v32) gen_v32; expected=1 ;;
   v33) gen_v33; expected=1 ;;
+  v34) gen_v34; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

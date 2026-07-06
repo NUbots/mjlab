@@ -98,6 +98,10 @@ class RslRlBaseRunnerCfg:
   )
   save_interval: int = 50
   """The number of iterations between saves."""
+  freeze_policy_after: int = 0
+  """Diagnostic probe (doc 15 R16): after this many PPO updates the
+  optimizer's step becomes a no-op — the policy is bit-frozen while
+  rollouts, losses, and logging continue. 0 = off."""
   obs_norm_freeze_iters: int = 0
   """Freeze actor/critic observation normalizers after this many
   iterations' worth of samples (doc 15 R15). rsl-rl's

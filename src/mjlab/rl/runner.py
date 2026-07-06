@@ -71,12 +71,32 @@ class MjlabOnPolicyRunner(OnPolicyRunner):
     if alg is None or getattr(alg, "desired_kl", None) is None:
       return
     base_kl = float(alg.desired_kl)
+    self._train_cfg_freeze_after = int(
+      (self.cfg.get("freeze_policy_after") or 0) if isinstance(self.cfg, dict) else 0
+    )
     orig_update = alg.update
     unwrapped = getattr(self.env, "unwrapped", None)
+
+    freeze_after = int(self._train_cfg_freeze_after)
+    state = {"updates": 0, "frozen": False}
 
     def update_with_landing(*args, **kwargs):
       factor = getattr(unwrapped, "_landing_factor", 1.0)
       alg.desired_kl = max(base_kl * float(factor), 2e-4)
+      state["updates"] += 1
+      # FREEZE_POLICY_AFTER probe (R16): past the threshold, gradients
+      # are still computed and losses logged, but optimizer.step is a
+      # no-op - the policy is bit-frozen. Discriminator for the late-run
+      # rot: three falsifications (task relief, LR floor, frozen obs
+      # normalizers) leave two suspects - residual training-side updates
+      # vs env/measurement-side drift. A frozen policy that still
+      # "slides" indicts the environment or the metric; a flat one
+      # indicts training updates below LR 1e-5.
+      if freeze_after > 0 and state["updates"] >= freeze_after and not state["frozen"]:
+        state["frozen"] = True
+        opt = getattr(alg, "optimizer", None)
+        if opt is not None:
+          opt.step = lambda *a, **k: None
       return orig_update(*args, **kwargs)
 
     alg.update = update_with_landing

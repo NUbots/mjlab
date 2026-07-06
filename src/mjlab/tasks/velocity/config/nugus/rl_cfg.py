@@ -85,4 +85,5 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     num_steps_per_env=24,
     max_iterations=20_000,
     obs_norm_freeze_iters=_env_int("OBS_NORM_FREEZE_ITERS", 500),
+    freeze_policy_after=_env_int("FREEZE_POLICY_AFTER", 0),
   )
