@@ -1472,3 +1472,52 @@ def test_adaptive_obs_window_tracks_t75() -> None:
   env.termination_manager.get_term.return_value = torch.tensor([False, False])
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
   assert 3.5 < tracker.push_obs_window_s < 5.0  # adapted to measured t75
+
+
+def test_frontier_retreats_during_population_decline() -> None:
+  """R26 (v38 replay): unhealthy windows must decay frontier confidence,
+  not poll the surviving elite."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  tracker.attain_by_speed[:16] = 0.75
+  tracker.attain_by_speed_weight[:16] = 100.0
+  tracker._attain_bin_sum[:16] = 90.0 * 0.8  # elite survivors still great
+  tracker._attain_bin_weight[:16] = 90.0
+  tracker.fast_fall_clean = 0.50  # population dying
+  tracker._bucket_next_step = 0
+  tracker._bucket_steps[0] = 200.0
+  env.common_step_counter = 5000
+  env.termination_manager.get_term.return_value = torch.tensor([False, False])
+  tracker._finalized_step = -1
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  # Curve values unchanged (no fold), confidence decayed.
+  assert tracker.attain_by_speed[8].item() == pytest.approx(0.75)
+  assert tracker.attain_by_speed_weight[8].item() == pytest.approx(85.0)
+
+
+def test_floor_memory_releases_during_crash() -> None:
+  """R26: sustained crash signal must deflate the attained memory fast
+  so the floor follows capability down instead of caging the run."""
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  tracker.attain_ema[:] = 0.6
+  tracker.wobble_ema[:] = 0.02
+  term._attained_best_v = 0.68
+  term._cmd_ctrl.d = 0.5
+  tracker.attain_by_speed.zero_()
+  tracker.attain_by_speed_weight.zero_()  # frontier reads 0
+
+  def step(it: int, f: float) -> None:
+    tracker.fast_fall_clean = f
+    tracker.fast_fall_rate = f
+    tracker.fast_fall_pushed = f
+    env.common_step_counter = it * _NUM_STEPS_PER_ENV
+    tracker._finalized_step = -1
+    term(env, torch.tensor([0, 1]), "twist", "push_robot")
+
+  step(1000, 0.05)
+  assert term._attained_best_v == pytest.approx(0.68 * 0.999)
+  before = term._attained_best_v
+  for it in range(1001, 1101):
+    step(it, 0.60)  # crash: fast release
+  assert term._attained_best_v < before * 0.45  # 0.99^100 ~ 0.366

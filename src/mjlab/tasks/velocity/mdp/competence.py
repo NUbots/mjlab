@@ -679,16 +679,26 @@ class CompetenceTracker:
         self.rho_hazard = 0.3 * rho_hazard + 0.7 * self.rho_hazard
         self._rho_steps.zero_()
         self._rho_falls.zero_()
-        has_w = self._attain_bin_weight > 8.0
-        window_attain = self._attain_bin_sum / self._attain_bin_weight.clamp(min=1e-6)
-        self.attain_by_speed = torch.where(
-          has_w,
-          0.3 * window_attain + 0.7 * self.attain_by_speed,
-          self.attain_by_speed,
-        )
-        self.attain_by_speed_weight = (
-          0.3 * self._attain_bin_weight + 0.7 * self.attain_by_speed_weight
-        )
+        if self.fast_fall_clean < 0.20:
+          has_w = self._attain_bin_weight > 8.0
+          window_attain = self._attain_bin_sum / self._attain_bin_weight.clamp(min=1e-6)
+          self.attain_by_speed = torch.where(
+            has_w,
+            0.3 * window_attain + 0.7 * self.attain_by_speed,
+            self.attain_by_speed,
+          )
+          self.attain_by_speed_weight = (
+            0.3 * self._attain_bin_weight + 0.7 * self.attain_by_speed_weight
+          )
+        else:
+          # Survivor-bias guard (R26): during population decline the
+          # survivors are the elite, so folding their windows RAISES the
+          # frontier exactly when the truth is falling (v38: frontier
+          # 0.64->0.677 while fall rate went 0.13->0.50). While the
+          # clean fall rate is unhealthy, bin confidence decays instead
+          # - the frontier retreats with the population, never polls
+          # only the living.
+          self.attain_by_speed_weight *= 0.85
         self._attain_bin_sum.zero_()
         self._attain_bin_weight.zero_()
         if float(self.push_fall_dt_counts.sum()) >= 50.0:
@@ -1654,7 +1664,14 @@ class aimd_difficulty:
         self._tracker.speed_bin_width,
         self._band_lo,
       )
-      self._attained_best_v = max(self._attained_best_v * 0.999, frontier_v)
+      # Crash-release (R26): the floor memory follows genuine capability
+      # loss instead of caging the run at survivor-inflated speed (v38
+      # pinned at d=0.443 = exactly its floor while the fall rate hit
+      # 0.73 - the anti-collapse floor was the cage). Slow ratchet in
+      # health; fast release while the fall signal is above the bar.
+      crash_sig = max(strat["fast_fall_clean"], pop_fast if emergency else 0.0)
+      mem_decay = 0.99 if crash_sig >= self._cmd_params.congest_bar else 0.999
+      self._attained_best_v = max(self._attained_best_v * mem_decay, frontier_v)
       floor_d = max(
         0.0, (self._floor_frac * self._attained_best_v - lo_v) / (hi_v - lo_v)
       )
