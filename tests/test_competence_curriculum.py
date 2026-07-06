@@ -1281,7 +1281,7 @@ def test_frontier_controller_climbs_glides_and_floors() -> None:
     tracker.attain_by_speed[:n] = 0.75
     tracker.attain_by_speed_weight[:n] = 100.0
 
-  def step(it: int, f_clean: float = 0.05) -> float:
+  def step(it: int, f_clean: float = 0.0) -> float:
     tracker.fast_fall_clean = f_clean
     tracker.fast_fall_rate = f_clean
     tracker.fast_fall_pushed = 0.20
@@ -1317,12 +1317,14 @@ def test_frontier_controller_climbs_glides_and_floors() -> None:
   assert d_glide == pytest.approx(floor_d, abs=0.01)
   assert d_glide > 0.2  # held well above zero (floor decays ~0.999/iter)
 
-  # Sustained crash-level fall signal: cuts clamp at the floor.
+  # R27: under a SUSTAINED crash signal the floor releases (0.99/iter,
+  # no frontier re-ratchet) and difficulty follows capability down -
+  # the v38/v39 cage is the counterexample this encodes. The watchdog,
+  # not the floor, is the answer to a true catastrophe.
   for it in range(1400, 1470):
     d_crash = step(it, f_clean=0.60)
-  floor_d = (0.95 * term._attained_best_v - lo_v) / (hi_v - lo_v)
-  assert d_crash == pytest.approx(max(floor_d, 0.0), abs=0.01)
-  assert d_crash > 0.05  # NOT the old collapse-to-zero
+  assert term._attained_best_v < 0.30
+  assert d_crash < 0.15
 
 
 def test_survivor_conditioning_gates_capability_credit() -> None:
@@ -1492,7 +1494,7 @@ def test_frontier_retreats_during_population_decline() -> None:
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
   # Curve values unchanged (no fold), confidence decayed.
   assert tracker.attain_by_speed[8].item() == pytest.approx(0.75)
-  assert tracker.attain_by_speed_weight[8].item() == pytest.approx(85.0)
+  assert tracker.attain_by_speed_weight[8].item() == pytest.approx(50.0)
 
 
 def test_floor_memory_releases_during_crash() -> None:
@@ -1521,3 +1523,57 @@ def test_floor_memory_releases_during_crash() -> None:
   for it in range(1001, 1101):
     step(it, 0.60)  # crash: fast release
   assert term._attained_best_v < before * 0.45  # 0.99^100 ~ 0.366
+
+
+def test_release_is_not_reratcheted_by_stale_frontier() -> None:
+  """R27 (v39 replay): during a crash the floor memory must decay even
+  while the (stale) frontier still reads high."""
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  tracker.attain_ema[:] = 0.6
+  tracker.wobble_ema[:] = 0.02
+  # Stale-high frontier: curve says 0.67 with plenty of weight.
+  n = int(0.68 / tracker.speed_bin_width)
+  tracker.attain_by_speed[:n] = 0.75
+  tracker.attain_by_speed_weight[:n] = 100.0
+  term._attained_best_v = 0.673
+  term._cmd_ctrl.d = 0.574
+  for it in range(2000, 2100):
+    tracker.fast_fall_clean = 0.50
+    tracker.fast_fall_rate = 0.50
+    tracker.fast_fall_pushed = 0.50
+    env.common_step_counter = it * _NUM_STEPS_PER_ENV
+    tracker._finalized_step = -1
+    out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+  assert term._attained_best_v < 0.673 * 0.45  # released despite frontier
+  assert out["difficulty"].item() < 0.30  # cage broken: d followed down
+
+
+def test_stress_scaled_headroom_closes_the_valve() -> None:
+  """R27: the beyond-frontier margin shrinks to zero as stress rises."""
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  tracker.attain_ema[:] = 0.7
+  tracker.wobble_ema[:] = 0.02
+  n = int(0.52 / tracker.speed_bin_width)
+  tracker.attain_by_speed[:n] = 0.75
+  tracker.attain_by_speed_weight[:n] = 100.0
+  lo_v, hi_v = 0.20, 0.75 * term._envelope_scale
+
+  def eq_target(f_clean: float) -> float:
+    term._cmd_ctrl.d = 0.2
+    tracker.fast_fall_clean = f_clean
+    tracker.fast_fall_rate = f_clean
+    tracker.fast_fall_pushed = f_clean
+    d = 0.2
+    for it in range(3000, 3400):
+      env.common_step_counter = it * _NUM_STEPS_PER_ENV
+      tracker._finalized_step = -1
+      out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+      d = out["difficulty"].item()
+    return lo_v + (hi_v - lo_v) * d
+
+  v_relaxed = eq_target(0.01)  # ~ frontier x 1.15
+  v_stressed = eq_target(0.13)  # near the gate: margin ~ gone
+  assert v_relaxed > v_stressed
+  assert v_stressed < 0.56  # ~ frontier x <1.02 (floor may hold it near)

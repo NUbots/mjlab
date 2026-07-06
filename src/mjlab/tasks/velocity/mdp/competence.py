@@ -679,7 +679,7 @@ class CompetenceTracker:
         self.rho_hazard = 0.3 * rho_hazard + 0.7 * self.rho_hazard
         self._rho_steps.zero_()
         self._rho_falls.zero_()
-        if self.fast_fall_clean < 0.20:
+        if self.fast_fall_clean < 0.15:
           has_w = self._attain_bin_weight > 8.0
           window_attain = self._attain_bin_sum / self._attain_bin_weight.clamp(min=1e-6)
           self.attain_by_speed = torch.where(
@@ -698,7 +698,7 @@ class CompetenceTracker:
           # clean fall rate is unhealthy, bin confidence decays instead
           # - the frontier retreats with the population, never polls
           # only the living.
-          self.attain_by_speed_weight *= 0.85
+          self.attain_by_speed_weight *= 0.5
         self._attain_bin_sum.zero_()
         self._attain_bin_weight.zero_()
         if float(self.push_fall_dt_counts.sum()) >= 50.0:
@@ -1670,8 +1670,13 @@ class aimd_difficulty:
       # 0.73 - the anti-collapse floor was the cage). Slow ratchet in
       # health; fast release while the fall signal is above the bar.
       crash_sig = max(strat["fast_fall_clean"], pop_fast if emergency else 0.0)
-      mem_decay = 0.99 if crash_sig >= self._cmd_params.congest_bar else 0.999
-      self._attained_best_v = max(self._attained_best_v * mem_decay, frontier_v)
+      if crash_sig >= self._cmd_params.congest_bar:
+        # Release means RELEASE (v39: max(memory, frontier) re-ratcheted
+        # the floor from a frozen-stale frontier every iteration and the
+        # cage rebuilt itself at 0.673 while the fall rate hit 0.79).
+        self._attained_best_v *= 0.99
+      else:
+        self._attained_best_v = max(self._attained_best_v * 0.999, frontier_v)
       floor_d = max(
         0.0, (self._floor_frac * self._attained_best_v - lo_v) / (hi_v - lo_v)
       )
@@ -1713,7 +1718,15 @@ class aimd_difficulty:
       # exceed headroom; descent is bounded slew, never a cascade below
       # the floor.
       if frontier_v > 0:
-        target_v = frontier_v * self._headroom
+        # Stress-scaled headroom (R27): the beyond-frontier margin is a
+        # pressure valve, shrinking linearly to zero as the clean fall
+        # rate approaches the fold gate - near a hard capability
+        # ceiling a FIXED margin is a constant poison drip (v38/v39:
+        # fall-rate creep from ~1500 at frontier x 1.15 against the
+        # ~0.68 m/s ceiling).
+        stress = min(max(strat["fast_fall_clean"] / 0.15, 0.0), 1.0)
+        headroom_eff = 1.0 + (self._headroom - 1.0) * (1.0 - stress)
+        target_v = frontier_v * headroom_eff
       else:
         # Bootstrap (R22): no bin has qualified yet (cold start). Crawl
         # upward while globally healthy so the sampler can reach speeds
