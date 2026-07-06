@@ -1535,6 +1535,43 @@ gen_v24c() {
 }
 
 
+# BATCH=v43: sim-state telemetry probe. Static env + frozen policy at
+# 600 (v42a repro, shortened) with live model-field ratios logged; any
+# in-place ratchet (forcerange/damping/armature/frictionloss) is visible
+# within ~100 iters and its slope names the culprit event. If all ratios
+# hold at 1.0 while the rot appears anyway, the drift lives in Data-side
+# or warp-internal state and the minimal repro goes upstream to mjwarp.
+gen_v43() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS=""
+  export ADAPTIVE_PUSHES=""
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="1"
+  export MULTINODE=""
+  export PUSH_COHORT_FRAC="0.3"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export JOULE_W="0"
+  export JOINT_ACC_W="0"
+  export TORQUE_RATE_PEAK_W="0"
+  export SOFT_LANDING_PEAK_W="0"
+  export FREEZE_POLICY_AFTER="600"
+  export TRACK_WATCHDOG="0"
+  export MAX_ITERATIONS="1600"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v43-simstate-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v43"
+  export RUN_NAME="clock_owned__v43-simstate-probe__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v43,simstate-telemetry,batch-v43,gridsearch"
+  emit_manifest "mj-gs-v43-simstate"
+}
+
+
 # BATCH=v42: the sim-state probe. v41 pincer: ignition is schedule-
 # independent (v41a: PHASE=3000 moved nothing) AND training-independent
 # (v41b: bit-frozen policy rotted faster, in an easing env). The rot is
@@ -2564,6 +2601,7 @@ case "$BATCH" in
   v40) gen_v40; expected=1 ;;
   v41) gen_v41; expected=2 ;;
   v42) gen_v42; expected=2 ;;
+  v43) gen_v43; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
