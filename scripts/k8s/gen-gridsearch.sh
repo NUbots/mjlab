@@ -1526,6 +1526,42 @@ gen_v24c() {
 }
 
 
+# BATCH=v36: the minimal-cocktail arm — joule + action_rate only
+# (JOINT_ACC_W=0, TORQUE_RATE_PEAK_W=0). If v35a is clean, this tests
+# whether torque_rate was earning anything in-sim: compare gait metrics
+# (peak_height, feet spacing) and smoothness against v35a. Queued behind
+# the v35 pair; runs on whichever node frees first.
+gen_v36() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="1"
+  export MULTINODE=""
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.3"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export JOINT_ACC_W="0"
+  export TORQUE_RATE_PEAK_W="0"
+  export MAX_ITERATIONS="3000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v36-jouleonly-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v36"
+  export RUN_NAME="clock_owned__v36-joule-only__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v36-joule-only,minimal-cocktail,batch-v36,gridsearch"
+  emit_manifest "mj-gs-v36-jouleonly"
+}
+
+
 # BATCH=v35: the penalty-cocktail discrimination pair (user hypothesis,
 # R17). Stage-4 arrival precedes every slide onset by 150-300 iters and
 # moved WITH the ladder in v33 - the first variable that shifts the
@@ -2260,6 +2296,7 @@ case "$BATCH" in
   v33) gen_v33; expected=1 ;;
   v34) gen_v34; expected=1 ;;
   v35) gen_v35; expected=2 ;;
+  v36) gen_v36; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
