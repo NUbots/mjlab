@@ -1,0 +1,343 @@
+# Volcano Job template for mjlab grid-search cells. Do not apply directly.
+# Generate manifests with scripts/k8s/gen-gridsearch.sh (see --help).
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  name: mj-gs-v41a-phase3k
+  namespace: mjlab
+  labels:
+    app.kubernetes.io/name: mjlab-train
+    app.kubernetes.io/component: gridsearch
+    mjlab/gridsearch: "true"
+    mjlab/variant: clock_owned
+spec:
+  schedulerName: volcano
+  queue: mjlab-train
+  minAvailable: 1
+  plugins:
+    env: []
+    svc: []
+  maxRetry: 0
+  ttlSecondsAfterFinished: 86400
+  tasks:
+    - name: train
+      replicas: 1
+      minAvailable: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: mjlab-train
+            app.kubernetes.io/component: gridsearch
+            mjlab/gridsearch: "true"
+            mjlab/variant: clock_owned
+        spec:
+          restartPolicy: Never
+          runtimeClassName: nvidia
+          priorityClassName: training-medium
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Exists
+              effect: NoSchedule
+          containers:
+            - name: train
+              image: ghcr.io/mujocolab/mjlab:latest
+              imagePullPolicy: Always
+              command:
+                - /scripts/entrypoint.sh
+              env:
+                - name: MUJOCO_GL
+                  value: egl
+                - name: NUM_ENVS
+                  value: "6144"
+                - name: MULTINODE
+                  value: ""
+                - name: NNODES
+                  value: "1"
+                - name: MJLAB_LOG_STAMP
+                  value: "v41a-phase3k-20260706-205730"
+                - name: UV_LINK_MODE
+                  value: copy
+                - name: MJLAB_VARIANT
+                  value: "clock_owned"
+                - name: JOULE_W
+                  value: "1e-5"
+                - name: STAND_W
+                  value: "0.15"
+                - name: PHASE_C_FRAC
+                  value: "0.5"
+                # Curriculum phase boundaries are derived from PHASE_ITERATIONS,
+                # decoupled from MAX_ITERATIONS (which only drives the training
+                # length). Freeze at 1250 so resumed/extended runs keep the same
+                # absolute phase timing.
+                - name: PHASE_ITERATIONS
+                  value: "3000"
+                # Training length (additive on resume: rsl-rl runs this many more
+                # iterations starting from the checkpoint's iteration). Overrides
+                # the configmap default per cell.
+                - name: MAX_ITERATIONS
+                  value: "3000"
+                # New clock_anneal variant knobs read by the factory.
+                - name: SILENCE_CLOCK
+                  value: "0"
+                - name: CURRENT_OBS
+                  value: "0"
+                - name: PHASE_DELTA_STRONG_ITERS
+                  value: "1000"
+                - name: PHASE_DELTA_STRONG_W
+                  value: "-5.0"
+                - name: PHASE_DELTA_TAIL_W
+                  value: ""
+                - name: UPRIGHT_W
+                  value: "0.5"
+                - name: PROGRESS_BACKSLIDE_W
+                  value: "-0.5"
+                - name: TRAINING_REGIME
+                  value: "base"
+                - name: HARD_COMPONENTS
+                  value: ""
+                - name: CONT_BASE_STEP
+                  value: ""
+                - name: CRITIC_HEIGHT_SCAN
+                  value: "true"
+                - name: TASK
+                  value: "Mjlab-Velocity-Flat-Nubots-Nugus"
+                - name: RESAMPLE_MIN
+                  value: "3.0"
+                - name: GAIT_PERIOD
+                  value: "0.7"
+                - name: SWING_TARGET_HEIGHT
+                  value: "0.05"
+                - name: FLATTEN_PHASE_C
+                  value: "0"
+                - name: PHASE_C_WARMUP
+                  value: "1"
+                - name: ALIVE_W
+                  value: "0.5"
+                - name: JOINT_ACC_W
+                  value: "0"
+                - name: PHASE_DELTA_W
+                  value: "-0.2"
+                - name: FEET_MIN_SEP
+                  value: "0.13"
+                - name: FEET_MIN_SEP_W
+                  value: "-1.0"
+                - name: FEET_MIN_SEP_SHARPNESS
+                  value: "20"
+                - name: TRACK_LIN_W
+                  value: "3.0"
+                - name: TRACK_ANG_W
+                  value: "2.0"
+                - name: AIR_TIME_W
+                  value: "0.25"
+                - name: MIRROR_AUG
+                  value: "1"
+                - name: FOOT_FLAT_W
+                  value: "-0.5"
+                - name: FOOT_FLAT_ONESIDED
+                  value: "1"
+                - name: CLEARANCE_PER_CORNER
+                  value: ""
+                - name: SWING_HEIGHT_SOURCE
+                  value: "min_corner"
+                - name: CLEARANCE_TARGET_HEIGHT
+                  value: ""
+                - name: CLEARANCE_TARGET_FROM_SWING
+                  value: "1"
+                - name: PUSH_INTERVAL_SCALE
+                  value: "1.0"
+                - name: LR_CAP
+                  value: "3e-4"
+                - name: LR_CAP_START_ITER
+                  value: "1200"
+                - name: ENTROPY_DECAY
+                  value: "1"
+                - name: ENTROPY_START
+                  value: ""
+                - name: ENTROPY_END
+                  value: ""
+                - name: STD_MIN
+                  value: "0.13"
+                - name: GAMMA
+                  value: ""
+                - name: ADAPTIVE_COMMANDS
+                  value: "1"
+                - name: ADAPTIVE_PUSHES
+                  value: "1"
+                - name: PENALTY_GATE
+                  value: "competence"
+                - name: ADAPTIVE_CMD_LMAX
+                  value: "5"
+                - name: ADAPTIVE_PUSH_LMAX
+                  value: "2"
+                - name: COMPETENCE_PROMOTE_TRACK_ERR
+                  value: ""
+                - name: COMPETENCE_DEMOTE_TRACK_ERR
+                  value: ""
+                - name: COMPETENCE_PROMOTE_ATTAIN
+                  value: "0.60"
+                - name: COMPETENCE_DEMOTE_ATTAIN
+                  value: "0.40"
+                - name: COMPETENCE_PROMOTE_WOBBLE
+                  value: ""
+                - name: COMPETENCE_DEMOTE_WOBBLE
+                  value: ""
+                - name: COMPETENCE_PROMOTE_FELL
+                  value: ""
+                - name: COMPETENCE_DEMOTE_FELL
+                  value: ""
+                - name: COMPETENCE_DEMOTE_FAST_FELL
+                  value: "0.35"
+                - name: COMPETENCE_TOP_STREAK
+                  value: ""
+                - name: CURRICULUM_STYLE
+                  value: "aimd"
+                - name: AIMD_ALPHA
+                  value: ""
+                - name: AIMD_BETA
+                  value: ""
+                - name: AIMD_CONGEST_BAR
+                  value: ""
+                - name: AIMD_EMERGENCY_BAR
+                  value: ""
+                - name: AIMD_GATE_ATTAIN
+                  value: ""
+                - name: TRACK_WATCHDOG
+                  value: ""
+                - name: WATCHDOG_ARM_ABOVE
+                  value: ""
+                - name: WATCHDOG_FAIL_BELOW
+                  value: ""
+                - name: WATCHDOG_PERSIST_ITERS
+                  value: ""
+                - name: PUSH_COHORT_FRAC
+                  value: "0.3"
+                - name: FRONTIER_HAZARD_BAR
+                  value: ""
+                - name: JOULE_LAMBDA_SHADOW
+                  value: ""
+                - name: LAMBDA_CAP
+                  value: ""
+                - name: LAMBDA_RAMP_ITERS
+                  value: ""
+                - name: JOULE_LAMBDA_LIVE
+                  value: ""
+                - name: COMMAND_GEOMETRY
+                  value: "ellipsoid"
+                - name: AIMD_BETA_ARREST
+                  value: ""
+                - name: AIMD_ENVELOPE_SCALE
+                  value: "1.6"
+                - name: AIMD_PUSH_CONGEST_BAR
+                  value: ""
+                - name: AIMD_PUSH_GATE_EXCESS
+                  value: ""
+                - name: AIMD_ATTAIN_SLIDE_FRAC
+                  value: ""
+                - name: LANDING_ANNEAL
+                  value: ""
+                - name: OBS_NORM_FREEZE_ITERS
+                  value: "500"
+                - name: FREEZE_POLICY_AFTER
+                  value: ""
+                - name: TORQUE_RATE_PEAK_W
+                  value: "0"
+                - name: SOFT_LANDING_PEAK_W
+                  value: ""
+                - name: AIMD_ATTAIN_BAND_HI
+                  value: ""
+                - name: AIMD_ATTAIN_BAND_LO
+                  value: ""
+                - name: AIMD_FLOOR_FRAC
+                  value: ""
+                - name: AIMD_FRONTIER_HEADROOM
+                  value: ""
+                - name: PUSH_SURVIVAL_BAR
+                  value: ""
+                - name: PUSH_OBS_WINDOW_S
+                  value: ""
+                - name: COMPETENCE_COOLDOWN_ITERS
+                  value: ""
+                - name: LINK_MASS_SCALE_MIN
+                  value: "0.90"
+                - name: LINK_MASS_SCALE_MAX
+                  value: "1.10"
+                - name: PAYLOAD_KG_MIN
+                  value: "-0.2"
+                - name: PAYLOAD_KG_MAX
+                  value: "0.2"
+                - name: EFFORT_LO
+                  value: "0.7"
+                - name: EFFORT_HI
+                  value: "1.2"
+                - name: SEED
+                  value: "1"
+                - name: LOGGER
+                  value: "wandb"
+                - name: EXPERIMENT_NAME
+                  value: "nugus_gridsearch_v41"
+                - name: RUN_NAME
+                  value: "clock_owned__v41a-phase3000__4gpu-6144__s1__v41"
+                - name: WANDB_PROJECT
+                  value: "mjlab"
+                - name: WANDB_TAGS
+                  value: "clock_owned,v41a,phase-3000,discriminator,batch-v41,gridsearch"
+                # Data-parallel: use every GPU the pod is granted (4 -> torchrunx).
+                - name: GPU_IDS
+                  value: "all"
+                # Pin commit + force fresh, isolated runs regardless of the shared
+                # mjlab-train-config configmap (which is rewritten by other tooling).
+                # NOTE: c04e4ec adds the actuator_current (CURRENT_OBS) and
+                # clock-silence (SILENCE_CLOCK) clock_anneal variants, decouples the
+                # curriculum phase timing via PHASE_ITERATIONS, and rescales the
+                # command_vel curriculum so the wide backward/strafe/yaw ranges are
+                # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
+                # policy learns to rotate).
+                - name: GIT_COMMIT
+                  value: "e9886363e8e73aa45c86c20fb4d303b95259da3b"
+                # Resume/continuation: set per cell by gen-gridsearch.sh. When
+                # RESUME=true the run continues from WANDB_RUN_PATH's latest
+                # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
+                - name: RESUME
+                  value: "false"
+                - name: WANDB_RUN_PATH
+                  value: ""
+                - name: WANDB_RUN_NAME
+                  value: ""
+              envFrom:
+                - configMapRef:
+                    name: mjlab-train-config
+                - secretRef:
+                    name: mjlab-wandb
+                    optional: true
+              resources:
+                requests:
+                  nvidia.com/gpu: "4"
+                limits:
+                  nvidia.com/gpu: "4"
+              volumeMounts:
+                - name: workspace
+                  mountPath: /workspace
+                - name: logs
+                  mountPath: /logs
+                - name: entrypoint
+                  mountPath: /scripts
+                - name: dshm
+                  mountPath: /dev/shm
+          volumes:
+            # Per-pod clone instead of the shared mjlab-workspace PVC: that PVC is
+            # longhorn-local pinned to node munin, which forces every job onto munin
+            # and leaves hugin idle. emptyDir lets each 4-GPU job land on any GPU node
+            # (one on munin, one on hugin) and clone the repo fresh at the pinned commit.
+            - name: workspace
+              emptyDir: {}
+            - name: logs
+              persistentVolumeClaim:
+                claimName: mjlab-logs
+            - name: entrypoint
+              configMap:
+                name: mjlab-entrypoint
+                defaultMode: 0755
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 16Gi

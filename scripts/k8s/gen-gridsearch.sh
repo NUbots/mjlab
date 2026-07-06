@@ -1535,6 +1535,55 @@ gen_v24c() {
 }
 
 
+# BATCH=v41: the two-suspect discriminator pair. v40 proved the
+# controller blameless (valve compressed exposure to exactly 1.000 and
+# the rot accelerated through it; release followed capability down and
+# the rot completed anyway - 7th demonstration). Remaining suspects:
+# (a) the entropy schedule, whose coefficient bottoms exactly in the
+# 1500-1700 ignition window on the PHASE=2000 profile - v41a stretches
+# it to 3000 (onset should move to ~2400+ if implicated); (b) whether
+# training updates are needed at all - v41b bit-freezes the policy at
+# 1400 (R16 probe, never previously run to verdict).
+gen_v41() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="1"
+  export MULTINODE=""
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.6"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export JOINT_ACC_W="0"
+  export TORQUE_RATE_PEAK_W="0"
+  export SEED="1"
+  export EXPERIMENT_NAME="nugus_gridsearch_v41"
+
+  export PHASE_ITERATIONS="3000"
+  export MAX_ITERATIONS="3000"
+  export MJLAB_LOG_STAMP="v41a-phase3k-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v41a-phase3000__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v41a,phase-3000,discriminator,batch-v41,gridsearch"
+  emit_manifest "mj-gs-v41a-phase3k"
+
+  export PHASE_ITERATIONS="2000"
+  export MAX_ITERATIONS="2600"
+  export FREEZE_POLICY_AFTER="1400"
+  export MJLAB_LOG_STAMP="v41b-freeze-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v41b-freeze1400__4gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v41b,freeze-probe,discriminator,batch-v41,gridsearch"
+  emit_manifest "mj-gs-v41b-freeze"
+}
+
+
 # BATCH=v40: R27 stack - fold gate 0.15, fast stale expiry, true floor
 # release, stress-scaled headroom. v39 held 1800 healthy iterations; its
 # three slow guards and the fixed-headroom poison drip are corrected.
@@ -2464,6 +2513,7 @@ case "$BATCH" in
   v38) gen_v38; expected=1 ;;
   v39) gen_v39; expected=1 ;;
   v40) gen_v40; expected=1 ;;
+  v41) gen_v41; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
