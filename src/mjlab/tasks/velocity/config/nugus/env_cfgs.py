@@ -583,6 +583,7 @@ def _add_aimd_curriculum(cfg: ManagerBasedRlEnvCfg) -> None:
       "attain_band_hi": _env_float("AIMD_ATTAIN_BAND_HI", 0.66),
       "attain_band_lo": _env_float("AIMD_ATTAIN_BAND_LO", 0.60),
       "floor_frac": _env_float("AIMD_FLOOR_FRAC", 0.95),
+      "frontier_headroom": _env_float("AIMD_FRONTIER_HEADROOM", 1.15),
       "push_gate_excess": _env_float("AIMD_PUSH_GATE_EXCESS", 0.15),
     },
   )

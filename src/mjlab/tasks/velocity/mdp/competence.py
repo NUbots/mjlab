@@ -260,9 +260,19 @@ class CompetenceTracker:
     # curriculum consumes interpolated level-crossings/quantiles, which
     # integrate across bins and are robust to fine binning).
     self.n_cmd_buckets = 32
+    self.speed_bin_width = 0.04  # covers commanded speeds to 1.28 m/s
     self._bucket_steps = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._bucket_falls = torch.zeros(self.n_cmd_buckets, device=self.device)
     self.bucket_hazard = torch.zeros(self.n_cmd_buckets, device=self.device)
+    # Attainment conditional on commanded speed (R20): the capability
+    # curve. Windowed sums -> EMA'd per-bin curve at the hazard cadence;
+    # the interpolated bar-crossing of this curve (attained_frontier) is
+    # the control signal - the population-mean attain is fractionally
+    # hypersensitive at small commands and blind to WHERE failure lives.
+    self._attain_bin_sum = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self._attain_bin_weight = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self.attain_by_speed = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self.attain_by_speed_weight = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._cur_bucket = torch.full((n,), -1, dtype=torch.long, device=self.device)
     self._bucket_next_step = 0
     # Mahalanobis-radius buckets (doc 15 R11): rho normalizes (vx, vy, wz)
@@ -387,16 +397,19 @@ class CompetenceTracker:
     # Frontier estimator exposure (clean cohort only): bucket walking steps
     # by commanded speed so falls can be attributed to the speed at which
     # they happened (binned Bernoulli estimate of P(fall | speed)).
-    bucket = (
-      (torch.sqrt(cmd_sq) / (0.8 / self.n_cmd_buckets))
-      .long()
-      .clamp(0, self.n_cmd_buckets - 1)
-    )
+    cmd_speed = torch.sqrt(cmd_sq)
+    bucket = (cmd_speed / self.speed_bin_width).long().clamp(0, self.n_cmd_buckets - 1)
     self._cur_bucket = torch.where(walking, bucket, torch.full_like(bucket, -1))
     expose = walking & ~self.push_cohort
     if expose.any():
       self._bucket_steps.scatter_add_(
         0, bucket[expose], torch.ones(int(expose.sum()), device=self.device)
+      )
+    m_attain = meaningful & ~self.push_cohort
+    if m_attain.any():
+      self._attain_bin_sum.scatter_add_(0, bucket[m_attain], attain[m_attain])
+      self._attain_bin_weight.scatter_add_(
+        0, bucket[m_attain], torch.ones(int(m_attain.sum()), device=self.device)
       )
 
     # Mahalanobis-radius exposure: normalize by the CURRENT per-axis
@@ -562,6 +575,18 @@ class CompetenceTracker:
         self.rho_hazard = 0.3 * rho_hazard + 0.7 * self.rho_hazard
         self._rho_steps.zero_()
         self._rho_falls.zero_()
+        has_w = self._attain_bin_weight > 8.0
+        window_attain = self._attain_bin_sum / self._attain_bin_weight.clamp(min=1e-6)
+        self.attain_by_speed = torch.where(
+          has_w,
+          0.3 * window_attain + 0.7 * self.attain_by_speed,
+          self.attain_by_speed,
+        )
+        self.attain_by_speed_weight = (
+          0.3 * self._attain_bin_weight + 0.7 * self.attain_by_speed_weight
+        )
+        self._attain_bin_sum.zero_()
+        self._attain_bin_weight.zero_()
         self._bucket_next_step = env.common_step_counter + 50 * _NUM_STEPS_PER_ENV
 
   def population_means(self) -> dict[str, float]:
@@ -770,6 +795,40 @@ def _interp_crossing(hazards: torch.Tensor, bin_width: float, bar: float) -> flo
   return n * bin_width
 
 
+def _attained_frontier(
+  attain_by_speed: torch.Tensor,
+  weights: torch.Tensor,
+  bin_width: float,
+  bar: float,
+  min_weight: float = 8.0,
+) -> float:
+  """Highest interpolated speed at which the conditional attainment curve
+  still clears the bar (R20). Scans downward from the fastest bin with
+  real exposure so fractional noise at small commands never touches the
+  result; returns 0 when no bin with data clears the bar."""
+  n = len(attain_by_speed)
+  hi = -1
+  for i in range(n - 1, -1, -1):
+    if float(weights[i]) >= min_weight:
+      hi = i
+      break
+  if hi < 0:
+    return 0.0
+  for i in range(hi, -1, -1):
+    if float(weights[i]) < min_weight:
+      continue
+    a = float(attain_by_speed[i])
+    if a >= bar:
+      c = (i + 0.5) * bin_width
+      if i < hi and float(weights[i + 1]) >= min_weight:
+        a_next = float(attain_by_speed[i + 1])
+        if a_next < bar and a > a_next:
+          frac = (a - bar) / max(a - a_next, 1e-12)
+          return c + frac * bin_width
+      return c
+  return 0.0
+
+
 def _binned_quantile(counts: torch.Tensor, bin_width: float, q: float) -> float:
   """Interpolated quantile of a binned distribution (R18)."""
   total = float(counts.sum())
@@ -818,7 +877,7 @@ class competence_diagnostics:
     self._tracker.finalize_episodes(env, env_ids)
     out = {k: torch.tensor(v) for k, v in self._tracker.stratified_means().items()}
     t = self._tracker
-    speed_bw = 0.8 / t.n_cmd_buckets
+    speed_bw = t.speed_bin_width
     rho_bw = 1.6 / t.n_cmd_buckets
     # R18: the statistics ARE the metrics; dense bins feed the
     # interpolated crossings/quantiles and the histogram views only.
@@ -827,6 +886,11 @@ class competence_diagnostics:
     )
     out["frontier_rho"] = torch.tensor(
       _interp_crossing(t.rho_hazard, rho_bw, self._hazard_bar)
+    )
+    out["attained_frontier"] = torch.tensor(
+      _attained_frontier(
+        t.attain_by_speed, t.attain_by_speed_weight, t.speed_bin_width, 0.60
+      )
     )
     out["push_fall_t50"] = torch.tensor(
       _binned_quantile(t.push_fall_dt_counts, t.dt_bin_width, 0.50)
@@ -862,7 +926,13 @@ class competence_diagnostics:
           "frontier/hazard_by_speed": wandb.Histogram(
             np_histogram=(
               t.bucket_hazard.cpu().numpy(),
-              np.linspace(0.0, 0.8, n + 1),
+              np.linspace(0.0, t.speed_bin_width * n, n + 1),
+            )
+          ),
+          "frontier/attain_by_speed": wandb.Histogram(
+            np_histogram=(
+              t.attain_by_speed.cpu().numpy(),
+              np.linspace(0.0, t.speed_bin_width * n, n + 1),
             )
           ),
           "frontier/hazard_by_rho": wandb.Histogram(
@@ -1318,6 +1388,7 @@ class aimd_difficulty:
     self._band_lo: float = cfg.params.get("attain_band_lo", 0.60)
     self._glide_mult: float = cfg.params.get("glide_mult", 2.0)
     self._floor_frac: float = cfg.params.get("floor_frac", 0.95)
+    self._headroom: float = cfg.params.get("frontier_headroom", 1.15)
     self._attained_best_v = 0.0
     self._attain_max = 0.0
     # Landing anneal (R14): task-side relief cannot stop churn once begun
@@ -1371,6 +1442,7 @@ class aimd_difficulty:
       "ang_vel_z_max": torch.tensor(ccfg.ranges.ang_vel_z[1]),
       "push_scale": torch.tensor(push_scale),
       "attain_trailing_max": torch.tensor(self._attain_max),
+      "attained_frontier_v": torch.tensor(self._attained_best_v),
       "landing_factor": torch.tensor(self._landing_factor),
     }
 
@@ -1395,11 +1467,13 @@ class aimd_difficulty:
     attain_band_lo: float = 0.60,
     glide_mult: float = 2.0,
     floor_frac: float = 0.95,
+    frontier_headroom: float = 1.15,
   ) -> dict[str, torch.Tensor]:
     del (command_name, event_name, alpha, beta, congest_bar, emergency_bar)
     del (gate_attain, beta_arrest, envelope_scale)
     del (push_congest_bar, push_gate_excess, attain_slide_frac, landing_anneal)
     del (attain_band_hi, attain_band_lo, glide_mult, floor_frac)
+    del frontier_headroom
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
     strat = self._tracker.stratified_means()
@@ -1415,11 +1489,20 @@ class aimd_difficulty:
       attain_slide = (
         self._attain_max > 0.5 and att < self._attain_slide_frac * self._attain_max
       )
-      # Attained-speed memory (slow decay) and its floor in d-units (R19).
+      # R20: the conditional capability curve owns target and floor. The
+      # attained frontier is the highest speed at which attain(v) still
+      # clears the bar - immune to the population mean's fractional
+      # noise at small commands and to WHERE-blindness (user analysis).
       lo_v = COMMAND_LEVEL_TABLE[0]["lin_vel_x"][1]
       hi_v = COMMAND_LEVEL_TABLE[-1]["lin_vel_x"][1] * self._envelope_scale
       vmax_now = lo_v + (hi_v - lo_v) * self._cmd_ctrl.d
-      self._attained_best_v = max(self._attained_best_v * 0.999, att * vmax_now)
+      frontier_v = _attained_frontier(
+        self._tracker.attain_by_speed,
+        self._tracker.attain_by_speed_weight,
+        self._tracker.speed_bin_width,
+        self._band_lo,
+      )
+      self._attained_best_v = max(self._attained_best_v * 0.999, frontier_v)
       floor_d = max(
         0.0, (self._floor_frac * self._attained_best_v - lo_v) / (hi_v - lo_v)
       )
@@ -1455,11 +1538,25 @@ class aimd_difficulty:
         wobble_ema=strat["clean_wobble"],
         attain_ema=0.0,
       )
+      # Slew toward frontier x headroom: a controlled fraction of the
+      # command range sits beyond demonstrated capability; cold start
+      # climbs immediately (frontier ~ vmax early); overshoot cannot
+      # exceed headroom; descent is bounded slew, never a cascade below
+      # the floor.
+      target_v = frontier_v * self._headroom if frontier_v > 0 else vmax_now
+      target_d = (target_v - lo_v) / (hi_v - lo_v)
       if cmd_signal < self._cmd_params.congest_bar:
-        if att > self._band_hi and strat["clean_wobble"] < self._cmd_params.gate_wobble:
-          self._cmd_ctrl.d = min(self._cmd_ctrl.d + self._cmd_params.alpha, 1.0)
-        elif att < self._band_lo:
-          self._cmd_ctrl.d -= self._glide_mult * self._cmd_params.alpha
+        if (
+          target_d > self._cmd_ctrl.d
+          and strat["clean_wobble"] < self._cmd_params.gate_wobble
+        ):
+          self._cmd_ctrl.d = min(
+            self._cmd_ctrl.d + self._cmd_params.alpha, target_d, 1.0
+          )
+        elif target_d < self._cmd_ctrl.d:
+          self._cmd_ctrl.d = max(
+            self._cmd_ctrl.d - self._glide_mult * self._cmd_params.alpha, target_d
+          )
       self._cmd_ctrl.d = max(self._cmd_ctrl.d, floor_d)
       self._push_ctrl.update(
         cur_iter=cur_iter,

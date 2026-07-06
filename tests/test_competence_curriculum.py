@@ -676,19 +676,19 @@ def test_frontier_buckets_charge_falls_to_speed() -> None:
   env = _mock_tracked_env(fell=False)
   tracker = CompetenceTracker(env)
   tracker.set_push_cohort(0.5)  # env 1 is clean
-  # Command 0.55 m/s -> bin 22 of 32 (0.025 m/s bins, R18).
+  # Command 0.55 m/s -> bin 13 of 32 (0.04 m/s bins, R20 range).
   ct = env.command_manager.get_term.return_value
   ct.vel_command_b = torch.tensor([[0.55, 0.0, 0.0], [0.55, 0.0, 0.0]])
   ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.5, 0.0], [0.5, 0.0]])
   tracker.record_step(env)
-  assert tracker._cur_bucket.tolist() == [22, 22]
+  assert tracker._cur_bucket.tolist() == [13, 13]
   # Only the clean env's exposure counts.
-  assert tracker._bucket_steps[22].item() == pytest.approx(1.0)
+  assert tracker._bucket_steps[13].item() == pytest.approx(1.0)
   env.termination_manager.get_term.return_value = torch.tensor([True, True])
   env.common_step_counter = 48
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
   # Only env 1 (clean) charges the bin; env 0's fall is push-cohort.
-  assert tracker._bucket_falls[22].item() == pytest.approx(1.0)
+  assert tracker._bucket_falls[13].item() == pytest.approx(1.0)
   assert tracker._bucket_falls.sum().item() == pytest.approx(1.0)
 
 
@@ -1082,38 +1082,6 @@ def test_joule_lambda_live_applies_weight() -> None:
       assert term_cfg.weight == pytest.approx(-1e-5)
 
 
-def test_attain_slide_fires_congestion_at_the_cap() -> None:
-  """R19 semantics: at the cap with falls quiet, an attainment sag below
-  the band glides d_cmd down at bounded slew (no multiplicative cut),
-  and a small dip inside the band holds."""
-  term, env = _split_aimd_term()
-  tracker = env._competence_tracker
-  term._cmd_ctrl.d = 1.0
-  term._push_ctrl.d = 0.6
-  tracker.wobble_ema[:] = 0.02
-  tracker.fast_fall_rate = 0.12
-  tracker.fast_fall_clean = 0.11  # falls quiet - v29 at iter ~1810
-  tracker.fast_fall_pushed = 0.30
-
-  def step_at(it: int, attain: float) -> dict:
-    tracker.attain_ema[:] = attain
-    env.common_step_counter = it * _NUM_STEPS_PER_ENV
-    tracker._finalized_step = -1
-    return term(env, torch.tensor([0, 1]), "twist", "push_robot")
-
-  # Healthy plateau: holds at the cap.
-  out = step_at(1500, 0.712)
-  assert out["difficulty"].item() == pytest.approx(1.0)
-  # Dip inside the band: holds (no twitchy response).
-  out = step_at(1501, 0.63)
-  assert out["difficulty"].item() == pytest.approx(1.0)
-  # Sag below the band: gentle glide, 2*alpha per iteration.
-  out = step_at(1502, 0.55)
-  assert out["difficulty"].item() == pytest.approx(1.0 - 0.004)
-  out = step_at(1503, 0.55)
-  assert out["difficulty"].item() == pytest.approx(1.0 - 0.008)
-
-
 def test_landing_anneal_triggers_at_capacity_plateau() -> None:
   """v30 replay: at capacity from ~1100, plateaued from ~1400 -> the
   landing factor must begin decaying around 1600 and be well below 1 by
@@ -1289,46 +1257,61 @@ def test_interp_crossing_and_binned_quantile() -> None:
   assert _binned_quantile(torch.zeros(32), 0.5, 0.75) == pytest.approx(0.0)
 
 
-def test_band_controller_climbs_glides_and_floors() -> None:
-  """R19 replay: climb only while attaining, glide (not halve) on sag,
-  and never command below the attained floor even under fall cuts."""
+def test_frontier_controller_climbs_glides_and_floors() -> None:
+  """R20: difficulty slews toward attained_frontier x headroom, glides
+  (never cascades) when the frontier retreats, and fall cuts cannot
+  pierce the attained floor."""
   term, env = _split_aimd_term()
   tracker = env._competence_tracker
   tracker.wobble_ema[:] = 0.02
-  tracker.fast_fall_rate = 0.05
-  tracker.fast_fall_clean = 0.05
-  tracker.fast_fall_pushed = 0.20
+  tracker.attain_ema[:] = 0.70
 
-  def step(it: int, att: float, f_clean: float = 0.05) -> float:
-    tracker.attain_ema[:] = att
+  def set_frontier(v: float) -> None:
+    tracker.attain_by_speed.zero_()
+    tracker.attain_by_speed_weight.zero_()
+    n = int(v / tracker.speed_bin_width)
+    tracker.attain_by_speed[:n] = 0.75
+    tracker.attain_by_speed_weight[:n] = 100.0
+
+  def step(it: int, f_clean: float = 0.05) -> float:
     tracker.fast_fall_clean = f_clean
     tracker.fast_fall_rate = f_clean
+    tracker.fast_fall_pushed = 0.20
     env.common_step_counter = it * _NUM_STEPS_PER_ENV
     tracker._finalized_step = -1
     out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
     return out["difficulty"].item()
 
-  # Attaining well: climbs at alpha per iter.
-  term._cmd_ctrl.d = 0.5
-  d1 = step(1000, att=0.70)
-  assert d1 == pytest.approx(0.5 + 0.002)
-  # In-band: holds.
-  d2 = step(1001, att=0.63)
-  assert d2 == pytest.approx(d1)
-  # Sagging: glides at 2*alpha - no cascade.
-  d3 = step(1002, att=0.55)
-  assert d3 == pytest.approx(d2 - 0.004)
-
-  # Attained floor: with attained_best_v established at d~0.5 and
-  # att 0.7 (v ~ 0.7*0.7=0.49... via envelope 1.0: vmax=0.2+0.55*0.502),
-  # a fall-cut cascade must stop at the floor, not at ~0.
-  # Establish memory, then hammer with fall signal.
-  for it in range(1003, 1010):
-    step(it, att=0.70)
-  for it in range(1010, 1080):
-    d_after = step(it, att=0.70, f_clean=0.60)  # sustained crash signal
-  # Floor from the (slowly decaying) attained memory at the end.
   lo_v, hi_v = 0.20, 0.75 * term._envelope_scale
+
+  # Frontier at 0.50 m/s: target = 0.575, so from d=0.5 it climbs at alpha.
+  set_frontier(0.50)
+  term._cmd_ctrl.d = 0.5
+  d1 = step(1000)
+  assert d1 == pytest.approx(0.5 + 0.002)
+  # Converges to the target, not the cap: run it forward.
+  for it in range(1001, 1150):
+    d_eq = step(it)
+  frontier_v = term._attained_best_v
+  target_d = (frontier_v * term._headroom - lo_v) / (hi_v - lo_v)
+  assert d_eq == pytest.approx(target_d, abs=0.01)
+  assert d_eq < 1.0  # emphatically not parked at the cap
+
+  # Frontier retreats: glide down at bounded slew, stopping at the floor
+  # from the (slowly decaying) attained memory - not a halving cascade.
+  set_frontier(0.30)
+  d_prev = d_eq
+  d_next = step(1150)
+  assert d_next == pytest.approx(d_prev - 2 * 0.002)
+  for it in range(1151, 1400):
+    d_glide = step(it)
   floor_d = (0.95 * term._attained_best_v - lo_v) / (hi_v - lo_v)
-  assert d_after == pytest.approx(max(floor_d, 0.0), abs=1e-6)
-  assert d_after > 0.05  # emphatically NOT the old collapse-to-zero
+  assert d_glide == pytest.approx(floor_d, abs=0.01)
+  assert d_glide > 0.2  # held well above zero (floor decays ~0.999/iter)
+
+  # Sustained crash-level fall signal: cuts clamp at the floor.
+  for it in range(1400, 1470):
+    d_crash = step(it, f_clean=0.60)
+  floor_d = (0.95 * term._attained_best_v - lo_v) / (hi_v - lo_v)
+  assert d_crash == pytest.approx(max(floor_d, 0.0), abs=0.01)
+  assert d_crash > 0.05  # NOT the old collapse-to-zero

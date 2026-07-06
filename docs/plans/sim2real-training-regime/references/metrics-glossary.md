@@ -82,6 +82,13 @@ pushes. Bare `fast_fall_*` names carry the same split.
   32 densely-binned hazards with light smoothing (R18: the statistic is
   the metric; bins are internal). Continuous, not stair-stepped. Cross-
   validate against where the AIMD sawtooth settles.
+- `attained_frontier` (and `Curriculum/aimd_difficulty/attained_frontier_v`,
+  its ratcheted memory) — THE R20 control signal: the highest speed at
+  which the conditional attainment curve attain(v) still clears 0.60,
+  interpolated, scanned from the fastest bin with real exposure. The
+  commanded max slews toward attained_frontier x 1.15 and may never fall
+  below 95% of its trailing max. attain(v) itself is logged as the
+  `frontier/attain_by_speed` histogram.
 - `frontier_rho` — same crossing in Mahalanobis radius
   ρ = √((vx/Rx)²+(vy/Ry)²+(ω/Rω)²) over 32 bins spanning [0, 1.6).
   ρ ≈ 1 is the ellipsoid surface; under box sampling ρ > 1 is corner
