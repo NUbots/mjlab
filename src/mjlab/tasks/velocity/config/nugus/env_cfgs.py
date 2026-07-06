@@ -1476,6 +1476,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       params={
         "cohort_frac": push_cohort_frac,
         "frontier_hazard_bar": _env_float("FRONTIER_HAZARD_BAR", 5e-4),
+        "push_obs_window_s": _env_float("PUSH_OBS_WINDOW_S", 6.0),
       },
     )
     # Shadow Lagrangian energy multiplier (doc 15 R10): log-only pilot of

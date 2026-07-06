@@ -260,7 +260,15 @@ class CompetenceTracker:
     # next push or timeout; a fall charges the pending push's bin.
     self.n_push_bins = 25
     self.push_bin_width = 0.04
+    # Observation window (R24): survival credit requires window seconds
+    # of clean observation after the push (default ~ measured t75 of
+    # the push->fall delay distribution). Anything ambiguous is
+    # CENSORED: an intervening push inside the window discards the
+    # earlier event (hard-then-easy must not launder the hard one), and
+    # a timeout inside the window is observation ending, not survival.
+    self.push_obs_window_s = 6.0
     self._pending_push_mag = torch.full((n,), -1.0, device=self.device)
+    self._pending_push_step = torch.full((n,), -1.0, device=self.device)
     self._push_bin_survive = torch.zeros(self.n_push_bins, device=self.device)
     self._push_bin_fall = torch.zeros(self.n_push_bins, device=self.device)
     self.push_survival = torch.ones(self.n_push_bins, device=self.device)
@@ -328,13 +336,17 @@ class CompetenceTracker:
     magnitudes: torch.Tensor | None = None,
   ) -> None:
     if magnitudes is not None:
-      # Settle the previous pending push for these envs: a new push
-      # arriving means no fall intervened -> survived (R23).
+      # Settle the previous pending push (R24): SURVIVAL only if its
+      # full observation window elapsed cleanly before this new push;
+      # otherwise the earlier event is censored - no credit, so a hard
+      # push followed quickly by an easy one is never laundered.
+      window_steps = self.push_obs_window_s / self._step_dt
       pending = self._pending_push_mag[env_ids]
-      has_pending = pending >= 0
-      if has_pending.any():
+      elapsed = env.common_step_counter - self._pending_push_step[env_ids]
+      survived = (pending >= 0) & (elapsed >= window_steps)
+      if survived.any():
         bins = (
-          (pending[has_pending] / self.push_bin_width)
+          (pending[survived] / self.push_bin_width)
           .long()
           .clamp(0, self.n_push_bins - 1)
         )
@@ -342,6 +354,7 @@ class CompetenceTracker:
           0, bins, torch.ones(len(bins), device=self.device)
         )
       self._pending_push_mag[env_ids] = magnitudes
+      self._pending_push_step[env_ids] = float(env.common_step_counter)
     self.last_push_step[env_ids] = float(env.common_step_counter)
 
   def record_peak_height(self, env: ManagerBasedRlEnv) -> None:
@@ -572,28 +585,36 @@ class CompetenceTracker:
     self._win_fell_clean += float(fell[clean].sum().item())
     self._win_done_clean += float(int(clean.sum()))
 
-    # Settle pending pushes at episode end (R23): timeout -> survived,
-    # fall -> the pending push's magnitude bin takes the failure.
+    # Settle pending pushes at episode end (R24, censoring-aware):
+    #   fall within the window  -> failure for the pending bin;
+    #   fall beyond the window  -> the push already survived its window;
+    #   timeout, window elapsed -> survival;
+    #   timeout, window unfinished -> CENSORED (observed, not survived).
+    window_steps = self.push_obs_window_s / self._step_dt
     pend = self._pending_push_mag[ids]
+    pend_elapsed = env.common_step_counter - self._pending_push_step[ids]
     has_pend = pend >= 0
     if has_pend.any():
       pbins = (
         (pend[has_pend] / self.push_bin_width).long().clamp(0, self.n_push_bins - 1)
       )
-      fell_pend = fell[has_pend] > 0.5
-      if fell_pend.any():
+      fell_p = fell[has_pend] > 0.5
+      in_window = pend_elapsed[has_pend] < window_steps
+      failure = fell_p & in_window
+      survival = ~in_window  # window completed cleanly before episode end
+      if failure.any():
         self._push_bin_fall.scatter_add_(
-          0,
-          pbins[fell_pend],
-          torch.ones(int(fell_pend.sum()), device=self.device),
+          0, pbins[failure], torch.ones(int(failure.sum()), device=self.device)
         )
-      if (~fell_pend).any():
+      if survival.any():
         self._push_bin_survive.scatter_add_(
           0,
-          pbins[~fell_pend],
-          torch.ones(int((~fell_pend).sum()), device=self.device),
+          pbins[survival],
+          torch.ones(int(survival.sum()), device=self.device),
         )
+      # fell & beyond-window -> survived; timed-out & in-window -> censored.
     self._pending_push_mag[ids] = -1.0
+    self._pending_push_step[ids] = -1.0
 
     # Time-from-push-to-fall histogram (pushed cohort): answers "how long
     # does recovery take" empirically instead of assuming a horizon.
@@ -974,6 +995,7 @@ class competence_diagnostics:
     cohort_frac = cfg.params.get("cohort_frac", 1.0)
     if self._tracker.push_cohort_frac != cohort_frac:
       self._tracker.set_push_cohort(cohort_frac)
+    self._tracker.push_obs_window_s = cfg.params.get("push_obs_window_s", 6.0)
     self._hazard_bar: float = cfg.params.get("frontier_hazard_bar", 5e-4)
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
@@ -985,8 +1007,9 @@ class competence_diagnostics:
     env_ids: torch.Tensor,
     cohort_frac: float = 1.0,
     frontier_hazard_bar: float = 5e-4,
+    push_obs_window_s: float = 6.0,
   ) -> dict[str, torch.Tensor]:
-    del cohort_frac, frontier_hazard_bar
+    del cohort_frac, frontier_hazard_bar, push_obs_window_s
     self._tracker.finalize_episodes(env, env_ids)
     out = {k: torch.tensor(v) for k, v in self._tracker.stratified_means().items()}
     t = self._tracker

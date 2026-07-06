@@ -253,6 +253,8 @@ spec:
                   value: "${AIMD_FRONTIER_HEADROOM}"
                 - name: PUSH_SURVIVAL_BAR
                   value: "${PUSH_SURVIVAL_BAR}"
+                - name: PUSH_OBS_WINDOW_S
+                  value: "${PUSH_OBS_WINDOW_S}"
                 - name: COMPETENCE_COOLDOWN_ITERS
                   value: "${COMPETENCE_COOLDOWN_ITERS}"
                 - name: LINK_MASS_SCALE_MIN

@@ -1395,33 +1395,50 @@ def test_graded_bar_and_bootstrap_fix_cold_start() -> None:
   assert out["difficulty"].item() == pytest.approx(0.002)
 
 
-def test_push_survival_settlement() -> None:
-  """R23: survived if no fall before the next push or timeout; a fall
-  charges the pending push's magnitude bin."""
+def test_push_survival_censoring() -> None:
+  """R24 (user scenarios): a hard push followed quickly by an easy push
+  then a fall must NOT credit the hard push (censored) and must charge
+  the easy one; a push shortly before timeout is censored, not survived;
+  a full clean window earns survival."""
   env = _mock_tracked_env(fell=False)
+  env.step_dt = 0.02
   tracker = CompetenceTracker(env)
   tracker.set_push_cohort(1.0)
-  b = int(0.30 / tracker.push_bin_width)
+  w_steps = int(tracker.push_obs_window_s / 0.02)  # 300 steps
+  b_hard = int(0.80 / tracker.push_bin_width)
+  b_easy = int(0.20 / tracker.push_bin_width)
 
-  # Push at 0.30; a second push arrives with no fall -> first survived.
-  env.common_step_counter = 100
-  tracker.record_push(env, torch.tensor([0]), torch.tensor([0.30]))
-  env.common_step_counter = 300
-  tracker.record_push(env, torch.tensor([0]), torch.tensor([0.30]))
-  assert tracker._push_bin_survive[b].item() == pytest.approx(1.0)
-  assert tracker._push_bin_fall[b].item() == pytest.approx(0.0)
-
-  # Episode falls -> the pending (second) push takes the failure.
+  # Hard push, easy push 3 s later (inside window), fall 1 s after that.
+  env.common_step_counter = 1000
+  tracker.record_push(env, torch.tensor([0]), torch.tensor([0.80]))
+  env.common_step_counter = 1150  # 3 s later - hard window unfinished
+  tracker.record_push(env, torch.tensor([0]), torch.tensor([0.20]))
+  assert tracker._push_bin_survive[b_hard].item() == pytest.approx(0.0)  # censored
   env.termination_manager.get_term.return_value = torch.tensor([True, False])
-  env.common_step_counter = 348
+  env.common_step_counter = 1200  # 1 s after easy push: in-window fall
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  assert tracker._push_bin_fall[b].item() == pytest.approx(1.0)
-  assert tracker._pending_push_mag[0].item() == pytest.approx(-1.0)
+  assert tracker._push_bin_fall[b_easy].item() == pytest.approx(1.0)
+  assert tracker._push_bin_fall[b_hard].item() == pytest.approx(0.0)
+  assert tracker._push_bin_survive[b_hard].item() == pytest.approx(0.0)
 
-  # Timeout settles as survival.
-  env.common_step_counter = 400
-  tracker.record_push(env, torch.tensor([1]), torch.tensor([0.30]))
+  # Push just before timeout: censored, not survived.
+  env.common_step_counter = 2000
+  tracker.record_push(env, torch.tensor([1]), torch.tensor([0.80]))
   env.termination_manager.get_term.return_value = torch.tensor([False, False])
-  env.common_step_counter = 448
+  env.common_step_counter = 2000 + w_steps // 3  # window unfinished
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  assert tracker._push_bin_survive[b].item() == pytest.approx(2.0)
+  assert tracker._push_bin_survive[b_hard].item() == pytest.approx(0.0)
+  assert tracker._push_bin_fall[b_hard].item() == pytest.approx(0.0)
+
+  # Full clean window before the next push: survival.
+  env.common_step_counter = 3000
+  tracker.record_push(env, torch.tensor([0]), torch.tensor([0.80]))
+  env.common_step_counter = 3000 + w_steps + 10
+  tracker.record_push(env, torch.tensor([0]), torch.tensor([0.20]))
+  assert tracker._push_bin_survive[b_hard].item() == pytest.approx(1.0)
+  # And a fall BEYOND the window does not retract it.
+  env.termination_manager.get_term.return_value = torch.tensor([True, False])
+  env.common_step_counter = 3000 + 2 * w_steps + 50
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker._push_bin_fall[b_easy].item() == pytest.approx(1.0)  # unchanged
+  assert tracker._push_bin_survive[b_easy].item() == pytest.approx(1.0)
