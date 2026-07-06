@@ -94,6 +94,11 @@ pushes. Bare `fast_fall_*` names carry the same split.
   commanded max slews toward attained_frontier x 1.15 and may never fall
   below 95% of its trailing max. attain(v) itself is logged as the
   `frontier/attain_by_speed` histogram.
+- `Curriculum/aimd_difficulty/push_survival_frontier` — R23: the highest
+  shove magnitude (|dv_xy|, m/s) with per-event survival >= 0.85, where
+  survived = no fall before the next push or timeout (horizon-free).
+  The push scale rides at this x headroom with a survived-strength
+  floor. Ratcheted memory, like attained_frontier_v.
 - `frontier_rho` — same crossing in Mahalanobis radius
   ρ = √((vx/Rx)²+(vy/Ry)²+(ω/Rω)²) over 32 bins spanning [0, 1.6).
   ρ ≈ 1 is the ellipsoid surface; under box sampling ρ > 1 is corner

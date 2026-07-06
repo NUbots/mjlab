@@ -255,6 +255,16 @@ class CompetenceTracker:
     self.n_dt_bins = 32
     self.dt_bin_width = 0.5
     self.push_fall_dt_counts = torch.zeros(self.n_dt_bins, device=self.device)
+    # Push survival frontier (R23): per-event outcomes binned by shove
+    # magnitude |dv_xy|. A push survives if no fall arrives before the
+    # next push or timeout; a fall charges the pending push's bin.
+    self.n_push_bins = 25
+    self.push_bin_width = 0.04
+    self._pending_push_mag = torch.full((n,), -1.0, device=self.device)
+    self._push_bin_survive = torch.zeros(self.n_push_bins, device=self.device)
+    self._push_bin_fall = torch.zeros(self.n_push_bins, device=self.device)
+    self.push_survival = torch.ones(self.n_push_bins, device=self.device)
+    self.push_survival_weight = torch.zeros(self.n_push_bins, device=self.device)
     # Frontier estimator (clean cohort only): exposure steps and falls
     # densely binned (R18: bins are the sufficient statistic; the
     # curriculum consumes interpolated level-crossings/quantiles, which
@@ -311,7 +321,27 @@ class CompetenceTracker:
     n_pushed = int(round(frac * self.num_envs))
     self.push_cohort = torch.arange(self.num_envs, device=self.device) < n_pushed
 
-  def record_push(self, env: ManagerBasedRlEnv, env_ids: torch.Tensor) -> None:
+  def record_push(
+    self,
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    magnitudes: torch.Tensor | None = None,
+  ) -> None:
+    if magnitudes is not None:
+      # Settle the previous pending push for these envs: a new push
+      # arriving means no fall intervened -> survived (R23).
+      pending = self._pending_push_mag[env_ids]
+      has_pending = pending >= 0
+      if has_pending.any():
+        bins = (
+          (pending[has_pending] / self.push_bin_width)
+          .long()
+          .clamp(0, self.n_push_bins - 1)
+        )
+        self._push_bin_survive.scatter_add_(
+          0, bins, torch.ones(len(bins), device=self.device)
+        )
+      self._pending_push_mag[env_ids] = magnitudes
     self.last_push_step[env_ids] = float(env.common_step_counter)
 
   def record_peak_height(self, env: ManagerBasedRlEnv) -> None:
@@ -542,6 +572,29 @@ class CompetenceTracker:
     self._win_fell_clean += float(fell[clean].sum().item())
     self._win_done_clean += float(int(clean.sum()))
 
+    # Settle pending pushes at episode end (R23): timeout -> survived,
+    # fall -> the pending push's magnitude bin takes the failure.
+    pend = self._pending_push_mag[ids]
+    has_pend = pend >= 0
+    if has_pend.any():
+      pbins = (
+        (pend[has_pend] / self.push_bin_width).long().clamp(0, self.n_push_bins - 1)
+      )
+      fell_pend = fell[has_pend] > 0.5
+      if fell_pend.any():
+        self._push_bin_fall.scatter_add_(
+          0,
+          pbins[fell_pend],
+          torch.ones(int(fell_pend.sum()), device=self.device),
+        )
+      if (~fell_pend).any():
+        self._push_bin_survive.scatter_add_(
+          0,
+          pbins[~fell_pend],
+          torch.ones(int((~fell_pend).sum()), device=self.device),
+        )
+    self._pending_push_mag[ids] = -1.0
+
     # Time-from-push-to-fall histogram (pushed cohort): answers "how long
     # does recovery take" empirically instead of assuming a horizon.
     fell_pushed = pushed & (fell > 0)
@@ -611,6 +664,15 @@ class CompetenceTracker:
         )
         self._attain_bin_sum.zero_()
         self._attain_bin_weight.zero_()
+        events = self._push_bin_survive + self._push_bin_fall
+        has_ev = events > 8.0
+        win_surv = self._push_bin_survive / events.clamp(min=1e-6)
+        self.push_survival = torch.where(
+          has_ev, 0.3 * win_surv + 0.7 * self.push_survival, self.push_survival
+        )
+        self.push_survival_weight = 0.3 * events + 0.7 * self.push_survival_weight
+        self._push_bin_survive.zero_()
+        self._push_bin_fall.zero_()
         self._bucket_next_step = env.common_step_counter + 50 * _NUM_STEPS_PER_ENV
 
   def population_means(self) -> dict[str, float]:
@@ -682,9 +744,12 @@ def push_cohort_by_setting_velocity(
 ) -> None:
   """Cohort-filtered push: only env indices < cohort_frac * num_envs are
   pushed; the rest train push-free (deployment-matched) and serve as the
-  uncontaminated baseline for tracking competence. Also stamps push times
-  on the tracker for the recovery-time histogram."""
-  from mjlab.envs.mdp.events import push_by_setting_velocity
+  uncontaminated baseline for tracking competence. Samples the shove
+  itself (rather than delegating) so the per-event |dv_xy| magnitude is
+  known for the survival frontier (R23), and settles the PREVIOUS pending
+  push for these envs as survived (no fall intervened - horizon-free
+  event outcomes)."""
+  from mjlab.utils.lab_api.math import sample_uniform
 
   tracker = get_competence_tracker(env)
   if tracker.push_cohort_frac != cohort_frac:
@@ -693,8 +758,17 @@ def push_cohort_by_setting_velocity(
   pushed_ids = env_ids[mask]
   if len(pushed_ids) == 0:
     return
-  tracker.record_push(env, pushed_ids)
-  push_by_setting_velocity(env, pushed_ids, velocity_range)
+  asset = env.scene["robot"]
+  vel_w = asset.data.root_link_vel_w[pushed_ids]
+  range_list = [
+    velocity_range.get(key, (0.0, 0.0))
+    for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+  ]
+  ranges = torch.tensor(range_list, device=env.device)
+  delta = sample_uniform(ranges[:, 0], ranges[:, 1], vel_w.shape, device=env.device)
+  magnitudes = torch.norm(delta[:, :2], dim=-1)
+  tracker.record_push(env, pushed_ids, magnitudes)
+  asset.write_root_link_velocity_to_sim(vel_w + delta, env_ids=pushed_ids)
 
 
 class joule_lambda_shadow:
@@ -1428,7 +1502,9 @@ class aimd_difficulty:
     self._glide_mult: float = cfg.params.get("glide_mult", 2.0)
     self._floor_frac: float = cfg.params.get("floor_frac", 0.95)
     self._headroom: float = cfg.params.get("frontier_headroom", 1.15)
+    self._push_survival_bar: float = cfg.params.get("push_survival_bar", 0.85)
     self._attained_best_v = 0.0
+    self._survived_best = 0.0
     self._attain_max = 0.0
     # Landing anneal (R14): task-side relief cannot stop churn once begun
     # (five demonstrations, v24-v30); the only lever left for runs longer
@@ -1482,6 +1558,7 @@ class aimd_difficulty:
       "push_scale": torch.tensor(push_scale),
       "attain_trailing_max": torch.tensor(self._attain_max),
       "attained_frontier_v": torch.tensor(self._attained_best_v),
+      "push_survival_frontier": torch.tensor(self._survived_best),
       "landing_factor": torch.tensor(self._landing_factor),
     }
 
@@ -1507,12 +1584,13 @@ class aimd_difficulty:
     glide_mult: float = 2.0,
     floor_frac: float = 0.95,
     frontier_headroom: float = 1.15,
+    push_survival_bar: float = 0.85,
   ) -> dict[str, torch.Tensor]:
     del (command_name, event_name, alpha, beta, congest_bar, emergency_bar)
     del (gate_attain, beta_arrest, envelope_scale)
     del (push_congest_bar, push_gate_excess, attain_slide_frac, landing_anneal)
     del (attain_band_hi, attain_band_lo, glide_mult, floor_frac)
-    del frontier_headroom
+    del (frontier_headroom, push_survival_bar)
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
     strat = self._tracker.stratified_means()
@@ -1615,8 +1693,46 @@ class aimd_difficulty:
         cur_iter=cur_iter,
         fast_fall_rate=max(excess, pop_fast if emergency else 0.0),
         wobble_ema=strat["pushed_wobble"],
-        attain_ema=strat["clean_attain"],
+        attain_ema=0.0,
       )
+      # R23: the push survival frontier owns the push trajectory, same
+      # grammar as commands - target = frontier x headroom, bounded
+      # slew both ways, floor at survived-strength memory; the excess
+      # cut above remains the fast safety layer.
+      surv_frontier = _attained_frontier(
+        self._tracker.push_survival,
+        self._tracker.push_survival_weight,
+        self._tracker.push_bin_width,
+        self._push_survival_bar,
+        abs_tol=0.0,
+      )
+      self._survived_best = max(self._survived_best * 0.999, surv_frontier)
+      p_lo = PUSH_LEVEL_SCALES[0]
+      p_hi = PUSH_LEVEL_SCALES[-1]
+      base_mag = 0.45  # approx mean |dv_xy| of the base range at scale 1
+      push_excess_sig = max(excess, pop_fast if emergency else 0.0)
+      if surv_frontier > 0:
+        target_scale = surv_frontier * self._headroom / base_mag
+        floor_scale = 0.95 * self._survived_best / base_mag
+        t_dp = (target_scale - p_lo) / (p_hi - p_lo)
+        f_dp = max(0.0, (floor_scale - p_lo) / (p_hi - p_lo))
+        if push_excess_sig < self._push_params.congest_bar:
+          if t_dp > self._push_ctrl.d:
+            self._push_ctrl.d = min(
+              self._push_ctrl.d + self._push_params.alpha, t_dp, 1.0
+            )
+          elif t_dp < self._push_ctrl.d:
+            self._push_ctrl.d = max(
+              self._push_ctrl.d - self._glide_mult * self._push_params.alpha,
+              t_dp,
+            )
+        self._push_ctrl.d = max(self._push_ctrl.d, min(f_dp, 1.0))
+      elif (
+        push_excess_sig < self._push_params.gate_fast
+        and strat["pushed_wobble"] < self._push_params.gate_wobble
+      ):
+        # Bootstrap: no bin qualified yet - crawl while healthy.
+        self._push_ctrl.d = min(self._push_ctrl.d + self._push_params.alpha, 1.0)
     snapshot = self._apply(env, self._cmd_ctrl.d, self._push_ctrl.d)
     snapshot.update({f"competence_{k}": torch.tensor(v) for k, v in stats.items()})
     return snapshot

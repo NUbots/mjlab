@@ -692,24 +692,32 @@ def test_frontier_buckets_charge_falls_to_speed() -> None:
   assert tracker._bucket_falls.sum().item() == pytest.approx(1.0)
 
 
-def test_push_cohort_event_filters_and_stamps(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_push_cohort_event_filters_and_stamps(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
   from mjlab.tasks.velocity.mdp import competence as comp
 
   env = _mock_tracked_env(fell=False)
   env._competence_tracker = CompetenceTracker(env)
-  pushed_ids: list[torch.Tensor] = []
-  monkeypatch.setattr(
-    "mjlab.envs.mdp.events.push_by_setting_velocity",
-    lambda e, ids, vr: pushed_ids.append(ids),
+  robot = MagicMock()
+  robot.data.root_link_vel_w = torch.zeros(2, 6)
+  writes: list[tuple[torch.Tensor, torch.Tensor]] = []
+  robot.write_root_link_velocity_to_sim = lambda vel, env_ids: writes.append(
+    (vel, env_ids)
   )
+  env.scene = {"robot": robot}
   env.common_step_counter = 240
   comp.push_cohort_by_setting_velocity(
-    env, torch.tensor([0, 1]), {"x": (-0.2, 0.4)}, cohort_frac=0.5
+    env, torch.tensor([0, 1]), {"x": (0.3, 0.3), "y": (0.0, 0.0)}, cohort_frac=0.5
   )
-  assert len(pushed_ids) == 1
-  assert pushed_ids[0].tolist() == [0]
-  assert env._competence_tracker.last_push_step[0].item() == pytest.approx(240.0)
-  assert env._competence_tracker.last_push_step[1].item() < 0
+  # Only env 0 (cohort) is pushed, with the sampled magnitude recorded.
+  assert len(writes) == 1
+  assert writes[0][1].tolist() == [0]
+  tracker = env._competence_tracker
+  assert tracker.last_push_step[0].item() == pytest.approx(240.0)
+  assert tracker.last_push_step[1].item() < 0
+  assert tracker._pending_push_mag[0].item() == pytest.approx(0.3, rel=1e-5)
+  assert tracker._pending_push_mag[1].item() == pytest.approx(-1.0)
 
 
 def test_aimd_ignores_congestion_at_zero_difficulty() -> None:
@@ -1385,3 +1393,35 @@ def test_graded_bar_and_bootstrap_fix_cold_start() -> None:
   tracker._finalized_step = -1
   out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
   assert out["difficulty"].item() == pytest.approx(0.002)
+
+
+def test_push_survival_settlement() -> None:
+  """R23: survived if no fall before the next push or timeout; a fall
+  charges the pending push's magnitude bin."""
+  env = _mock_tracked_env(fell=False)
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(1.0)
+  b = int(0.30 / tracker.push_bin_width)
+
+  # Push at 0.30; a second push arrives with no fall -> first survived.
+  env.common_step_counter = 100
+  tracker.record_push(env, torch.tensor([0]), torch.tensor([0.30]))
+  env.common_step_counter = 300
+  tracker.record_push(env, torch.tensor([0]), torch.tensor([0.30]))
+  assert tracker._push_bin_survive[b].item() == pytest.approx(1.0)
+  assert tracker._push_bin_fall[b].item() == pytest.approx(0.0)
+
+  # Episode falls -> the pending (second) push takes the failure.
+  env.termination_manager.get_term.return_value = torch.tensor([True, False])
+  env.common_step_counter = 348
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker._push_bin_fall[b].item() == pytest.approx(1.0)
+  assert tracker._pending_push_mag[0].item() == pytest.approx(-1.0)
+
+  # Timeout settles as survival.
+  env.common_step_counter = 400
+  tracker.record_push(env, torch.tensor([1]), torch.tensor([0.30]))
+  env.termination_manager.get_term.return_value = torch.tensor([False, False])
+  env.common_step_counter = 448
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker._push_bin_survive[b].item() == pytest.approx(2.0)
