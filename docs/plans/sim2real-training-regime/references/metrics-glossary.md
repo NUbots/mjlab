@@ -92,6 +92,10 @@ pushes. Bare `fast_fall_*` names carry the same split.
   If hazard_rho rises with ρ while hazard_cmd is flat across speed,
   falls are driven by axis COMBINATIONS, not raw speed.
 - `frontier_rho` — the ρ-version of frontier_speed.
+- `frontier/hazard_by_speed`, `frontier/hazard_by_rho`,
+  `frontier/push_fall_dt` — W&B Histogram renderings of the same bucket
+  data (heatmap over training steps; the human view). The per-bucket
+  scalars remain the programmatic source of truth.
 - `push_fall_within_{0.5,1.0,2.0,4.0,8.0}s` — cumulative fraction of
   pushed-cohort falls that happened within that many seconds of the
   last push. The empirical recovery-time distribution (answers the

@@ -751,6 +751,7 @@ class competence_diagnostics:
 
   def __init__(self, cfg: CurriculumTermCfg, env: ManagerBasedRlEnv):
     self._tracker = get_competence_tracker(env)
+    self._last_hist_iter = -1
     cohort_frac = cfg.params.get("cohort_frac", 1.0)
     if self._tracker.push_cohort_frac != cohort_frac:
       self._tracker.set_push_cohort(cohort_frac)
@@ -795,7 +796,55 @@ class competence_diagnostics:
     total = counts.sum().clamp(min=1.0)
     for i, edge in enumerate(self._tracker.push_fall_dt_edges):
       out[f"push_fall_within_{edge}s"] = counts[: i + 1].sum() / total
+    self._log_histograms(env)
     return out
+
+  def _log_histograms(self, env: ManagerBasedRlEnv) -> None:
+    """W&B heatmap views of the bucketed profiles (user request): the
+    per-bucket scalars stay (monitor triggers and API pulls read them);
+    these are the human-readable evolution-over-time renderings. Logged
+    directly with commit=False so they attach to the logger's next
+    committed step; inherently rank-0-only (only that process owns a
+    W&B run). Cadence matches the hazard refresh (~50 iters).
+    """
+    cur_iter = env.common_step_counter // _NUM_STEPS_PER_ENV
+    if cur_iter - self._last_hist_iter < 50:
+      return
+    self._last_hist_iter = cur_iter
+    try:
+      import numpy as np
+      import wandb
+
+      if wandb.run is None:
+        return
+      t = self._tracker
+      n = t.n_cmd_buckets
+      wandb.log(
+        {
+          "frontier/hazard_by_speed": wandb.Histogram(
+            np_histogram=(
+              t.bucket_hazard.cpu().numpy(),
+              np.linspace(0.0, 0.1 * n, n + 1),
+            )
+          ),
+          "frontier/hazard_by_rho": wandb.Histogram(
+            np_histogram=(
+              t.rho_hazard.cpu().numpy(),
+              np.linspace(0.0, 0.2 * n, n + 1),
+            )
+          ),
+          "frontier/push_fall_dt": wandb.Histogram(
+            np_histogram=(
+              t.push_fall_dt_counts.cpu().numpy(),
+              np.array([0.0, *t.push_fall_dt_edges, 16.0]),
+            )
+          ),
+        },
+        commit=False,
+      )
+    except Exception:
+      # Visualization must never take down training.
+      return
 
 
 def _scale_push_velocity_range(scale: float) -> dict[str, tuple[float, float]]:
