@@ -1345,3 +1345,43 @@ def test_survivor_conditioning_gates_capability_credit() -> None:
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
   assert tracker._attain_bin_weight[b].item() == pytest.approx(6.0)  # 2 envs x 3 steps
   assert tracker._attain_bin_sum[b].item() == pytest.approx(6.0 * 0.9, rel=1e-3)
+
+
+def test_graded_bar_and_bootstrap_fix_cold_start() -> None:
+  """R22: v37 replay — a 0.64 attainment ceiling at 0.2 m/s must qualify
+  under the graded bar, and with no qualified bins the controller crawls
+  instead of parking."""
+  from mjlab.tasks.velocity.mdp.competence import _attained_frontier
+
+  # Graded bar: bin at ~0.18 m/s has bar 1-0.08/0.18 ~ 0.56, so the
+  # measured 0.64 ceiling QUALIFIES (flat 0.60 bar would too here, but
+  # at 0.14 the graded bar ~0.43 rescues bins a flat bar rejects).
+  curve = torch.zeros(32)
+  w = torch.zeros(32)
+  curve[3] = 0.50  # ~0.14 m/s at 0.55 attain: graded bar ~0.43 passes
+  w[3] = 100.0
+  curve[4] = 0.64  # ~0.18 m/s: passes graded bar ~0.56
+  w[4] = 100.0
+  f = _attained_frontier(curve, w, 0.04, 0.60)
+  assert f > 0.15  # frontier engaged at cold-start speeds
+
+  # Bootstrap crawl: zero frontier + healthy -> d climbs at alpha.
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  tracker.attain_ema[:] = 0.55
+  tracker.wobble_ema[:] = 0.02
+  tracker.fast_fall_clean = 0.05
+  tracker.fast_fall_rate = 0.05
+  tracker.fast_fall_pushed = 0.15
+  term._cmd_ctrl.d = 0.0
+  env.common_step_counter = 100 * _NUM_STEPS_PER_ENV
+  tracker._finalized_step = -1
+  out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+  assert out["difficulty"].item() == pytest.approx(0.002)
+  # Unhealthy: crawl pauses.
+  tracker.fast_fall_clean = 0.30
+  tracker.fast_fall_rate = 0.30
+  env.common_step_counter = 101 * _NUM_STEPS_PER_ENV
+  tracker._finalized_step = -1
+  out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+  assert out["difficulty"].item() == pytest.approx(0.002)

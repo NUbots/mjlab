@@ -825,11 +825,23 @@ def _attained_frontier(
   bin_width: float,
   bar: float,
   min_weight: float = 8.0,
+  abs_tol: float = 0.08,
 ) -> float:
   """Highest interpolated speed at which the conditional attainment curve
-  still clears the bar (R20). Scans downward from the fastest bin with
-  real exposure so fractional noise at small commands never touches the
-  result; returns 0 when no bin with data clears the bar."""
+  still clears the (graded) bar (R20/R22).
+
+  The effective per-bin bar is min(bar, 1 - abs_tol/v): attainment is a
+  FRACTIONAL measure, so a fixed absolute wobble of ~abs_tol m/s must
+  not fail low-speed bins that a policy tracks as well as physics
+  allows (v37 parked forever because a flat 0.66 bar sat 0.02 above the
+  measured 0.64 ceiling at 0.2 m/s commands - bug species #5, sixth
+  occurrence). Scans downward from the fastest bin with real exposure;
+  returns 0 when no bin with data clears its bar."""
+
+  def bin_bar(i: int) -> float:
+    v = (i + 0.5) * bin_width
+    return min(bar, 1.0 - abs_tol / max(v, 1e-6))
+
   n = len(attain_by_speed)
   hi = -1
   for i in range(n - 1, -1, -1):
@@ -842,13 +854,16 @@ def _attained_frontier(
     if float(weights[i]) < min_weight:
       continue
     a = float(attain_by_speed[i])
-    if a >= bar:
+    b = bin_bar(i)
+    if a >= b:
       c = (i + 0.5) * bin_width
       if i < hi and float(weights[i + 1]) >= min_weight:
         a_next = float(attain_by_speed[i + 1])
-        if a_next < bar and a > a_next:
-          frac = (a - bar) / max(a - a_next, 1e-12)
-          return c + frac * bin_width
+        b_next = bin_bar(i + 1)
+        if a_next < b_next and a - b > a_next - b_next:
+          margin, margin_next = a - b, a_next - b_next
+          frac = margin / max(margin - margin_next, 1e-12)
+          return c + min(frac, 1.0) * bin_width
       return c
   return 0.0
 
@@ -1567,7 +1582,21 @@ class aimd_difficulty:
       # climbs immediately (frontier ~ vmax early); overshoot cannot
       # exceed headroom; descent is bounded slew, never a cascade below
       # the floor.
-      target_v = frontier_v * self._headroom if frontier_v > 0 else vmax_now
+      if frontier_v > 0:
+        target_v = frontier_v * self._headroom
+      else:
+        # Bootstrap (R22): no bin has qualified yet (cold start). Crawl
+        # upward while globally healthy so the sampler can reach speeds
+        # where the graded bar becomes satisfiable; survivor
+        # conditioning prevents stunt-ratcheting during the crawl, and
+        # the frontier takes over at the first qualified bin.
+        healthy = (
+          strat["fast_fall_clean"] < self._cmd_params.gate_fast
+          and strat["clean_wobble"] < self._cmd_params.gate_wobble
+        )
+        target_v = vmax_now + (
+          self._cmd_params.alpha * (hi_v - lo_v) if healthy else 0.0
+        )
       target_d = (target_v - lo_v) / (hi_v - lo_v)
       if cmd_signal < self._cmd_params.congest_bar:
         if (
