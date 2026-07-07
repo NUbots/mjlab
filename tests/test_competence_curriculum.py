@@ -676,19 +676,19 @@ def test_frontier_buckets_charge_falls_to_speed() -> None:
   env = _mock_tracked_env(fell=False)
   tracker = CompetenceTracker(env)
   tracker.set_push_cohort(0.5)  # env 1 is clean
-  # Command 0.55 m/s -> bin 13 of 32 (0.04 m/s bins, R20 range).
+  # Command 0.55 m/s -> bin 11 of 64 (0.05 m/s bins, R31 range).
   ct = env.command_manager.get_term.return_value
   ct.vel_command_b = torch.tensor([[0.55, 0.0, 0.0], [0.55, 0.0, 0.0]])
   ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.5, 0.0], [0.5, 0.0]])
   tracker.record_step(env)
-  assert tracker._cur_bucket.tolist() == [13, 13]
+  assert tracker._cur_bucket.tolist() == [11, 11]
   # Only the clean env's exposure counts.
-  assert tracker._bucket_steps[13].item() == pytest.approx(1.0)
+  assert tracker._bucket_steps[11].item() == pytest.approx(1.0)
   env.termination_manager.get_term.return_value = torch.tensor([True, True])
   env.common_step_counter = 48
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
   # Only env 1 (clean) charges the bin; env 0's fall is push-cohort.
-  assert tracker._bucket_falls[13].item() == pytest.approx(1.0)
+  assert tracker._bucket_falls[11].item() == pytest.approx(1.0)
   assert tracker._bucket_falls.sum().item() == pytest.approx(1.0)
 
 
@@ -894,15 +894,15 @@ def test_rho_buckets_attribute_corner_falls() -> None:
   ranges.ang_vel_z = (-0.80, 0.80)
   ct.cfg.ranges = ranges
   # Corner command: all axes near max -> rho ~ sqrt(3) ~ 1.69 -> top bin
-  # (clamped) of 32 x 0.05-wide bins (R18).
+  # (clamped) of 64 x 0.05-wide bins (R18/R31).
   ct.vel_command_b = torch.tensor([[0.74, 0.44, 0.79], [0.74, 0.44, 0.79]])
   ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.3, 0.1], [0.3, 0.1]])
   tracker.record_step(env)
-  assert tracker._cur_rho_bucket.tolist() == [31, 31]
+  assert tracker._cur_rho_bucket.tolist() == [63, 63]
   env.termination_manager.get_term.return_value = torch.tensor([True, True])
   env.common_step_counter = 48
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  assert tracker._rho_falls[31].item() == pytest.approx(1.0)  # clean env only
+  assert tracker._rho_falls[63].item() == pytest.approx(1.0)  # clean env only
 
 
 def test_aimd_arrest_mode_cuts_every_iteration_above_bar() -> None:
@@ -1612,3 +1612,15 @@ def test_envelope_auto_extends_at_the_cap() -> None:
   term._cmd_ctrl.d = 1.0
   out1 = step(1001, 0.30)
   assert out1["envelope_scale"].item() == pytest.approx(1.05)
+
+
+def test_frontier_instrument_outranges_envelope_cap() -> None:
+  """R31: the attain histogram must read past anything the controller
+  can command (envelope sanity cap 4x table = 3.0 m/s), and the push
+  histogram past any sampled |dv|; a saturated top bin silently caps
+  the auto-extension gate (v45: frontier pinned at 1.260 = old
+  32x0.04 top-bin center while commands sat at 1.389)."""
+  tracker = CompetenceTracker(_mock_tracked_env(fell=False))
+  vmax_possible = COMMAND_LEVEL_TABLE[-1]["lin_vel_x"][1] * 4.0
+  assert tracker.n_cmd_buckets * tracker.speed_bin_width > vmax_possible
+  assert tracker.n_push_bins * tracker.push_bin_width >= 2.0

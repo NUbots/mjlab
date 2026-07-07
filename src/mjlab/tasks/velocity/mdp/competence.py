@@ -258,8 +258,8 @@ class CompetenceTracker:
     # Push survival frontier (R23): per-event outcomes binned by shove
     # magnitude |dv_xy|. A push survives if no fall arrives before the
     # next push or timeout; a fall charges the pending push's bin.
-    self.n_push_bins = 25
-    self.push_bin_width = 0.04
+    self.n_push_bins = 40
+    self.push_bin_width = 0.05  # covers |dv| to 2.0 m/s (same rule)
     # Observation window (R24): survival credit requires window seconds
     # of clean observation after the push (default ~ measured t75 of
     # the push->fall delay distribution). Anything ambiguous is
@@ -283,8 +283,13 @@ class CompetenceTracker:
     # densely binned (R18: bins are the sufficient statistic; the
     # curriculum consumes interpolated level-crossings/quantiles, which
     # integrate across bins and are robust to fine binning).
-    self.n_cmd_buckets = 32
-    self.speed_bin_width = 0.04  # covers commanded speeds to 1.28 m/s
+    # Sized to out-range the envelope sanity cap (4x table = 3.0 m/s):
+    # the frontier estimator must always be able to read PAST anything
+    # the controller can command, or the auto-extension gate saturates
+    # at the top bin and masquerades as a capability ceiling (v45
+    # parked at exactly 1.260 = old top-bin center for 1400 iters).
+    self.n_cmd_buckets = 64
+    self.speed_bin_width = 0.05  # covers commanded speeds to 3.20 m/s
     self._bucket_steps = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._bucket_falls = torch.zeros(self.n_cmd_buckets, device=self.device)
     self.bucket_hazard = torch.zeros(self.n_cmd_buckets, device=self.device)
