@@ -1603,6 +1603,23 @@ gen_v45c() {
 }
 
 
+# BATCH=v46: held-speed semantics (R33) + raised claim bar. Attainment
+# credit now requires settling (0.75 s) and minimum dwell (3 s), so the
+# frontier reads speeds the robot MAINTAINS; with transients excluded
+# the climb bar rises 0.60 -> 0.70 (transient dilution previously
+# depressed measured ratios, so 0.70 against clean evidence is safer
+# than 0.60 against dirty). Extension bar stays 0.80. The definitive
+# honest-peak run.
+gen_v46() {
+  gen_v45c
+  export AIMD_ATTAIN_BAND_LO="0.70"
+  export MJLAB_LOG_STAMP="v46-heldspeed-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v46-held-speed__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v46,held-speed,censored-attain,batch-v46,gridsearch"
+  emit_manifest "mj-gs-v46-heldspeed"
+}
+
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -2713,6 +2730,7 @@ case "$BATCH" in
   v45) gen_v45; expected=1 ;;
   v45b) gen_v45b; expected=2 ;;
   v45c) gen_v45c; expected=3 ;;
+  v46) gen_v46; expected=4 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
