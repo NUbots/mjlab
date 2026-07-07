@@ -309,6 +309,44 @@ gone, pure cap-saturation churn is isolated (next lever: landing
 anneal). Contingencies staged env-only at the same pin: v29b-push-soft
 (bars 0.22/0.10), v29-landing (1800), v29-s2 (replicate).
 
+### R29 — ROOT CAUSE: the effort_drift/restore mechanism mismatch
+
+Every late-run collapse since v16b — the ~1500-1700 ignition invariant
+across policies, curricula, schedules, learning rates, normalizers, and
+controllers — was a single config bug:
+
+- `effort_drift` (interval, 2-4 s, v16b-era leftover) multiplied
+  `model.actuator_forcerange` by 0.995 per fire, unconditionally.
+- `effort_limits` (per-reset restore) takes the IdealPdActuator branch
+  for the NUgus DC actuator (DcMotorActuator subclasses IdealPdActuator)
+  and writes `actuator.set_effort_limit()` — a DIFFERENT force-limit
+  mechanism that never touches `actuator_forcerange`.
+- The sim-level torque clamp therefore compounded unrestored for the
+  whole run: x0.995^(t/3s) ≈ 0.67 by iter 500, ~0.30 by 1500-1700 —
+  measured live by the R28 telemetry (0.802 → 0.787 → 0.668, rate
+  x0.9956/iter = exactly the drift factor).
+
+Everything the era observed now has one explanation: the "slide" was
+the policy compensating for progressively melting servos (why it was
+LR-independent: it tracked env drift, not optimizer dynamics); frozen
+policies died faster because they could not compensate (v41b/v42a);
+landings survived by stopping before the clamp crossed gait viability;
+the attained frontier "ceiling" ~0.68 m/s was partly the clamp, not
+the robot. The R16 freeze probe + R28 field telemetry closed it in two
+runs once the question was finally forced env-side.
+
+Chronicle of the hunt (methodological lessons, in order): task relief
+(R7), optimizer steps (R14), obs normalization (R15), penalties (R17),
+exposure/controllers (R19-R27) — every falsification narrowed the
+space; the decisive moves were the bit-freeze discriminator and DIRECT
+STATE MEASUREMENT instead of behavioral inference. Also: one false
+smoking gun (zero-default DOFs polluting a mean — 0.4348 == 20/46)
+caught within minutes by arithmetic sanity-checking.
+
+Fix: effort_drift removed (959b7fb). If per-episode thermal derating
+is wanted, reimplement symmetric with the restore path. v44 = the full
+frontier architecture on honest physics, 4000 iters.
+
 ### Standing safety rails (all runs from v27 on)
 
 - track_reward_watchdog: armed once Episode_Reward/track_linear_velocity
