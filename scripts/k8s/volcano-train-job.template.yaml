@@ -247,6 +247,8 @@ spec:
                   value: "${AIMD_ATTAIN_BAND_HI}"
                 - name: AIMD_ATTAIN_BAND_LO
                   value: "${AIMD_ATTAIN_BAND_LO}"
+                - name: AIMD_EXTEND_BAR
+                  value: "${AIMD_EXTEND_BAR}"
                 - name: AIMD_FLOOR_FRAC
                   value: "${AIMD_FLOOR_FRAC}"
                 - name: AIMD_FRONTIER_HEADROOM

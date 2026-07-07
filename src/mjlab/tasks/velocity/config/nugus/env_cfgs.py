@@ -545,6 +545,7 @@ def _add_aimd_curriculum(cfg: ManagerBasedRlEnvCfg) -> None:
       "landing_anneal": _env_bool("LANDING_ANNEAL", default=False),
       "attain_band_hi": _env_float("AIMD_ATTAIN_BAND_HI", 0.66),
       "attain_band_lo": _env_float("AIMD_ATTAIN_BAND_LO", 0.60),
+      "extend_attain_bar": _env_float("AIMD_EXTEND_BAR", 0.80),
       "floor_frac": _env_float("AIMD_FLOOR_FRAC", 0.95),
       "frontier_headroom": _env_float("AIMD_FRONTIER_HEADROOM", 1.15),
       "push_survival_bar": _env_float("PUSH_SURVIVAL_BAR", 0.85),

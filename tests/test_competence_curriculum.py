@@ -1624,3 +1624,27 @@ def test_frontier_instrument_outranges_envelope_cap() -> None:
   vmax_possible = COMMAND_LEVEL_TABLE[-1]["lin_vel_x"][1] * 4.0
   assert tracker.n_cmd_buckets * tracker.speed_bin_width > vmax_possible
   assert tracker.n_push_bins * tracker.push_bin_width >= 2.0
+
+
+def test_extension_requires_strict_attainment() -> None:
+  """R32: top bins at 0.70 attain pass the lax climb bar (0.60) but must
+  NOT extend the envelope (strict bar 0.80): 'surviving' a speed is not
+  'stably hitting' it (v45 outpacing)."""
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  tracker.attain_ema[:] = 0.8
+  tracker.wobble_ema[:] = 0.02
+  n = int(0.78 / tracker.speed_bin_width)
+  tracker.attain_by_speed[:n] = 0.70
+  tracker.attain_by_speed_weight[:n] = 100.0
+  tracker.fast_fall_clean = 0.05
+  tracker.fast_fall_rate = 0.05
+  tracker.fast_fall_pushed = 0.05
+  term._cmd_ctrl.d = 1.0
+  env.common_step_counter = 1000 * _NUM_STEPS_PER_ENV
+  tracker._finalized_step = -1
+  out = term(env, torch.tensor([0, 1]), "twist", "push_robot")
+  assert out["envelope_scale"].item() == pytest.approx(1.0)
+  # Lax frontier sees the wall; strict does not.
+  assert out["attained_frontier_v"].item() > 0.5
+  assert out["strict_frontier_v"].item() < 0.5

@@ -1593,6 +1593,16 @@ class aimd_difficulty:
     # remains the catastrophe escape.
     self._band_hi: float = cfg.params.get("attain_band_hi", 0.66)
     self._band_lo: float = cfg.params.get("attain_band_lo", 0.60)
+    # R32: envelope extension answers to a STRICTER frontier than the
+    # day-to-day climb/floor. The 0.60 graded-bar cap certifies "made
+    # 60% of commanded speed without falling" - fine for pacing the
+    # climb, lax as a basis for extending the envelope (v45: mild but
+    # real outpacing during back-to-back extensions - err_norm +5%,
+    # falls x2 - consolidating only once extensions stopped). Extension
+    # requires attain >= extend_attain_bar at the wall: "stably hitting"
+    # rather than "surviving".
+    self._extend_bar: float = cfg.params.get("extend_attain_bar", 0.80)
+    self._strict_frontier_v: float = 0.0
     self._glide_mult: float = cfg.params.get("glide_mult", 2.0)
     self._floor_frac: float = cfg.params.get("floor_frac", 0.95)
     self._headroom: float = cfg.params.get("frontier_headroom", 1.15)
@@ -1651,6 +1661,7 @@ class aimd_difficulty:
       "ang_vel_z_max": torch.tensor(ccfg.ranges.ang_vel_z[1]),
       "push_scale": torch.tensor(push_scale),
       "envelope_scale": torch.tensor(self._envelope_scale),
+      "strict_frontier_v": torch.tensor(self._strict_frontier_v),
       "attain_trailing_max": torch.tensor(self._attain_max),
       "attained_frontier_v": torch.tensor(self._attained_best_v),
       "push_survival_frontier": torch.tensor(self._survived_best),
@@ -1676,6 +1687,7 @@ class aimd_difficulty:
     landing_anneal: bool = False,
     attain_band_hi: float = 0.66,
     attain_band_lo: float = 0.60,
+    extend_attain_bar: float = 0.80,
     glide_mult: float = 2.0,
     floor_frac: float = 0.95,
     frontier_headroom: float = 1.15,
@@ -1686,6 +1698,7 @@ class aimd_difficulty:
     del (gate_attain, beta_arrest, envelope_scale)
     del (push_congest_bar, push_gate_excess, attain_slide_frac, landing_anneal)
     del (attain_band_hi, attain_band_lo, glide_mult, floor_frac)
+    del extend_attain_bar
     del (frontier_headroom, push_survival_bar, envelope_max)
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
@@ -1805,11 +1818,17 @@ class aimd_difficulty:
             self._cmd_ctrl.d - self._glide_mult * self._cmd_params.alpha, target_d
           )
       self._cmd_ctrl.d = max(self._cmd_ctrl.d, floor_d)
+      self._strict_frontier_v = _attained_frontier(
+        self._tracker.attain_by_speed,
+        self._tracker.attain_by_speed_weight,
+        self._tracker.speed_bin_width,
+        self._extend_bar,
+      )
       if (
         self._cmd_ctrl.d >= 0.98
         and self._envelope_scale < self._envelope_max
         and strat["fast_fall_clean"] < self._cmd_params.gate_fast
-        and frontier_v >= 0.95 * vmax_now
+        and self._strict_frontier_v >= 0.95 * vmax_now
       ):
         old_hi = hi_v
         self._envelope_scale = min(self._envelope_scale * 1.05, self._envelope_max)
