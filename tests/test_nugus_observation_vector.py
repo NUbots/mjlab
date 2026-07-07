@@ -18,15 +18,12 @@ from mjlab.asset_zoo.robots.nugus.nugus_constants import (
 )
 from mjlab.entity import Entity
 from mjlab.envs import ManagerBasedRlEnv
-from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.tasks.velocity.config.nugus.dr_observations import (
   DR_RATIOS_DIM,
   dr_ratios,
-  dr_ratios_effort_slice,
   dr_ratios_torso_mass_index,
 )
 from mjlab.tasks.velocity.config.nugus.env_cfgs import (
-  effort_limit_drift,
   nubots_nugus_flat_env_cfg,
 )
 
@@ -275,26 +272,5 @@ def test_dr_ratios_change_across_resets(device, nugus_flat_cfg) -> None:
     second = dr_ratios(env)
     torso_mass_idx = dr_ratios_torso_mass_index()
     assert not torch.allclose(first[:, torso_mass_idx], second[:, torso_mass_idx])
-  finally:
-    env.close()
-
-
-def test_dr_ratios_effort_drift_within_episode(device, nugus_flat_cfg) -> None:
-  cfg = nugus_flat_cfg
-  cfg.scene.num_envs = 1
-  cfg.seed = 0
-  env = ManagerBasedRlEnv(cfg=cfg, device=device)
-  try:
-    env.reset(seed=0)
-    before = dr_ratios(env)[0, dr_ratios_effort_slice()]
-    effort_limit_drift(
-      env,
-      env_ids=torch.tensor([0], device=device, dtype=torch.int),
-      drift_factor=0.995,
-      asset_cfg=SceneEntityCfg("robot", joint_names=(r"^(?!.*_backlash$).*",)),
-    )
-    after = dr_ratios(env)[0, dr_ratios_effort_slice()]
-    assert torch.all(after < before)
-    assert torch.allclose(after, before * 0.995, rtol=0.0, atol=1e-5)
   finally:
     env.close()

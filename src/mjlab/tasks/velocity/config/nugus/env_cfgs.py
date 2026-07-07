@@ -6,8 +6,6 @@ import math
 import os
 from typing import TYPE_CHECKING, Literal
 
-import torch
-
 from mjlab.asset_zoo.robots import (
   NUGUS_ACTION_SCALE,
   NUGUS_MOTOR_JOINT_REGEX,
@@ -18,7 +16,7 @@ from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp import dr
 from mjlab.envs.mdp.actions import JointPositionActionCfg, PhaseDeltaActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
-from mjlab.managers.event_manager import EventTermCfg, requires_model_fields
+from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -39,7 +37,7 @@ from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 
 if TYPE_CHECKING:
-  from mjlab.envs import ManagerBasedRlEnv
+  pass
 
 _NUM_STEPS_PER_ENV = 24
 _DEFAULT_MAX_ITERATIONS = nubots_nugus_ppo_runner_cfg().max_iterations
@@ -105,41 +103,6 @@ def _phase_steps(max_iterations: int, phase_c_frac: float) -> tuple[int, int, in
   p2 = int(phase_c_frac * total)
   p3 = int(0.85 * total)
   return p1, p2, p3
-
-
-@requires_model_fields("actuator_forcerange")
-def effort_limit_drift(
-  env: ManagerBasedRlEnv,
-  env_ids: torch.Tensor | None,
-  drift_factor: float,
-  asset_cfg: SceneEntityCfg,
-) -> None:
-  """Gradually scale actuator effort limits down over an episode."""
-  from mjlab.entity import Entity
-
-  asset: Entity = env.scene[asset_cfg.name]
-  if env_ids is None:
-    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
-  else:
-    env_ids = env_ids.to(env.device, dtype=torch.int)
-
-  joint_names = asset_cfg.joint_names
-  if joint_names is None:
-    raise ValueError("effort_limit_drift requires joint_names on asset_cfg")
-
-  if isinstance(asset_cfg.actuator_ids, list):
-    actuators = [asset.actuators[i] for i in asset_cfg.actuator_ids]
-  elif isinstance(asset_cfg.actuator_ids, slice):
-    actuators = asset.actuators[asset_cfg.actuator_ids]
-  else:
-    actuators = [asset.actuators[asset_cfg.actuator_ids]]
-  if not isinstance(actuators, list):
-    actuators = [actuators]
-
-  for actuator in actuators:
-    ctrl_ids = actuator.global_ctrl_ids
-    env.sim.model.actuator_forcerange[env_ids[:, None], ctrl_ids, 0] *= drift_factor
-    env.sim.model.actuator_forcerange[env_ids[:, None], ctrl_ids, 1] *= drift_factor
 
 
 def _phase_c_ramp_stages(

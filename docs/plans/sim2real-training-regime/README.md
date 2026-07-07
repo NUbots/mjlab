@@ -94,6 +94,15 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 
 ## Standing recommendations (not tasks)
 
+> **2026-07-07 — collapse era CLOSED.** Root cause of every late-run
+> death since v16b was the effort_drift/restore mechanism mismatch
+> (doc 15 R29); the standing configuration is the `gen_v45` cell in
+> `scripts/k8s/gen-gridsearch.sh` (frontier-stack curriculum, honest
+> physics — see doc 15 "ERA CLOSED" for the full stack and the queue).
+> Recommendations below predate R29: entries about late-run
+> instability described symptoms of the ratchet and are retained for
+> history, not guidance.
+
 - **`ENTROPY_DECAY=1` in every future run** (`ENTROPY_START=0.01`,
   `ENTROPY_END=0.001`). The overnight collapse disease (doc 12): fixed
   entropy 0.01 regrows policy std after convergence (~iter 1000) and

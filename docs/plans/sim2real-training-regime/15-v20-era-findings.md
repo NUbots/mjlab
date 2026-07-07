@@ -356,6 +356,36 @@ frontier architecture on honest physics, 4000 iters.
 - Fast fall-rate reflex (0.35), σ floor STD_MIN=0.13, feet_min_sep,
   best-checkpoint harvesting.
 
+## ERA CLOSED (2026-07-07): standing configuration and state of play
+
+R29 ended the collapse era. v44 (honest physics, 4000 iters): attain
+0.833 (x 0.863 / y 0.754), falls 0.022, frontier 1.18 m/s pinned
+against the envelope cap, still improving at the end — every gait
+metric a project record. v45 (open road: auto-extending envelope, R30)
+runs 10,000 iters to find the true peak.
+
+**Standing configuration** (the `gen_v45` cell is canonical):
+clock_owned (PHASE_DELTA_W −0.2) · CURRICULUM_STYLE=aimd with the
+frontier stack (survivor/censored conditional curves R20-R26, stress
+valve R27, crash release, split cmd/push governors, adaptive t75
+window R25, auto-envelope R30) · ellipsoid commands (R11) ·
+push cohort 0.3 (R9) · STD_MIN 0.13 · obs-norm freeze 500 (harmless,
+kept) · minimal penalties (joule weak + action_rate + soft_landing;
+joint_acc and torque_rate deleted from the cocktail, R17/R35-36) ·
+track watchdog (fail-fast) · 6144 envs/GPU · 8-GPU multinode.
+
+**Champion artifacts**: v44 `model_3999` (log dir `v44-honest-*`) —
+eval/sim2sim candidate; v45 final expected to supersede.
+
+**Queue after v45**: nugus_eval + sim2sim on the champion · push-
+exposure floor (v39 finding: speed can trade pushes to zero) ·
+DR-widening rungs (sim2real robustness; prerequisite for the sysid
+teacher, doc 16) · λ-live joule with a measured watts budget (R10;
+shadow maxed its cap with gates green all of v44) · Webots gate
+(assessment in session notes; route 1 = standalone ONNX controller,
+1-2 days) · landing anneal retired from the critical path (was a
+workaround for R29; keep as opt-in convergence polish).
+
 ## Multi-GPU program (user-driven, latency-first)
 
 Reframe: while the lineage is still being debugged, single-run latency

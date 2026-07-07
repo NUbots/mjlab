@@ -8,6 +8,14 @@ Upcoming version (not yet released)
 Fixed
 ^^^^^
 
+- Removed the ``effort_drift`` interval event from the NUgus config: it scaled
+  ``model.actuator_forcerange`` down multiplicatively every 2–4 s, but the
+  per-reset ``effort_limits`` restore takes the ``IdealPdActuator`` branch for
+  the NUgus DC actuator and writes ``actuator.set_effort_limit()`` — a
+  different force-limit mechanism — so the sim-level torque clamp compounded
+  unrestored for the entire run (~30 % of nominal by iteration ~1600) and
+  caused every late-run training collapse since its introduction.
+
 - K8s ``entrypoint.sh`` failed to check out a pinned ``GIT_COMMIT`` that was not
   the shallow-clone branch tip because ``git fetch origin <sha>`` treats the
   argument as a ref name. Fetch with ``--depth=1`` (and deepen/unshallow as a
