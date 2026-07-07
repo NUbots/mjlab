@@ -1590,6 +1590,19 @@ gen_v45b() {
 }
 
 
+# BATCH=v45c: v45b + strict extension gate (R32). Same wide bins;
+# envelope extension now requires the 0.80-bar frontier at the wall
+# ("stably hitting", not "surviving"). The definitive true-peak run.
+gen_v45c() {
+  gen_v45b
+  export AIMD_EXTEND_BAR="0.80"
+  export MJLAB_LOG_STAMP="v45c-strictpeak-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v45c-strict-peak__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v45c,strict-extend,true-peak,batch-v45c,gridsearch"
+  emit_manifest "mj-gs-v45c-strictpeak"
+}
+
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -2699,6 +2712,7 @@ case "$BATCH" in
   v44) gen_v44; expected=1 ;;
   v45) gen_v45; expected=1 ;;
   v45b) gen_v45b; expected=2 ;;
+  v45c) gen_v45c; expected=3 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
