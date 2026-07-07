@@ -1120,15 +1120,20 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "ranges": (0.8, 1.2),
     },
   )
-  cfg.events["effort_drift"] = EventTermCfg(
-    mode="interval",
-    interval_range_s=(2.0, 4.0),
-    func=effort_limit_drift,
-    params={
-      "asset_cfg": motor_cfg(),
-      "drift_factor": 0.995,
-    },
-  )
+  # effort_drift REMOVED (R29 root cause, 2026-07-07). The interval event
+  # multiplied model.actuator_forcerange by 0.995 every 2-4 s per env,
+  # while the per-reset effort_limits restore for the NUgus DC actuator
+  # (DcMotorActuator -> IdealPdActuator branch) writes
+  # actuator.set_effort_limit() - a DIFFERENT force-limit mechanism that
+  # never touches actuator_forcerange. The sim-level clamp therefore
+  # compounded unrestored for the entire run: x0.995^(t/3s) = 0.67 by
+  # iter ~500 (measured live by the R28 telemetry: 0.802 -> 0.787 ->
+  # 0.668) and ~0.30 by the 1500-1700 window - the ignition schedule of
+  # EVERY late-run collapse since v16b, invariant to policy, training,
+  # curriculum, schedule, and learning rate, because it was none of
+  # those: the servos were simply melting. If per-episode thermal
+  # derating is wanted later, reimplement via set_effort_limit(),
+  # symmetric with the restore path.
   cfg.observations["critic"].terms["dr_ratios"] = ObservationTermCfg(
     func=dr_ratios,
     params={
