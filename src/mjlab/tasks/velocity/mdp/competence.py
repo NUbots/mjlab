@@ -310,6 +310,21 @@ class CompetenceTracker:
     # freeze during crashes.
     self._attain_ep_sum = torch.zeros((n, self.n_cmd_buckets), device=self.device)
     self._attain_ep_weight = torch.zeros((n, self.n_cmd_buckets), device=self.device)
+    # R33 (user): attainment must certify MAINTAINED speed, not touched
+    # speed. Two guards, both censoring (evidence discarded, not counted
+    # against): (1) settle exclusion - steps count toward a speed bin
+    # only after the command has been held attain_settle_s, so the
+    # acceleration transient after a resample (or a shove-induced surge)
+    # never mints credit; (2) minimum dwell - an episode's evidence for
+    # a bin folds into the frontier histogram only if it accumulated
+    # attain_min_dwell_s of post-settle time, so a high-speed command
+    # landing just before timeout (too short for a fall to manifest;
+    # measured push->fall t50 ~2-3 s) is censored like an end-of-episode
+    # push. Segments between resamples run 5-10 s, so honest evidence
+    # passes both bars comfortably.
+    self.attain_settle_s = 0.75
+    self.attain_min_dwell_s = 3.0
+    self._bin_dwell = torch.zeros(n, device=self.device)
     self.attain_by_speed = torch.zeros(self.n_cmd_buckets, device=self.device)
     self.attain_by_speed_weight = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._cur_bucket = torch.full((n,), -1, dtype=torch.long, device=self.device)
@@ -463,13 +478,19 @@ class CompetenceTracker:
     # they happened (binned Bernoulli estimate of P(fall | speed)).
     cmd_speed = torch.sqrt(cmd_sq)
     bucket = (cmd_speed / self.speed_bin_width).long().clamp(0, self.n_cmd_buckets - 1)
-    self._cur_bucket = torch.where(walking, bucket, torch.full_like(bucket, -1))
+    new_bucket = torch.where(walking, bucket, torch.full_like(bucket, -1))
+    same_bin = new_bucket == self._cur_bucket
+    self._bin_dwell = torch.where(
+      same_bin, self._bin_dwell + 1.0, torch.zeros_like(self._bin_dwell)
+    )
+    self._cur_bucket = new_bucket
     expose = walking & ~self.push_cohort
     if expose.any():
       self._bucket_steps.scatter_add_(
         0, bucket[expose], torch.ones(int(expose.sum()), device=self.device)
       )
-    m_attain = meaningful & ~self.push_cohort
+    settled = self._bin_dwell >= self.attain_settle_s / self._step_dt
+    m_attain = meaningful & ~self.push_cohort & settled
     if m_attain.any():
       env_idx = torch.arange(self.num_envs, device=self.device)[m_attain]
       self._attain_ep_sum.index_put_(
@@ -579,10 +600,13 @@ class CompetenceTracker:
     # buffered attainment into the capability-curve window.
     survivors = ids[fell < 0.5]
     if len(survivors) > 0:
-      self._attain_bin_sum += self._attain_ep_sum[survivors].sum(dim=0)
-      self._attain_bin_weight += self._attain_ep_weight[survivors].sum(dim=0)
+      ep_w = self._attain_ep_weight[survivors]
+      held = ep_w >= self.attain_min_dwell_s / self._step_dt
+      self._attain_bin_sum += (self._attain_ep_sum[survivors] * held).sum(dim=0)
+      self._attain_bin_weight += (ep_w * held).sum(dim=0)
     self._attain_ep_sum[ids] = 0.0
     self._attain_ep_weight[ids] = 0.0
+    self._bin_dwell[ids] = 0.0
 
     self._win_fell += float(fell.sum().item())
     self._win_done += float(len(ids))

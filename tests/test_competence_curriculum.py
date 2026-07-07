@@ -1648,3 +1648,61 @@ def test_extension_requires_strict_attainment() -> None:
   # Lax frontier sees the wall; strict does not.
   assert out["attained_frontier_v"].item() > 0.5
   assert out["strict_frontier_v"].item() < 0.5
+
+
+def _walking_env_for_attain() -> MagicMock:
+  env = MagicMock()
+  env.device = "cpu"
+  env.num_envs = 2
+  env.episode_length_buf = torch.tensor([100, 100])
+  env.max_episode_length = 1000
+  env.common_step_counter = 24
+  env.termination_manager.active_terms = ["fell_over"]
+  env.termination_manager.get_term.return_value = torch.tensor([False, False])
+  ct = MagicMock()
+  ct.is_standing_env = torch.tensor([False, False])
+  ct.vel_command_b = torch.tensor([[0.55, 0.0, 0.0], [0.55, 0.0, 0.0]])
+  ct.robot.data.root_link_lin_vel_b = torch.tensor([[0.5, 0.0], [0.5, 0.0]])
+  ct.robot.data.projected_gravity_b = torch.tensor([[0.0, 0.0, -1.0], [0.0, 0.0, -1.0]])
+  ct.cfg.ranges.lin_vel_x = (-0.75, 0.75)
+  ct.cfg.ranges.lin_vel_y = (-0.45, 0.45)
+  ct.cfg.ranges.ang_vel_z = (-0.80, 0.80)
+  env.command_manager.get_term.return_value = ct
+  return env
+
+
+def test_attain_credit_requires_settling() -> None:
+  """R33 guard 1: no frontier credit until the command has been held
+  attain_settle_s - the acceleration transient measures 'reached', not
+  'maintained'."""
+  env = _walking_env_for_attain()
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(0.0)  # all envs clean
+  tracker._step_dt = 1.0  # settle = 0.75 -> settled from dwell 1
+  b = int(0.55 / tracker.speed_bin_width)
+  tracker.record_step(env)  # dwell 0 (bin just entered): excluded
+  assert tracker._attain_ep_weight[0, b].item() == 0.0
+  tracker.record_step(env)  # dwell 1 >= 0.75: counts
+  tracker.record_step(env)
+  assert tracker._attain_ep_weight[0, b].item() == pytest.approx(2.0)
+
+
+def test_attain_fold_censors_short_segments() -> None:
+  """R33 guard 2: a survivor episode's bin evidence folds only if it
+  held the bin >= attain_min_dwell_s post-settle - a high-speed command
+  landing just before timeout is censored, not credited."""
+  env = _walking_env_for_attain()
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(0.0)  # all envs clean
+  tracker._step_dt = 1.0  # min dwell = 3 steps
+  b = int(0.55 / tracker.speed_bin_width)
+  for _ in range(3):  # 2 settled steps of credit: below the dwell bar
+    tracker.record_step(env)
+  env.termination_manager.get_term.return_value = torch.tensor([False, False])
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker._attain_bin_weight[b].item() == 0.0  # censored
+  for _ in range(5):  # 4 settled steps: clears the bar
+    tracker.record_step(env)
+  env.common_step_counter = 48  # new step so the finalize guard passes
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker._attain_bin_weight[b].item() >= 3.0  # folded
