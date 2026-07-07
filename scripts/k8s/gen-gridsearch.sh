@@ -1535,6 +1535,44 @@ gen_v24c() {
 }
 
 
+# BATCH=v45: the open-road run. v44 (honest physics) finished 4000 at
+# attainment 0.833 / falls 0.022 with its frontier pinned against the
+# envelope cap at 1.18 m/s - the cap was the last artificial limit.
+# v45 = auto-extending envelope (R30): the frontier chases the robot's
+# true peak; 10000 iterations now that nothing rots. Joule stays weak
+# (0.1% of income - the lambda-live watts-budget experiment is a later
+# single-variable arm).
+gen_v45() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.6"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export JOINT_ACC_W="0"
+  export TORQUE_RATE_PEAK_W="0"
+  export MAX_ITERATIONS="10000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v45-openroad-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v45"
+  export RUN_NAME="clock_owned__v45-open-road__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v45,auto-envelope,open-road,batch-v45,gridsearch"
+  emit_manifest "mj-gs-v45-openroad"
+}
+
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -2642,6 +2680,7 @@ case "$BATCH" in
   v42) gen_v42; expected=2 ;;
   v43) gen_v43; expected=1 ;;
   v44) gen_v44; expected=1 ;;
+  v45) gen_v45; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
