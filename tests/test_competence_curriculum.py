@@ -1577,3 +1577,38 @@ def test_stress_scaled_headroom_closes_the_valve() -> None:
   v_stressed = eq_target(0.13)  # near the gate: margin ~ gone
   assert v_relaxed > v_stressed
   assert v_stressed < 0.56  # ~ frontier x <1.02 (floor may hold it near)
+
+
+def test_envelope_auto_extends_at_the_cap() -> None:
+  """R30: at the cap, healthy, frontier at the wall -> envelope grows 5%
+  with commanded max continuous; unhealthy or distant frontier -> no
+  extension."""
+  term, env = _split_aimd_term()
+  tracker = env._competence_tracker
+  tracker.attain_ema[:] = 0.8
+  tracker.wobble_ema[:] = 0.02
+  # Frontier right at the wall: fill bins to ~ vmax (envelope 1.0: 0.75).
+  n = int(0.78 / tracker.speed_bin_width)
+  tracker.attain_by_speed[:n] = 0.8
+  tracker.attain_by_speed_weight[:n] = 100.0
+  term._cmd_ctrl.d = 1.0
+
+  def step(it: int, f: float) -> dict:
+    tracker.fast_fall_clean = f
+    tracker.fast_fall_rate = f
+    tracker.fast_fall_pushed = f
+    env.common_step_counter = it * _NUM_STEPS_PER_ENV
+    tracker._finalized_step = -1
+    return term(env, torch.tensor([0, 1]), "twist", "push_robot")
+
+  out0 = step(1000, 0.05)
+  assert out0["envelope_scale"].item() == pytest.approx(1.05)
+  # Commanded max continuous: d rescaled below 1.0, vmax unchanged.
+  vmax = out0["lin_vel_x_max"].item()
+  assert vmax == pytest.approx(0.75, abs=0.02)
+  assert out0["difficulty"].item() < 1.0
+
+  # Unhealthy: no further extension even if d returns to the cap.
+  term._cmd_ctrl.d = 1.0
+  out1 = step(1001, 0.30)
+  assert out1["envelope_scale"].item() == pytest.approx(1.05)

@@ -1556,6 +1556,13 @@ class aimd_difficulty:
     # and AIMD oscillates at capacity instead of at an artificial ceiling.
     # Safe only in combination with arrest mode + ellipsoid geometry.
     self._envelope_scale: float = cfg.params.get("envelope_scale", 1.0)
+    # Auto-extension (R30, user call after v44 pinned its frontier 1.7%
+    # under the cap at attainment 0.833): when difficulty sits at the
+    # cap, healthy, with the measured frontier within 5% of commanded
+    # max, the envelope grows 5% and d is rescaled so the commanded max
+    # stays continuous - the robot finds its own peak; no preordained
+    # ceiling. Sanity cap via envelope_max.
+    self._envelope_max: float = cfg.params.get("envelope_max", 4.0)
     # Attainment-slide congestion (v29 postmortem, R13): under ellipsoid
     # geometry, commands beyond capability UNDER-TRACK instead of causing
     # falls, so fall-based congestion never binds on the command axis at
@@ -1638,6 +1645,7 @@ class aimd_difficulty:
       "lin_vel_x_max": torch.tensor(ccfg.ranges.lin_vel_x[1]),
       "ang_vel_z_max": torch.tensor(ccfg.ranges.ang_vel_z[1]),
       "push_scale": torch.tensor(push_scale),
+      "envelope_scale": torch.tensor(self._envelope_scale),
       "attain_trailing_max": torch.tensor(self._attain_max),
       "attained_frontier_v": torch.tensor(self._attained_best_v),
       "push_survival_frontier": torch.tensor(self._survived_best),
@@ -1667,12 +1675,13 @@ class aimd_difficulty:
     floor_frac: float = 0.95,
     frontier_headroom: float = 1.15,
     push_survival_bar: float = 0.85,
+    envelope_max: float = 4.0,
   ) -> dict[str, torch.Tensor]:
     del (command_name, event_name, alpha, beta, congest_bar, emergency_bar)
     del (gate_attain, beta_arrest, envelope_scale)
     del (push_congest_bar, push_gate_excess, attain_slide_frac, landing_anneal)
     del (attain_band_hi, attain_band_lo, glide_mult, floor_frac)
-    del (frontier_headroom, push_survival_bar)
+    del (frontier_headroom, push_survival_bar, envelope_max)
     self._tracker.finalize_episodes(env, env_ids)
     stats = self._tracker.population_means()
     strat = self._tracker.stratified_means()
@@ -1791,6 +1800,18 @@ class aimd_difficulty:
             self._cmd_ctrl.d - self._glide_mult * self._cmd_params.alpha, target_d
           )
       self._cmd_ctrl.d = max(self._cmd_ctrl.d, floor_d)
+      if (
+        self._cmd_ctrl.d >= 0.98
+        and self._envelope_scale < self._envelope_max
+        and strat["fast_fall_clean"] < self._cmd_params.gate_fast
+        and frontier_v >= 0.95 * vmax_now
+      ):
+        old_hi = hi_v
+        self._envelope_scale = min(self._envelope_scale * 1.05, self._envelope_max)
+        new_hi = COMMAND_LEVEL_TABLE[-1]["lin_vel_x"][1] * self._envelope_scale
+        # Rescale d so commanded max is continuous across the extension.
+        self._cmd_ctrl.d = (vmax_now - lo_v) / (new_hi - lo_v)
+        del old_hi, new_hi
       self._push_ctrl.update(
         cur_iter=cur_iter,
         fast_fall_rate=max(excess, pop_fast if emergency else 0.0),
