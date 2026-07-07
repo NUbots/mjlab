@@ -1073,10 +1073,25 @@ class competence_diagnostics:
         cur = getattr(model, field, None)
         if cur is None:
           continue
-        default = env.sim.get_default_field(field)
-        denom = torch.as_tensor(default, device=cur.device).abs().clamp(min=1e-9)
-        ratio = (cur.abs() / denom).mean()
-        out[f"simstate_{field}_ratio"] = ratio.cpu()
+        default = torch.as_tensor(env.sim.get_default_field(field), device=cur.device)
+        # Only entries with a real default participate: zero-default
+        # DOFs (floating base, backlash) previously polluted the mean
+        # with 0/eps terms and faked a ratchet (0.4348 == 20/46 motor
+        # DOFs exactly - the first "smoking gun" was this artifact).
+        d_flat = default.reshape(-1).abs()
+        valid = d_flat > 1e-8
+        if not bool(valid.any()):
+          continue
+        nworld = cur.shape[0]
+        c_flat = cur.reshape(nworld, -1).abs()[:, valid]
+        out[f"simstate_{field}_ratio"] = (
+          c_flat.mean() / d_flat[valid].mean().clamp(min=1e-9)
+        ).cpu()
+      # Per-env health bimodality: global drift degrades everyone
+      # together (unimodal); per-env state corruption grows a BROKEN
+      # subpopulation while the rest stay pristine (bimodal).
+      out["envs_broken_frac"] = (t.fell_ema > 0.9).float().mean().cpu()
+      out["envs_healthy_frac"] = (t.fell_ema < 0.1).float().mean().cpu()
     except Exception:
       pass
     return out
