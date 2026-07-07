@@ -1535,6 +1535,45 @@ gen_v24c() {
 }
 
 
+# BATCH=v44: the vindication run. effort_drift removed (R29) - the
+# sim-level torque clamp no longer ratchets - and the full frontier
+# architecture gets its first run on honest physics: split governors,
+# survivor/censored frontiers, adaptive window, stress valve, crash
+# release, watchdog. 8 GPUs, 4000 iterations. Every prior death is
+# explained; if this one holds its frontier equilibrium to 4000, the
+# architecture and the sim are both clean and long-horizon training
+# (DR rungs, terrain) opens.
+gen_v44() {
+  _v16e_r13_exports
+  _competence_defaults
+  export MJLAB_VARIANT="clock_owned"
+  export PHASE_DELTA_W="-0.2"
+  export ADAPTIVE_COMMANDS="1"
+  export ADAPTIVE_PUSHES="1"
+  export PENALTY_GATE="competence"
+  export STD_MIN="0.13"
+  export NUM_ENVS="6144"
+  export JOB_REPLICAS="2"
+  export MULTINODE="1"
+  export CURRICULUM_STYLE="aimd"
+  export COMPETENCE_DEMOTE_FAST_FELL="0.35"
+  export PUSH_COHORT_FRAC="0.3"
+  export COMMAND_GEOMETRY="ellipsoid"
+  export AIMD_ENVELOPE_SCALE="1.6"
+  export OBS_NORM_FREEZE_ITERS="500"
+  export JOINT_ACC_W="0"
+  export TORQUE_RATE_PEAK_W="0"
+  export MAX_ITERATIONS="4000"
+  export PHASE_ITERATIONS="2000"
+  export SEED="1"
+  export MJLAB_LOG_STAMP="v44-honest-$(date +%Y%m%d-%H%M%S)"
+  export EXPERIMENT_NAME="nugus_gridsearch_v44"
+  export RUN_NAME="clock_owned__v44-honest-physics__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v44,no-effort-drift,frontier-stack,batch-v44,gridsearch"
+  emit_manifest "mj-gs-v44-honest"
+}
+
+
 # BATCH=v43: sim-state telemetry probe. Static env + frozen policy at
 # 600 (v42a repro, shortened) with live model-field ratios logged; any
 # in-place ratchet (forcerange/damping/armature/frictionloss) is visible
@@ -2602,6 +2641,7 @@ case "$BATCH" in
   v41) gen_v41; expected=2 ;;
   v42) gen_v42; expected=2 ;;
   v43) gen_v43; expected=1 ;;
+  v44) gen_v44; expected=1 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
