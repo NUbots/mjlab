@@ -107,7 +107,10 @@ pushes. Bare `fast_fall_*` names carry the same split.
   and end-of-episode pushes are observed, not survived). The push scale
   rides at this x headroom with a survived-strength floor.
 - `frontier_rho` — same crossing in Mahalanobis radius
-  ρ = √((vx/Rx)²+(vy/Ry)²+(ω/Rω)²) over 32 bins spanning [0, 1.6).
+  ρ = √((vx/Rx)²+(vy/Ry)²+(ω/Rω)²) over 64 bins spanning [0, 3.2). Bin ranges follow R31: every
+  histogram must out-range the envelope sanity cap (speed 64x0.05 to
+  3.2 m/s, push |dv| 40x0.05 to 2.0 m/s) or the frontier saturates at
+  the top bin and fakes a capability ceiling (v45: 1.260 exactly).
   ρ ≈ 1 is the ellipsoid surface; under box sampling ρ > 1 is corner
   territory (R11). frontier_rho low while frontier_speed high = axis
   COMBINATIONS bind, not raw speed.

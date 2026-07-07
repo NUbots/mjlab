@@ -1573,6 +1573,22 @@ gen_v45() {
 }
 
 
+# BATCH=v45b: v45 with un-saturated instruments (R31). v45 proved the
+# auto-envelope works (3 extensions, 1.6->1.852, commands to 1.389) but
+# its frontier estimator topped out at the 32x0.04 histogram's last bin
+# (1.260 exactly, flat for 1400 iters) so the extension gate could
+# never fire again. Bins now read to 3.2 m/s; this run finds the true
+# peak. Otherwise identical to v45.
+gen_v45b() {
+  gen_v45
+  export MAX_ITERATIONS="10000"
+  export MJLAB_LOG_STAMP="v45b-truepeak-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v45b-true-peak__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v45b,wide-bins,true-peak,batch-v45b,gridsearch"
+  emit_manifest "mj-gs-v45b-truepeak"
+}
+
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -2681,6 +2697,7 @@ case "$BATCH" in
   v43) gen_v43; expected=1 ;;
   v44) gen_v44; expected=1 ;;
   v45) gen_v45; expected=1 ;;
+  v45b) gen_v45b; expected=2 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
