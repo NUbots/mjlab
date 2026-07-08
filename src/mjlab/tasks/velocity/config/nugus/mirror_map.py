@@ -250,7 +250,9 @@ class NugusMirrorMap:
         self._mirror_projected_gravity(out, sl)
       elif name in ("joint_pos", "joint_vel", "actions"):
         self._mirror_joint_block(out, sl)
-      elif name == "actuator_current":
+      elif name in ("actuator_current", "servo_voltage"):
+        # Per-servo magnitudes in actuator order: left/right permutation
+        # only, no sign flip (current is |tau|-scaled, voltage positive).
         out[..., sl] = mirror_joint_vector(
           out[..., sl],
           self.dr_joint_perm,
@@ -273,8 +275,14 @@ class NugusMirrorMap:
         self._mirror_base_ang_vel(out, sl)
       elif name == "projected_gravity":
         self._mirror_projected_gravity(out, sl)
-      elif name in ("joint_pos", "joint_vel", "actions", "actuator_current"):
-        if name == "actuator_current":
+      elif name in (
+        "joint_pos",
+        "joint_vel",
+        "actions",
+        "actuator_current",
+        "servo_voltage",
+      ):
+        if name in ("actuator_current", "servo_voltage"):
           out[..., sl] = mirror_joint_vector(
             out[..., sl], self.dr_joint_perm, torch.ones_like(self.joint_sign)
           )

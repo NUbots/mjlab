@@ -241,3 +241,21 @@ def test_mirror_actions_with_phase_delta_dim(mirror_map) -> None:
   assert torch.allclose(mirrored[..., -1], actions[..., -1])
   twice = mirror_map.mirror_actions(mirrored)
   assert torch.allclose(twice, actions, atol=1e-6)
+
+
+def test_every_actor_term_has_a_mirror_rule_mentioned(
+  monkeypatch: pytest.MonkeyPatch,
+) -> None:
+  """Every actor observation term (all obs knobs enabled) must appear in
+  mirror_map.py: symmetry augmentation raises at runtime on any term
+  without a rule, which killed v48 at startup ('servo_voltage')."""
+  import pathlib
+
+  import mjlab.tasks.velocity.config.nugus.mirror_map as mm
+
+  monkeypatch.setenv("CURRENT_OBS", "1")
+  monkeypatch.setenv("BUS_VOLTAGE", "1")
+  cfg = nubots_nugus_flat_env_cfg()
+  src = pathlib.Path(mm.__file__).read_text()
+  for name in cfg.observations["actor"].terms:
+    assert f'"{name}"' in src, f"no mirror rule mentions actor term {name!r}"
