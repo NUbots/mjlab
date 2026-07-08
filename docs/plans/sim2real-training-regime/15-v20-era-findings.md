@@ -436,6 +436,41 @@ beats A/B throughput. Built in-session:
   question: does v22b's late L5 sag consolidate (mid-learning) or persist
   (structural — see R6 remedies).
 
+## R34 (2026-07-08): bus-voltage base ratchet — R29 recurs, canary works
+
+v48 (shared-bus voltage model, doc 17) flatlined from launch:
+track_linear_velocity ~0.002 at iter 450,
+simstate_actuator_forcerange_ratio 0.0000, clean_fell_ema 1.0 — zero
+torque authority, every env falling on spawn. Same mechanism class as
+R29, reintroduced by the fix's own author: `bus_voltage_step` refreshed
+its per-episode forcerange base by re-reading the live field on reset,
+assuming a reset-mode DR event restores it. Nothing does (R29's whole
+point: NUgus effort DR goes through `actuator.set_effort_limit`), so
+the "clean" base was our own previous scale — compounding ~0.85×/episode,
+and early-training falls every ~2 s melt authority to zero within
+minutes, self-reinforcing.
+
+Lessons banked:
+
+- **The unit test modeled the assumption, not reality**: its mock env
+  restored forcerange on reset, green-lighting the exact ratchet. The
+  rewritten test omits the restore (like the real event stack) and was
+  verified RED against the old code before shipping the fix (fac1f4d).
+- **The R28 telemetry caught it in one glance** — ratio 0.0000 is
+  unambiguous. It is now also a monitor trigger (T8: ratio outside
+  [0.5, 1.3] after iter 100; with BUS_VOLTAGE the legitimate steady
+  state is ~0.8).
+- **Generated manifests bake GIT_COMMIT**: applying a stale gen_ yaml
+  relaunched the OLD code after the fix was pinned (fourth
+  config-delivery split-brain of the era). After any re-pin,
+  re-run gen-gridsearch.sh before kubectl apply.
+- Any writer of a shared sim field must either own the restore path
+  end-to-end or never re-read the field it writes. The bus model now
+  caches its base once, from the clean first-call field, immutably.
+
+Relaunched clean: ratio steady at 0.812 (designed sag), tracking 2.37
+by iter 1750.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not
