@@ -47,39 +47,41 @@ def test_voltage_sags_with_fleet_load_and_chain_position() -> None:
 
 
 def test_no_ratchet_across_steps_and_episodes() -> None:
-  """R29 regression: the scale multiplies a cached per-episode base;
-  1000 steps and several resets must leave forcerange = base * scale,
-  never compounding."""
+  """R29 regression: NOTHING restores actuator_forcerange at reset in the
+  real config (effort_limits DR goes through actuator.set_effort_limit),
+  so the live field a fresh env carries into its next episode is our own
+  scaled write. 1000 steps with frequent falls (2 s episodes, worst case)
+  must leave forcerange = original_base * scale, never compounding. The
+  original version of this test restored the field on reset - modeling
+  the assumption instead of reality - and green-lit the ratchet that
+  melted v48's first launch to zero authority."""
   env = _env(1)
   env.scene["robot"].data.actuator_force = torch.full((1, NU), 5.0)
   bus_voltage_step(env, None, KT)
   for step in range(1000):
-    env.episode_length_buf[:] = (step % 200) + 1
-    if step % 200 == 199:
-      # Episode reset: DR restore writes a clean value.
-      env.episode_length_buf[:] = 0
-      env.sim.model.actuator_forcerange[:] = torch.tensor([[[-10.0, 10.0]] * NU])
+    # Short episodes (fall every 100 steps); reset does NOT touch the
+    # forcerange field - exactly like the real NUgus event stack.
+    env.episode_length_buf[:] = (step + 1) % 100
     bus_voltage_step(env, None, KT)
   fr = env.sim.model.actuator_forcerange[0, 0, 1]
   # Worst case: 10 * clamp floor 0.3; never below, never spiraling.
   assert 3.0 <= fr <= 11.5
 
 
-def test_base_refresh_reads_clean_reset_values_once() -> None:
-  env = _env(1)
-  bus_voltage_step(env, None, KT)
-  env.episode_length_buf[:] = 1
-  bus_voltage_step(env, None, KT)
-  base1 = None
+def test_base_cached_once_never_rereads_live() -> None:
+  """The base must be frozen at the first-call (pre-write) values; later
+  steps, loads, and resets must never fold the scaled live field back in."""
   from mjlab.tasks.velocity.mdp.bus_voltage import _STATE
 
-  base1 = _STATE[env].base_forcerange.clone()
-  # Steps 2..5 with load: base must not move (no re-read of scaled live).
+  env = _env(1)
+  bus_voltage_step(env, None, KT)
+  base0 = _STATE[env].base_forcerange.clone()
+  assert torch.equal(base0, torch.tensor([[[-10.0, 10.0]] * NU]))
   env.scene["robot"].data.actuator_force = torch.full((1, NU), 8.0)
-  for k in range(2, 6):
+  for k in [1, 2, 3, 0, 1, 2]:  # includes a reset (wrap to 0)
     env.episode_length_buf[:] = k
     bus_voltage_step(env, None, KT)
-  assert torch.equal(_STATE[env].base_forcerange, base1)
+  assert torch.equal(_STATE[env].base_forcerange, base0)
 
 
 def test_discharge_drains_over_episode() -> None:

@@ -17,11 +17,17 @@ Model, applied per control step (event mode="step"):
   scale = clamp(V_i / V_nom, 0.3, 1.15)
   actuator_forcerange_i = episode_base_i * scale
 
-R29 lesson applies: the scale multiplies a per-episode BASE cached
-after the reset-mode DR events ran (episode_length_buf == 0 marks the
-refresh), never the current field - stateless per step, no compounding
-ratchet. The R28 simstate telemetry independently guards this in every
-run.
+R29 lesson applies: the scale multiplies a BASE cached ONCE from the
+first-ever call, before this event has written anything - never the
+live field. Nothing in the NUgus config rewrites
+model.actuator_forcerange at reset (the effort_limits DR event goes
+through actuator.set_effort_limit, the very mechanism split R29
+exposed), so re-reading the live field "after reset" captures our own
+previous scale and compounds it geometrically per episode. That exact
+ratchet melted v48's first launch to zero authority within ~450 iters
+(simstate ratio 0.0000, every env falling on spawn) - caught by the
+R28 telemetry. If per-episode forcerange DR is ever added, the cache
+must take that event's output explicitly, not a live re-read.
 
 Per-episode DR (measured ranges, doc 17): V_oc U(12.5, 16.5) V,
 discharge U(40, 90) mV/min, R_src U(0.04, 0.15) Ohm, R_local
@@ -72,10 +78,9 @@ class _BusState:
     self.age_s = torch.zeros(n, device=device)
     self.base_forcerange: torch.Tensor | None = None
     self.voltage = torch.full((n, nu), V_NOMINAL, device=device)
-    # Reset detector: refresh the base exactly once per episode, on the
-    # first step after episode_length_buf wraps (a <=1 test would
-    # re-read the base on the second step, after our own scale had
-    # already been applied - a one-shot double-sag contamination).
+    # Reset detector (episode_length_buf wrap): triggers per-episode DR
+    # resampling only. The forcerange base is never re-read after the
+    # first call - see the module docstring for the ratchet this avoids.
     self.prev_ep_len = torch.full((n,), torch.iinfo(torch.long).max, device=device)
 
   def resample(self, env_ids: torch.Tensor, device: str) -> None:
@@ -114,18 +119,20 @@ def bus_voltage_step(
   asset = env.scene[asset_cfg.name]
   device = env.device
 
-  # Per-episode base: refresh rows for envs that just reset (after the
-  # reset-mode DR events, which run before the first step event). The
-  # scale below always multiplies THIS base, never the live field (R29).
+  # Base cached ONCE, from the clean pre-write field on the first call.
+  # Never refreshed from the live field afterwards: nothing restores
+  # actuator_forcerange at reset in this config, so the live rows of a
+  # freshly reset env still hold OUR previous scale - re-adopting them
+  # compounds ~0.85x per episode into zero authority (the R29 ratchet;
+  # it killed v48's first launch). The scale below always multiplies
+  # this immutable base.
   ctrl_ids = asset.indexing.ctrl_ids
-  live = env.sim.model.actuator_forcerange[:, ctrl_ids]
   if state.base_forcerange is None:
-    state.base_forcerange = live.clone()
+    state.base_forcerange = env.sim.model.actuator_forcerange[:, ctrl_ids].clone()
   fresh = env.episode_length_buf < state.prev_ep_len
   state.prev_ep_len = env.episode_length_buf.clone()
   if fresh.any():
     ids = torch.arange(env.num_envs, device=device)[fresh]
-    state.base_forcerange[ids] = live[ids]
     state.resample(ids, device)
 
   step_dt = float(env.step_dt)
