@@ -99,3 +99,37 @@ vibration, not sensor floor. Tails are heavy everywhere; Gaussian at
 matched std is the available first-order match. If a future run shows
 noise-related brittleness, the next step is spike/burst noise (matched
 kurtosis), not bigger Gaussians.
+
+## Repeatable procedure (new hardware / new logs)
+
+The entire pipeline is `scripts/servo_sysid.py` (checked in with this
+section):
+
+    uv run python scripts/servo_sysid.py extract <nuclear_log.json> --cache c.npz
+    uv run python scripts/servo_sysid.py report c.npz
+
+Requirements on the log: paired RawSensors/Sensors JSON-lines with the
+robot WALKING (fits need motion; noise calibration is only meaningful
+under gait vibration). ~5 min of walking sufficed here.
+
+What it extracts and where each number goes:
+
+| section | outputs | lands in |
+|---|---|---|
+| 1 integrity | velocity unit/sign/lag per joint | NUbots pipeline bug reports; never fit against the velocity register |
+| 2 electrical | R, K (back-EMF) per joint + pooled | `_NUGUS_CURRENT_KT`; K*I_limit cross-checks effort limits |
+| 3 mechanical | J, b, tc pooled with quality gates | J -> `ARMATURE_<servo>`; b/tc only from a BAM pendulum bench (walking data is gravity-confounded) |
+| 4 noise | hf-residual std per obs channel | actor `Gnoise` values in `env_cfgs.py` |
+| 5 power | Voc, discharge rate, R_src, fleet A/W, per-servo R_local + chain offsets | bus-voltage model constants and DR ranges; joule watts budget |
+
+Not extracted (and why): gear ratio (spec-sheet constant - the "W270"
+in the model name, 272.5:1 per e-Manual; J is measured at the output
+shaft so the ratio never enters the fits, only the rotor-inertia
+sanity check); motor thermal model (needs longer logs with rest
+periods); gearbox backlash (needs bench dwell/reversal tests).
+
+Standing rules when repeating: quality gates tighten, never loosen;
+any pooled value replacing a sim constant gets a dated comment citing
+the log; noise values go in WITHOUT extra "safety" factors (the
+walking residual already contains the vibration term - that was the
+lesson of the 5x gyro miss).
