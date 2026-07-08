@@ -8,6 +8,13 @@ Upcoming version (not yet released)
 Fixed
 ^^^^^
 
+- The hazard-crossing frontier readouts (``frontier_speed``,
+  ``frontier_rho``) are now clamped to the highest speed/radius bin with
+  actual exposure evidence. Previously a near-zero fall rate meant no bin
+  crossed the hazard bar and the readout returned the full instrument
+  range (3.2 m/s), which reads like a capability claim when it only means
+  "no hazard visible in the bins we sampled".
+
 - The push recovery-time histogram (``frontier/push_fall_dt``) no longer
   attributes falls to pushes that never happened: attribution now requires a
   push in the current episode (the last-push stamp is cleared at episode end),

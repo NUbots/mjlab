@@ -1334,8 +1334,21 @@ def test_interp_crossing_and_binned_quantile() -> None:
   # Crossing near bin 5 (h=5e-4), interpolated - continuous, not a
   # 0.1-quantized stair step.
   assert 0.10 < x < 0.16
-  # Never crossed: returns full range.
+  # Never crossed, no exposure info: returns full range.
   assert _interp_crossing(torch.zeros(32), 0.025, bar) == pytest.approx(0.8)
+  # Never crossed WITH exposure: clamps to the highest sampled bin -
+  # "clean as far as we have sampled", not an instrument-range
+  # capability claim (frontier_speed read 3.2 m/s at near-zero fall
+  # rates before this).
+  exposure = torch.zeros(32)
+  exposure[:20] = 100.0
+  x = _interp_crossing(torch.zeros(32), 0.025, bar, exposure=exposure)
+  assert x == pytest.approx((19 + 0.5) * 0.025)
+  # No exposure anywhere: nothing demonstrated.
+  assert _interp_crossing(torch.zeros(32), 0.025, bar, exposure=torch.zeros(32)) == 0.0
+  # A genuine crossing below the exposure limit is unaffected.
+  x = _interp_crossing(hazards, 0.025, bar, exposure=exposure)
+  assert 0.10 < x < 0.16
 
   # Quantiles of a binned distribution: uniform mass in bins 0..3.
   counts = torch.tensor([10.0, 10.0, 10.0, 10.0] + [0.0] * 28)

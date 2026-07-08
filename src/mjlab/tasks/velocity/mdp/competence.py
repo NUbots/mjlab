@@ -306,6 +306,12 @@ class CompetenceTracker:
     self._bucket_steps = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._bucket_falls = torch.zeros(self.n_cmd_buckets, device=self.device)
     self.bucket_hazard = torch.zeros(self.n_cmd_buckets, device=self.device)
+    # Persistent per-bin exposure EMA (folded with the hazard): lets the
+    # frontier readouts clamp to "as far as we have actually sampled"
+    # instead of returning the instrument end when no hazard crossing
+    # exists (a near-zero fall rate made frontier_speed read 3.2 = the
+    # full R31 range, which is not a capability claim).
+    self.bucket_exposure = torch.zeros(self.n_cmd_buckets, device=self.device)
     # Attainment conditional on commanded speed (R20): the capability
     # curve. Windowed sums -> EMA'd per-bin curve at the hazard cadence;
     # the interpolated bar-crossing of this curve (attained_frontier) is
@@ -350,6 +356,7 @@ class CompetenceTracker:
     self._rho_steps = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._rho_falls = torch.zeros(self.n_cmd_buckets, device=self.device)
     self.rho_hazard = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self.rho_exposure = torch.zeros(self.n_cmd_buckets, device=self.device)
     self._cur_rho_bucket = torch.full((n,), -1, dtype=torch.long, device=self.device)
     try:
       self._step_dt = float(env.step_dt)
@@ -725,10 +732,12 @@ class CompetenceTracker:
       if self._bucket_steps.sum() >= 100.0:
         hazard = self._bucket_falls / self._bucket_steps.clamp(min=1.0)
         self.bucket_hazard = 0.3 * hazard + 0.7 * self.bucket_hazard
+        self.bucket_exposure = 0.3 * self._bucket_steps + 0.7 * self.bucket_exposure
         self._bucket_steps.zero_()
         self._bucket_falls.zero_()
         rho_hazard = self._rho_falls / self._rho_steps.clamp(min=1.0)
         self.rho_hazard = 0.3 * rho_hazard + 0.7 * self.rho_hazard
+        self.rho_exposure = 0.3 * self._rho_steps + 0.7 * self.rho_exposure
         self._rho_steps.zero_()
         self._rho_falls.zero_()
         if self.fast_fall_clean < 0.15:
@@ -964,29 +973,46 @@ class joule_lambda_shadow:
     }
 
 
-def _interp_crossing(hazards: torch.Tensor, bin_width: float, bar: float) -> float:
+def _interp_crossing(
+  hazards: torch.Tensor,
+  bin_width: float,
+  bar: float,
+  exposure: torch.Tensor | None = None,
+) -> float:
   """First up-crossing of the hazard bar, linearly interpolated (R18).
 
   Light 3-bin smoothing first: quantiles/crossings integrate noise, but
   a single hot fine bin should not snap the frontier. Returns the
-  bin-center-based crossing position; the full range if never crossed.
+  bin-center-based crossing position; if never crossed, the readout is
+  clamped to the highest bin with ``exposure`` evidence (when given):
+  "clean as far as we have actually sampled". Without the clamp a
+  near-zero fall rate rendered the full instrument range (3.2 m/s after
+  R31 widening) as if it were a capability claim - unvisited bins hold
+  hazard 0 and cannot testify.
   """
   n = len(hazards)
   sm = hazards.clone()
   if n >= 3:
     sm[1:-1] = (hazards[:-2] + hazards[1:-1] + hazards[2:]) / 3.0
+  crossing = float(n * bin_width)
   prev_c = 0.5 * bin_width
   prev_h = float(sm[0])
   if prev_h > bar:
-    return prev_c
-  for i in range(1, n):
-    c = (i + 0.5) * bin_width
-    h = float(sm[i])
-    if h > bar:
-      frac = (bar - prev_h) / max(h - prev_h, 1e-12)
-      return prev_c + frac * (c - prev_c)
-    prev_c, prev_h = c, h
-  return n * bin_width
+    crossing = prev_c
+  else:
+    for i in range(1, n):
+      c = (i + 0.5) * bin_width
+      h = float(sm[i])
+      if h > bar:
+        frac = (bar - prev_h) / max(h - prev_h, 1e-12)
+        crossing = prev_c + frac * (c - prev_c)
+        break
+      prev_c, prev_h = c, h
+  if exposure is not None:
+    seen = torch.nonzero(exposure > 1.0)
+    limit = 0.0 if len(seen) == 0 else (float(seen[-1]) + 0.5) * bin_width
+    crossing = min(crossing, limit)
+  return crossing
 
 
 def _attained_frontier(
@@ -1095,10 +1121,20 @@ class competence_diagnostics:
     # R18: the statistics ARE the metrics; dense bins feed the
     # interpolated crossings/quantiles and the histogram views only.
     out["frontier_speed"] = torch.tensor(
-      _interp_crossing(t.bucket_hazard, speed_bw, self._hazard_bar)
+      _interp_crossing(
+        t.bucket_hazard,
+        speed_bw,
+        self._hazard_bar,
+        exposure=t.bucket_exposure + t._bucket_steps,
+      )
     )
     out["frontier_rho"] = torch.tensor(
-      _interp_crossing(t.rho_hazard, rho_bw, self._hazard_bar)
+      _interp_crossing(
+        t.rho_hazard,
+        rho_bw,
+        self._hazard_bar,
+        exposure=t.rho_exposure + t._rho_steps,
+      )
     )
     out["attained_frontier"] = torch.tensor(
       _attained_frontier(
