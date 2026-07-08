@@ -8,6 +8,11 @@ Upcoming version (not yet released)
 Fixed
 ^^^^^
 
+- ``VideoRecorder`` falls back to the static ffmpeg bundled with
+  ``imageio-ffmpeg`` when no ``ffmpeg`` binary is on PATH (headless
+  training images commonly ship without one), instead of crashing on the
+  first capture.
+
 - The hazard-crossing frontier readouts (``frontier_speed``,
   ``frontier_rho``) are now clamped to the highest speed/radius bin with
   actual exposure evidence. Previously a near-zero fall rate meant no bin

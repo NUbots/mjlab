@@ -145,6 +145,19 @@ TRAIN_ARGS=(
   --agent.max-iterations "${MAX_ITERATIONS}"
 )
 
+# Periodic training videos (rank 0 only, offscreen EGL - verified working
+# on the cluster pods): VIDEO=1 enables capture. Interval/length are in
+# policy steps (24/iter, so 6000 = every 250 iterations; 1000 steps = one
+# full 20 s episode at 50 Hz). The rsl-rl W&B logger finds the mp4s in the
+# log dir and uploads each as wandb.Video automatically.
+if [[ "${VIDEO:-0}" == "1" ]]; then
+  TRAIN_ARGS+=(
+    --video
+    --video-length "${VIDEO_LENGTH:-1000}"
+    --video-interval "${VIDEO_INTERVAL:-6000}"
+  )
+fi
+
 # tyro union parsing for --gpu-ids rejects a lone "0"; default [0] is correct for 1-GPU jobs.
 if [[ -n "${GPU_IDS}" && "${GPU_IDS}" != "0" ]]; then
   IFS=',' read -ra _gpu_ids <<< "${GPU_IDS}"

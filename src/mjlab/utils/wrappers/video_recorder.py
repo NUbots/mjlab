@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Literal
 
@@ -11,6 +12,17 @@ import torch
 from typing_extensions import assert_never
 
 from mjlab.envs import ManagerBasedRlEnv
+
+# mediapy shells out to an ffmpeg binary; headless training images often
+# ship without one. imageio-ffmpeg bundles a static build, so fall back to
+# it when ffmpeg is not on PATH (otherwise the first capture crashes).
+if shutil.which("ffmpeg") is None:
+  try:
+    import imageio_ffmpeg
+
+    media.set_ffmpeg(imageio_ffmpeg.get_ffmpeg_exe())
+  except Exception:  # pragma: no cover - best effort; mediapy errors later.
+    pass
 
 
 class VideoRecorder(ManagerBasedRlEnv):

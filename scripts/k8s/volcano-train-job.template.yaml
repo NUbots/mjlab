@@ -83,6 +83,12 @@ spec:
                   value: "${CURRENT_OBS}"
                 - name: BUS_VOLTAGE
                   value: "${BUS_VOLTAGE}"
+                - name: VIDEO
+                  value: "${VIDEO}"
+                - name: VIDEO_LENGTH
+                  value: "${VIDEO_LENGTH}"
+                - name: VIDEO_INTERVAL
+                  value: "${VIDEO_INTERVAL}"
                 - name: PHASE_DELTA_STRONG_ITERS
                   value: "${PHASE_DELTA_STRONG_ITERS}"
                 - name: PHASE_DELTA_STRONG_W
