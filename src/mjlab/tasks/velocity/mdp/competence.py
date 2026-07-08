@@ -256,10 +256,18 @@ class CompetenceTracker:
     # never let the top bin truncate the phenomenon). With per-episode
     # attribution a dt can never exceed the episode, so the out-of-range
     # drop in finalize only excises impossible values.
-    # Quantiles (t50/t75) are the outputs.
+    # Windowed like the survival bins: falls scatter into _push_fall_dt_win;
+    # at the hazard-refresh cadence a window holding >= 50 events folds
+    # into the EMA'd push_fall_dt_counts (0.3 new / 0.7 old, matching
+    # push_survival) and clears; sparse windows keep accumulating so
+    # evidence is never discarded. The EMA is what t50/t75, the adaptive
+    # observation window, and the W&B histogram read - the CURRENT
+    # policy's recovery profile, not the run-lifetime average (a
+    # cumulative histogram let early-training falls weigh on t75 forever).
     self.n_dt_bins = 40
     self.dt_bin_width = 0.5
     self.push_fall_dt_counts = torch.zeros(self.n_dt_bins, device=self.device)
+    self._push_fall_dt_win = torch.zeros(self.n_dt_bins, device=self.device)
     # Push survival frontier (R23): per-event outcomes binned by shove
     # magnitude |dv_xy|. A push survives if no fall arrives before the
     # next push or timeout; a fall charges the pending push's bin.
@@ -672,7 +680,7 @@ class CompetenceTracker:
       in_range = dt_s < self.n_dt_bins * self.dt_bin_width
       if in_range.any():
         bins = (dt_s[in_range] / self.dt_bin_width).long()
-        self.push_fall_dt_counts.scatter_add_(
+        self._push_fall_dt_win.scatter_add_(
           0, bins, torch.ones(int(in_range.sum()), device=self.device)
         )
     # Pushes do not carry across resets: the next episode starts unpushed.
@@ -745,7 +753,11 @@ class CompetenceTracker:
           self.attain_by_speed_weight *= 0.5
         self._attain_bin_sum.zero_()
         self._attain_bin_weight.zero_()
-        if float(self.push_fall_dt_counts.sum()) >= 50.0:
+        if float(self._push_fall_dt_win.sum()) >= 50.0:
+          self.push_fall_dt_counts = (
+            0.3 * self._push_fall_dt_win + 0.7 * self.push_fall_dt_counts
+          )
+          self._push_fall_dt_win.zero_()
           t75 = _binned_quantile(self.push_fall_dt_counts, self.dt_bin_width, 0.75)
           self.push_obs_window_s = min(max(t75, 2.0), 12.0)
         events = self._push_bin_survive + self._push_bin_fall

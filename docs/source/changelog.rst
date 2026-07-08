@@ -16,7 +16,11 @@ Fixed
   bin, producing a phantom spike at 15.5–16 s and mildly inflating the
   adaptive observation-window t75. The histogram now also spans the full
   20 s episode (was 16 s), so a late-episode fall after an early push is
-  recorded instead of truncated. The push survival frontier and its
+  recorded instead of truncated, and it is windowed with an EMA fold like
+  the survival bins (was cumulative over the run), so t50/t75 and the
+  displayed histogram track the current policy's recovery profile rather
+  than a run-lifetime average dominated by early training. The push
+  survival frontier and its
   per-bin evidence weight are now also logged as W&B histograms
   (``frontier/push_survival_by_dv``, ``frontier/push_events_by_dv``).
 

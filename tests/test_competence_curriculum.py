@@ -666,9 +666,47 @@ def test_push_fall_dt_histogram() -> None:
   # Fall 0.72 s later (36 steps at dt=0.02): second bin (0.5-1.0 s).
   env.common_step_counter = 1036
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  counts = tracker.push_fall_dt_counts
+  counts = tracker._push_fall_dt_win
   assert counts[1].item() == pytest.approx(2.0)
   assert counts.sum().item() == pytest.approx(2.0)
+
+
+def test_push_fall_dt_window_folds_into_ema() -> None:
+  """The dt histogram is windowed like the survival bins: a window with
+  >= 50 events folds 0.3/0.7 into the EMA and clears; sparse windows
+  keep accumulating. The EMA tracks the CURRENT policy's recovery
+  profile instead of letting early-training falls weigh forever."""
+  env = _mock_tracked_env(fell=True)
+  env.step_dt = 0.02
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(1.0)
+  tracker._push_fall_dt_win[2] = 60.0  # 60 falls at ~1-1.5 s (early flail)
+  env.common_step_counter = 50 * _NUM_STEPS_PER_ENV
+  tracker._bucket_next_step = 0
+  tracker._bucket_steps[0] = 200.0  # satisfy the refresh precondition
+  env.termination_manager.get_term.return_value = torch.tensor([False, False])
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker.push_fall_dt_counts[2].item() == pytest.approx(18.0)  # 0.3*60
+  assert tracker._push_fall_dt_win.sum().item() == pytest.approx(0.0)
+  # A sparse window (< 50 events) neither folds nor discards.
+  tracker._push_fall_dt_win[8] = 10.0
+  env.common_step_counter += 50 * _NUM_STEPS_PER_ENV
+  tracker._bucket_next_step = 0
+  tracker._bucket_steps[0] = 200.0
+  tracker._finalized_step = -1
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker.push_fall_dt_counts[8].item() == pytest.approx(0.0)
+  assert tracker._push_fall_dt_win[8].item() == pytest.approx(10.0)
+  # Once the window reaches 50, the fold shifts the EMA toward the new
+  # shape: recovery now takes ~4-4.5 s, and the old 1-1.5 s mode decays.
+  tracker._push_fall_dt_win[8] = 50.0
+  env.common_step_counter += 50 * _NUM_STEPS_PER_ENV
+  tracker._bucket_next_step = 0
+  tracker._bucket_steps[0] = 200.0
+  tracker._finalized_step = -1
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker.push_fall_dt_counts[8].item() == pytest.approx(15.0)  # 0.3*50
+  assert tracker.push_fall_dt_counts[2].item() == pytest.approx(12.6)  # 0.7*18
 
 
 def test_push_fall_dt_requires_push_this_episode() -> None:
@@ -683,7 +721,7 @@ def test_push_fall_dt_requires_push_this_episode() -> None:
   # Fall with no push ever: nothing recorded.
   env.common_step_counter = 500
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(0.0)
+  assert tracker._push_fall_dt_win.sum().item() == pytest.approx(0.0)
   # Push, episode ends WITHOUT a fall, next episode falls unpushed:
   # the stale stamp must not attribute the new fall to the old push.
   env.common_step_counter = 1000
@@ -694,22 +732,22 @@ def test_push_fall_dt_requires_push_this_episode() -> None:
   env.termination_manager.get_term.return_value = torch.tensor([True, True])
   env.common_step_counter = 1200
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(0.0)
+  assert tracker._push_fall_dt_win.sum().item() == pytest.approx(0.0)
   # The bins cover a full 20 s episode, so a late-episode fall after an
   # early push IS a genuine datum (17 s -> bin 34)...
   env.common_step_counter = 2000
   tracker.record_push(env, torch.tensor([0, 1]))
   env.common_step_counter = 2000 + int(17.0 / 0.02)
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  assert tracker.push_fall_dt_counts[34].item() == pytest.approx(2.0)
-  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(2.0)
+  assert tracker._push_fall_dt_win[34].item() == pytest.approx(2.0)
+  assert tracker._push_fall_dt_win.sum().item() == pytest.approx(2.0)
   # ...while an impossible dt (> episode length; cannot occur with
   # per-episode attribution) is dropped, never clamped into the top bin.
   env.common_step_counter = 4000
   tracker.record_push(env, torch.tensor([0, 1]))
   env.common_step_counter = 4000 + int(21.0 / 0.02)
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(2.0)
+  assert tracker._push_fall_dt_win.sum().item() == pytest.approx(2.0)
 
 
 def test_frontier_buckets_charge_falls_to_speed() -> None:
