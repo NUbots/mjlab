@@ -76,3 +76,26 @@ efficiency; the electrical equation identifies back-EMF K_e).
   (R10) has hardware numbers to anchor to now.
 - Hottest servo: rKnee 47 °C after 5 min of walking (also the joint
   with the worst mechanical fit — load-heaviest).
+
+## Observation-noise calibration (added same day, user prompt)
+
+High-frequency residual (signal minus 11-tap Hanning smooth) across the
+full walking log — i.e., what a policy's input actually carries on
+hardware, including structure-borne vibration the rigid-body sim never
+generates:
+
+| channel | sim (before) | measured walking hf | sim (after) |
+|---|---|---|---|
+| gyro (rad/s) | 0.02/0.03/0.03 ("×10 safety") | 0.130/0.163/0.156, kurt 8–26 | 0.13/0.16/0.16 |
+| projected gravity | 3.9e-3/4.3e-3/5.9e-4 | 4.6e-3/3.4e-3/3.0e-3 (fused Htw) | 5e-3/4e-3/3e-3 |
+| joint pos (rad) | 0.01 | 0.0037 | 0.01 (kept, margin) |
+| joint vel (rad/s) | 0.05 | 0.14–0.21 (position-derivative @ 91 Hz) | 0.15 |
+| current (A) | 0.05 white + 0.02 bias | 0.25–0.54 legs / 0.12–0.29 arms, kurt to 24; offsets ±0.095 | 0.25 white; offset DR ±0.1 already covered |
+| accel (m/s²) | (not an actor obs) | 1.27/1.39/1.85, kurt 5–42 | n/a |
+
+Lesson: bench-static noise measurements under-read walking reality ~5×
+even after "×10 safety" inflation, because the dominant term is
+vibration, not sensor floor. Tails are heavy everywhere; Gaussian at
+matched std is the available first-order match. If a future run shows
+noise-related brittleness, the next step is spike/burst noise (matched
+kurtosis), not bigger Gaussians.

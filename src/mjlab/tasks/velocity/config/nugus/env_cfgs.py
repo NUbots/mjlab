@@ -844,19 +844,26 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   if not critic_height_scan:
     cfg.observations["critic"].terms.pop("height_scan", None)
 
-  # Override observation sensor noise parameters with more realistic values based on real sensor measurements.
+  # Observation noise calibrated to hardware WALKING data (doc 17,
+  # 2026-07-08): high-frequency residual of each channel across 293 s
+  # of real walking. Bench-static measurements (the previous values,
+  # even with x10 "safety") miss structure-borne vibration - gear
+  # chatter and link flex that the rigid-body sim does not produce, so
+  # it must be injected as noise for the input distribution to match.
+  # Measured tails are heavy (gyro kurtosis 8-26); Gaussian at matched
+  # std is the first-order approximation available.
   cfg.observations["actor"].terms["base_ang_vel"].noise = Gnoise(
-    mean=0.0, std=(0.02, 0.03, 0.03)
-  )  # rads/s stdev for gyroscope noise (measured from real IMU) * 10 for factor of safety.
+    mean=0.0, std=(0.13, 0.16, 0.16)
+  )  # rad/s: measured walking hf residual (bench-static was ~5x lower).
   cfg.observations["actor"].terms["projected_gravity"].noise = Gnoise(
-    mean=0.0, std=(3.9e-03, 4.3e-03, 5.9e-04)
-  )  # From measurements of Z component of Htw Rotation matrix (rounded) then * 10 for factor of safety.
+    mean=0.0, std=(5.0e-03, 4.0e-03, 3.0e-03)
+  )  # unit-vector components: measured from fused Htw during walking.
   cfg.observations["actor"].terms["joint_pos"].noise = Gnoise(
     mean=0.0, std=0.01
-  )  # Came from the motor position units (0.088 deg for the MX series) * factor of safety.
+  )  # measured walking hf 0.0037 rad; 0.01 retained as a margin.
   cfg.observations["actor"].terms["joint_vel"].noise = Gnoise(
-    mean=0.0, std=0.05
-  )  # Came from the motor velocity units (0.229 rpm for the X series) * factor of safety.
+    mean=0.0, std=0.15
+  )  # rad/s: position-derivative consumer at ~91 Hz measures 0.14-0.21.
 
   # Sensor delays
   cfg.observations["actor"].terms["base_ang_vel"].delay_min_lag = 0
@@ -1254,7 +1261,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "kt": _NUGUS_CURRENT_KT,
         "quantize": _CURRENT_QUANTIZE_A,
       },
-      noise=Gnoise(mean=0.02, std=0.05),  # Amps: constant bias + sensor noise.
+      # Amps. Measured walking hf residual: 0.25-0.54 A legs, 0.12-0.29
+      # arms/head (spiky, kurtosis up to 24); per-servo idle offsets
+      # spread +/-0.095 A - covered by the current_sensor offset DR
+      # (+/-0.1) below, with this term as the white component.
+      noise=Gnoise(mean=0.02, std=0.25),
     )
     cfg.observations["actor"].terms["actuator_current"] = current_term
     cfg.observations["critic"].terms["actuator_current"] = current_term
