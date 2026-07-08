@@ -1620,6 +1620,25 @@ gen_v46() {
 }
 
 
+# BATCH=v47: measured physics + proprioceptive current. Two coupled
+# changes from the servo sysid (doc 17): ARMATURE_XH540 corrected 1.9x
+# (0.0266 -> 0.0496 measured; old value was outside the DR band, so
+# this is a physics-baseline fix, not a hyperparameter) and CURRENT_OBS
+# enabled (per-servo current = tau/Kt with measured Kt 2.68, Dynamixel
+# quantization, noise+bias, gain/offset DR) - the deployable torque
+# signal the real robot reports. Otherwise identical to v46. Not
+# directly comparable to v46 (heavier legs); compare against its own
+# frontier equilibrium.
+gen_v47() {
+  gen_v46
+  export CURRENT_OBS="1"
+  export MJLAB_LOG_STAMP="v47-current-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v47-current-obs__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v47,current-obs,measured-armature,batch-v47,gridsearch"
+  emit_manifest "mj-gs-v47-current"
+}
+
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -2731,6 +2750,7 @@ case "$BATCH" in
   v45b) gen_v45b; expected=2 ;;
   v45c) gen_v45c; expected=3 ;;
   v46) gen_v46; expected=4 ;;
+  v47) gen_v47; expected=5 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
