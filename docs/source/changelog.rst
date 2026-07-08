@@ -8,6 +8,13 @@ Upcoming version (not yet released)
 Fixed
 ^^^^^
 
+- ``ARMATURE_XH540`` corrected from 0.0266 (the MX-106 value, copied) to the
+  hardware-measured 0.0496 kg·m² reflected inertia (servo sysid on walking
+  logs); the previous value was ~1.9× low and outside the domain-randomization
+  band, so training never saw realistic leg inertia. The actuator-current
+  observation's leg torque constant likewise moves from 2.0 to the measured
+  back-EMF constant 2.68 N·m/A.
+
 - Removed the ``effort_drift`` interval event from the NUgus config: it scaled
   ``model.actuator_forcerange`` down multiplicatively every 2–4 s, but the
   per-reset ``effort_limits`` restore takes the ``IdealPdActuator`` branch for

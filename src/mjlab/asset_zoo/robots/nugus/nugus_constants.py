@@ -109,7 +109,12 @@ ACTUATOR_MX64 = ElectricActuator(
 )
 
 # XH540-W270 motor (knee joints)
-ARMATURE_XH540 = 0.0266
+# Measured by servo sysid on hardware walking data (2026-07-08, doc 17):
+# reflected inertia J = 0.0496 +/- 0.0108 kg.m^2 pooled over 10/12 leg
+# joints (electrical fit R^2 0.85-0.99). The previous 0.0266 was the
+# MX-106 value copied over and sat ~1.9x low - outside even the +/-20%
+# DR band, so no training env ever saw realistic leg inertia.
+ARMATURE_XH540 = 0.0496
 ACTUATOR_XH540 = ElectricActuator(
   reflected_inertia=ARMATURE_XH540,
   velocity_limit=VELOCITY_LIMIT_XH540,

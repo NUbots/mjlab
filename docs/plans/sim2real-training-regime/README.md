@@ -147,6 +147,7 @@ If only one thing can be done: Phase 0, then launch the B1 grid.
 | `15-v20-era-findings.md` | v20-era chronicle: clock_owned promoted (10x resilience, p95 usage under stress), feet fix validated, controller bug chronicle + threshold-feasibility rule, attainment/wobble gating, std<0.15 destabilizer hypothesis (v22), multi-GPU program + batch-size economics |
 | `16-auto-sysid-teacher-student.md` | automatic sysid plan: privileged teacher (dr_ratios actor) -> recurrent history student via rsl-rl distillation, adaptation-probe validation, route tradeoffs (action distillation vs explicit-z RMA) |
 | `references/codebase-map.md` | file:line map of the NUgus task, rewards, DR, curriculum, k8s harness |
+| `17-servo-sysid.md` | hardware servo sysid: 3 NUbots sensor-pipeline bugs (rev/s velocity, side sign flip, 55 ms lag), fitted R/K/J/b/tc, armature 1.9x correction, current-obs model constants |
 | `references/metrics-glossary.md` | every logged W&B key explained with units and measured healthy/alarm bands (AIMD, cohort diagnostics, hazards/frontier, watchdog, shadow-lambda, core rsl-rl gotchas) + 30-second run-reading checklist |
 | `references/wandb-run-history.md` | v8–v15 leaderboard, per-run curves, re-pull script |
 | `references/bam-actuator-models.md` | Rhoban BAM: extended friction for MX-64/MX-106 |

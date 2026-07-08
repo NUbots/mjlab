@@ -59,7 +59,13 @@ _DEFAULT_PROGRESS_BACKSLIDE_W = -0.5
 # servos are approximated lower. Matched by regex against actuator names.
 _NUGUS_CURRENT_KT: dict[str, float] = {
   r"(shoulder|elbow|neck|head)": 1.5,
-  "default": 2.0,
+  # Back-EMF constant measured by sysid on hardware walking data (doc
+  # 17): K = 2.68 +/- 0.18 Nm/A pooled over the XH540 legs (hip-yaw
+  # MX106 measured 2.4-2.6, close enough to share). The spec-sheet ~2.0
+  # is the stall-derived effective constant which bakes in gear losses;
+  # present-current on hardware reads the electrical current, so the
+  # observation model uses the electrical constant.
+  "default": 2.68,
 }
 # Dynamixel XH540-W270 "present current" unit: 2.69 mA per LSB.
 _CURRENT_QUANTIZE_A = 0.00269
