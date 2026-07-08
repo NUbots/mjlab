@@ -695,13 +695,21 @@ def test_push_fall_dt_requires_push_this_episode() -> None:
   env.common_step_counter = 1200
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
   assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(0.0)
-  # Pushed this episode but the fall is beyond the bin range (16 s):
-  # dropped, not clamped into the top bin.
+  # The bins cover a full 20 s episode, so a late-episode fall after an
+  # early push IS a genuine datum (17 s -> bin 34)...
   env.common_step_counter = 2000
   tracker.record_push(env, torch.tensor([0, 1]))
   env.common_step_counter = 2000 + int(17.0 / 0.02)
   tracker.finalize_episodes(env, torch.tensor([0, 1]))
-  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(0.0)
+  assert tracker.push_fall_dt_counts[34].item() == pytest.approx(2.0)
+  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(2.0)
+  # ...while an impossible dt (> episode length; cannot occur with
+  # per-episode attribution) is dropped, never clamped into the top bin.
+  env.common_step_counter = 4000
+  tracker.record_push(env, torch.tensor([0, 1]))
+  env.common_step_counter = 4000 + int(21.0 / 0.02)
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(2.0)
 
 
 def test_frontier_buckets_charge_falls_to_speed() -> None:

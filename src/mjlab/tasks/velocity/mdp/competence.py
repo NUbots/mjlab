@@ -251,8 +251,13 @@ class CompetenceTracker:
     self.fast_fall_pushed = 1.0
     # Time-from-push-to-fall histogram (seconds bins: see edges) - answers
     # "how long does recovery take" empirically.
-    # 0.5 s bins over [0, 16 s); quantiles (t50/t75) are the outputs.
-    self.n_dt_bins = 32
+    # 0.5 s bins over [0, 20 s): sized to the 20 s training episode so the
+    # instrument out-ranges every dt attribution can produce (R31 lesson:
+    # never let the top bin truncate the phenomenon). With per-episode
+    # attribution a dt can never exceed the episode, so the out-of-range
+    # drop in finalize only excises impossible values.
+    # Quantiles (t50/t75) are the outputs.
+    self.n_dt_bins = 40
     self.dt_bin_width = 0.5
     self.push_fall_dt_counts = torch.zeros(self.n_dt_bins, device=self.device)
     # Push survival frontier (R23): per-event outcomes binned by shove
