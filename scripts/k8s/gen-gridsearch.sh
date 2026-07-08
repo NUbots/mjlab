@@ -108,6 +108,7 @@ MAX_ITERATIONS="${MAX_ITERATIONS:-1250}"
 PHASE_ITERATIONS="${PHASE_ITERATIONS:-1250}"
 SILENCE_CLOCK="${SILENCE_CLOCK:-0}"
 CURRENT_OBS="${CURRENT_OBS:-0}"
+BUS_VOLTAGE="${BUS_VOLTAGE:-0}"
 RESUME="${RESUME:-false}"
 RESAMPLE_MIN="${RESAMPLE_MIN:-3.0}"
 WANDB_RUN_PATH="${WANDB_RUN_PATH:-}"
@@ -294,7 +295,7 @@ gen_v4_continuation() {
   export SEED="1"
   export RESUME="true"
   export SILENCE_CLOCK="0"
-  export CURRENT_OBS="0"
+  export CURRENT_OBS BUS_VOLTAGE="0"
   local joule_label
   joule_label="$(joule_tag "$JOULE_W")"
   local stand_w run_path
@@ -1639,6 +1640,23 @@ gen_v47() {
 }
 
 
+# BATCH=v48: shared-bus power model (doc 17 power network). Per-servo
+# supply voltage sags with fleet current (battery Voc/discharge/69 mOhm
+# source resistance, all measured) plus daisy-chain position; torque
+# authority scales with each servo's live voltage and the policy SEES
+# per-servo voltage (what hardware presentVoltage reports). This is the
+# total-power budget made physical: 22 A fleet peaks cost every servo
+# ~10% authority at once. Otherwise identical to v47.
+gen_v48() {
+  gen_v47
+  export BUS_VOLTAGE="1"
+  export MJLAB_LOG_STAMP="v48-busvolt-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v48-bus-voltage__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v48,bus-voltage,shared-power,batch-v48,gridsearch"
+  emit_manifest "mj-gs-v48-busvolt"
+}
+
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -2751,6 +2769,7 @@ case "$BATCH" in
   v45c) gen_v45c; expected=3 ;;
   v46) gen_v46; expected=4 ;;
   v47) gen_v47; expected=5 ;;
+  v48) gen_v48; expected=6 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

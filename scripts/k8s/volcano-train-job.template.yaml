@@ -81,6 +81,8 @@ spec:
                   value: "${SILENCE_CLOCK}"
                 - name: CURRENT_OBS
                   value: "${CURRENT_OBS}"
+                - name: BUS_VOLTAGE
+                  value: "${BUS_VOLTAGE}"
                 - name: PHASE_DELTA_STRONG_ITERS
                   value: "${PHASE_DELTA_STRONG_ITERS}"
                 - name: PHASE_DELTA_STRONG_W

@@ -779,6 +779,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   resample_min = _env_float("RESAMPLE_MIN", _DEFAULT_RESAMPLE_MIN)
   silence_clock = _env_bool("SILENCE_CLOCK", False)
   current_obs = _env_bool("CURRENT_OBS", False)
+  bus_voltage = _env_bool("BUS_VOLTAGE", False)
   max_iterations = _env_int("MAX_ITERATIONS", _DEFAULT_MAX_ITERATIONS)
   # Phase curriculum boundaries are derived from PHASE_ITERATIONS, which is
   # decoupled from MAX_ITERATIONS (the latter only drives the
@@ -1301,6 +1302,26 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     if phase_delta_w > 0:
       phase_delta_w = -phase_delta_w
     cfg.rewards["phase_delta_nominal"].weight = phase_delta_w
+
+  # Shared-bus voltage model (doc 17 power-network section): per-servo
+  # supply sags with fleet current (battery + harness) and chain
+  # position, scaling each servo's torque authority per step; the
+  # servo_voltage observation is what hardware presentVoltage reports.
+  # Adds 20 dims to actor+critic: BUS_VOLTAGE runs train from scratch.
+  if bus_voltage:
+    cfg.events["bus_voltage"] = EventTermCfg(
+      mode="step",
+      func=mdp.bus_voltage_step,
+      params={"kt": _NUGUS_CURRENT_KT, "asset_cfg": SceneEntityCfg("robot")},
+    )
+    voltage_term = ObservationTermCfg(
+      func=mdp.servo_voltage,
+      params={"kt": _NUGUS_CURRENT_KT},
+      # Dynamixel voltage register LSB is 0.1 V; matched-scale noise.
+      noise=Gnoise(mean=0.0, std=0.1),
+    )
+    cfg.observations["actor"].terms["servo_voltage"] = voltage_term
+    cfg.observations["critic"].terms["servo_voltage"] = voltage_term
 
   # Self-paced sparse swing-height (peak-at-landing) handoff target.
   landing_height = cfg.rewards["foot_swing_height_landing"]

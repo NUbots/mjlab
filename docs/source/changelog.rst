@@ -57,6 +57,15 @@ Fixed
 Added
 ^^^^^
 
+- Shared-bus voltage model for the NUgus task (``BUS_VOLTAGE=1``): per-servo
+  supply voltage sags with total fleet current (battery open-circuit voltage,
+  discharge rate, source resistance, and per-servo daisy-chain resistance all
+  measured from hardware walking logs), each servo's torque authority scales
+  with its live voltage, and a ``servo_voltage`` observation exposes what
+  hardware ``presentVoltage`` reports. Also ``scripts/servo_sysid.py``: a
+  repeatable identification pipeline (electrical/mechanical fits, observation
+  noise calibration, power-network fit) for new hardware or new logs.
+
 - Added ``command_progress_backslide`` velocity reward with hysteresis-based peak
   tracking, optional one-shot stall latch (gated off for zero/near-zero commands),
   and Nugus env knob ``PROGRESS_BACKSLIDE_W``.
