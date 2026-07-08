@@ -671,6 +671,39 @@ def test_push_fall_dt_histogram() -> None:
   assert counts.sum().item() == pytest.approx(2.0)
 
 
+def test_push_fall_dt_requires_push_this_episode() -> None:
+  """Falls with no push in the CURRENT episode never enter the histogram:
+  not at run start (init sentinel), not via a stamp from a previous
+  episode, and never via clamping into the top bin (the phantom spike
+  at 15.5-16 s)."""
+  env = _mock_tracked_env(fell=True)
+  env.step_dt = 0.02
+  tracker = CompetenceTracker(env)
+  tracker.set_push_cohort(1.0)
+  # Fall with no push ever: nothing recorded.
+  env.common_step_counter = 500
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(0.0)
+  # Push, episode ends WITHOUT a fall, next episode falls unpushed:
+  # the stale stamp must not attribute the new fall to the old push.
+  env.common_step_counter = 1000
+  tracker.record_push(env, torch.tensor([0, 1]))
+  env.termination_manager.get_term.return_value = torch.tensor([False, False])
+  env.common_step_counter = 1100
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  env.termination_manager.get_term.return_value = torch.tensor([True, True])
+  env.common_step_counter = 1200
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(0.0)
+  # Pushed this episode but the fall is beyond the bin range (16 s):
+  # dropped, not clamped into the top bin.
+  env.common_step_counter = 2000
+  tracker.record_push(env, torch.tensor([0, 1]))
+  env.common_step_counter = 2000 + int(17.0 / 0.02)
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  assert tracker.push_fall_dt_counts.sum().item() == pytest.approx(0.0)
+
+
 def test_frontier_buckets_charge_falls_to_speed() -> None:
   """Clean-cohort falls are charged to the commanded-speed bucket."""
   env = _mock_tracked_env(fell=False)

@@ -653,15 +653,25 @@ class CompetenceTracker:
 
     # Time-from-push-to-fall histogram (pushed cohort): answers "how long
     # does recovery take" empirically instead of assuming a horizon.
-    fell_pushed = pushed & (fell > 0)
+    # Attribution requires an actual push THIS episode (last_push_step is
+    # cleared at episode end below - a stamp from a previous life is not
+    # a push), and dts beyond the bin range are dropped, not clamped: a
+    # fall 16+ s after the last push is a walking failure, not a recovery
+    # outcome. Clamping used to pile every cross-reset misattribution and
+    # the never-pushed init sentinel into a phantom spike at the top bin.
+    fell_pushed = pushed & (fell > 0) & (self.last_push_step[ids] >= 0.0)
     if fell_pushed.any():
       dt_s = (
         env.common_step_counter - self.last_push_step[ids][fell_pushed]
       ) * self._step_dt
-      bins = (dt_s / self.dt_bin_width).long().clamp(0, self.n_dt_bins - 1)
-      self.push_fall_dt_counts.scatter_add_(
-        0, bins, torch.ones(len(dt_s), device=self.device)
-      )
+      in_range = dt_s < self.n_dt_bins * self.dt_bin_width
+      if in_range.any():
+        bins = (dt_s[in_range] / self.dt_bin_width).long()
+        self.push_fall_dt_counts.scatter_add_(
+          0, bins, torch.ones(int(in_range.sum()), device=self.device)
+        )
+    # Pushes do not carry across resets: the next episode starts unpushed.
+    self.last_push_step[ids] = -(10**9)
 
     # Frontier falls (clean cohort): charge the fall to the speed bucket
     # the env was walking in when it fell.
@@ -1169,6 +1179,22 @@ class competence_diagnostics:
             np_histogram=(
               t.push_fall_dt_counts.cpu().numpy(),
               np.linspace(0.0, t.n_dt_bins * t.dt_bin_width, t.n_dt_bins + 1),
+            )
+          ),
+          # Survival frontier (R23): survival rate per shove |dv_xy| bin -
+          # the curve the push governor consumes - plus its evidence
+          # weight, so a prior-held 1.0 in an unvisited bin is not read
+          # as demonstrated competence.
+          "frontier/push_survival_by_dv": wandb.Histogram(
+            np_histogram=(
+              t.push_survival.cpu().numpy(),
+              np.linspace(0.0, t.n_push_bins * t.push_bin_width, t.n_push_bins + 1),
+            )
+          ),
+          "frontier/push_events_by_dv": wandb.Histogram(
+            np_histogram=(
+              t.push_survival_weight.cpu().numpy(),
+              np.linspace(0.0, t.n_push_bins * t.push_bin_width, t.n_push_bins + 1),
             )
           ),
         },

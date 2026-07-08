@@ -8,6 +8,16 @@ Upcoming version (not yet released)
 Fixed
 ^^^^^
 
+- The push recovery-time histogram (``frontier/push_fall_dt``) no longer
+  attributes falls to pushes that never happened: attribution now requires a
+  push in the current episode (the last-push stamp is cleared at episode end),
+  and out-of-range delays are dropped instead of clamped. Previously the
+  never-pushed init sentinel and cross-reset stamps all clamped into the top
+  bin, producing a phantom spike at 15.5–16 s and mildly inflating the
+  adaptive observation-window t75. The push survival frontier and its
+  per-bin evidence weight are now also logged as W&B histograms
+  (``frontier/push_survival_by_dv``, ``frontier/push_events_by_dv``).
+
 - ``ARMATURE_XH540`` corrected from 0.0266 (the MX-106 value, copied) to the
   hardware-measured 0.0496 kg·m² reflected inertia (servo sysid on walking
   logs); the previous value was ~1.9× low and outside the domain-randomization
