@@ -54,7 +54,7 @@ spec:
                 - name: NNODES
                   value: "2"
                 - name: MJLAB_LOG_STAMP
-                  value: "v45c-strictpeak-20260708-110947"
+                  value: "v45c-strictpeak-20260708-181120"
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
@@ -297,7 +297,7 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "8c64f1ba40e83c97628d38f9cc931fedeb55f71f"
+                  value: "87c5a33e39639d47a023cdaf10bf5623a07670e2"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
