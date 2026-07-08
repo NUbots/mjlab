@@ -282,7 +282,11 @@ class ViserPlayViewer(BaseViewer):
       return True
 
     if payload in ("refresh", "latest"):
-      entries = self._ckpt_mgr.fetch_available()
+      try:
+        entries = self._ckpt_mgr.fetch_available()
+      except Exception as e:
+        print(f"[WARN]: Failed to fetch available checkpoints: {e}")
+        return True
       labels = [f"{n}  ({t})" if t else n for n, t in entries]
       self._ckpt_user_event.clear()
       self._ckpt_dropdown.options = labels
