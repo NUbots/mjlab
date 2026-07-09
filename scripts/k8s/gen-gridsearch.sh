@@ -249,6 +249,8 @@ export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W PHASE_DELTA_W
 export PHASE_TARGET_MODE PHASE_LEG_LENGTH
 export PHASE_TARGET_INTERCEPT PHASE_TARGET_SLOPE PHASE_TARGET_MIN PHASE_TARGET_MAX
 export PHASE_TETHER_TAPER_START PHASE_TETHER_TAPER_END PHASE_RAW_MIN PHASE_RAW_MAX
+export PHASE_CONTACT_W
+PHASE_CONTACT_W="${PHASE_CONTACT_W:-}"
 PHASE_TARGET_MODE="${PHASE_TARGET_MODE:-}"
 PHASE_LEG_LENGTH="${PHASE_LEG_LENGTH:-}"
 PHASE_TARGET_INTERCEPT="${PHASE_TARGET_INTERCEPT:-}"
@@ -1730,6 +1732,30 @@ gen_v50() {
 }
 
 
+# BATCH=v51: grounded froude cadence (doc 15 R36, v50 clock-death).
+# v50's clock froze by iter 250 and it walked unclocked at 2 m/s: the
+# froude floor priced a dead clock at 0.02/step (vs the fixed-1.0
+# tether's 0.2), the raw_min=0.0 clamp made raw=0 a gradient-dead
+# attractor, and nothing grounded the phase to the physical gait (the
+# tether pins only the clock's RATE; swing_height's height tracking is
+# too loose to bind at NUgus's ~1.5 cm clearance). Three changes:
+# PHASE_CONTACT_W adds a contact/window mismatch cost (feet must be
+# airborne in their swing window, planted in stance -- unsatisfiable by
+# a frozen clock while stepping, so the cheapest response is steering
+# the owned clock to truthfully track footfalls, which the froude tether
+# then pins in physical units); raw_min moves to 0.35 (= target floor)
+# so the clock physically cannot die; taper release unchanged.
+gen_v51() {
+  gen_v50
+  export PHASE_RAW_MIN="0.35"
+  export PHASE_CONTACT_W="0.3"
+  export MJLAB_LOG_STAMP="v51-grounded-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v51-grounded-froude__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v51,bus-voltage,cadence-target,froude,clock-grounding,batch-v51,gridsearch"
+  emit_manifest "mj-gs-v51-grounded"
+}
+
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -2845,6 +2871,7 @@ case "$BATCH" in
   v48) gen_v48; expected=6 ;;
   v49) gen_v49; expected=7 ;;
   v50) gen_v50; expected=7 ;;
+  v51) gen_v51; expected=8 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

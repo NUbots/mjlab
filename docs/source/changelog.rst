@@ -27,6 +27,16 @@ Added
   ``PHASE_TARGET_*``, ``PHASE_TETHER_TAPER_*``, and ``PHASE_RAW_*``
   environment knobs.
 
+- ``gait_clock_contact_mismatch_cost``: a clock-grounding reward that
+  charges each foot whose contact state contradicts its clock window
+  (airborne during the swing window, planted during stance; same window
+  convention as ``feet_swing_height_clock``). With a policy-owned clock
+  the cheapest response is to steer the phase to truthfully track the
+  feet, which the cadence tether can then pin in physical units — without
+  it, nothing makes the phase mean footfalls, and the v50 run froze its
+  clock at iteration 250 and simply walked unclocked. Exposed on
+  ``clock_owned`` via the ``PHASE_CONTACT_W`` knob (off by default).
+
 Fixed
 ^^^^^
 

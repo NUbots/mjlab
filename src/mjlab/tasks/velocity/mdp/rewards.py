@@ -586,6 +586,68 @@ def phase_delta_nominal_cost(
   return cost
 
 
+def gait_clock_contact_mismatch_cost(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  period: float,
+  swing_ratio: float,
+  foot_offsets: tuple[float, ...] = (0.0, 0.5),
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+  phase_source: Literal["time", "policy"] = "time",
+  action_term_name: str = "phase_delta",
+) -> torch.Tensor:
+  """Penalize foot contact states that contradict the gait clock's windows.
+
+  Grounds the clock to the physical gait (doc 15 R36): each foot must be
+  airborne during its swing window (``foot_phase < swing_ratio``, same
+  convention and ``foot_offsets`` as :func:`feet_swing_height_clock`) and in
+  contact during its stance window. Cost is the count of feet whose contact
+  state contradicts their window.
+
+  Without this, nothing makes the phase MEAN footfalls: the tether pins the
+  clock's rate and ``feet_swing_height_clock`` tracks heights too loosely to
+  bind (at NUgus's ~1.5 cm clearance a frozen clock still collects ~0.96 of
+  its max), so v50 froze the clock by iter 250 and walked unclocked. A frozen
+  clock cannot satisfy this term while stepping; with a policy-owned clock the
+  cheapest response is to steer the phase to match the feet, making it a
+  truthful cadence register that the cadence tether then pins in physical
+  units. Gated off when standing (the clock may idle or spin freely there).
+  """
+  contact_sensor: ContactSensor = env.scene[sensor_name]
+  assert contact_sensor.data.found is not None
+  in_contact = contact_sensor.data.found > 0  # [B, F]
+  num_feet = in_contact.shape[1]
+  assert len(foot_offsets) == num_feet, (
+    f"foot_offsets has {len(foot_offsets)} entries but sensor reports {num_feet} feet."
+  )
+
+  base_phase = _gait_base_phase(env, period, phase_source, action_term_name)
+  offsets = torch.tensor(foot_offsets, device=env.device, dtype=torch.float32)
+  foot_phase = torch.remainder(base_phase[:, None] + offsets[None, :], 1.0)
+  in_swing = foot_phase < swing_ratio  # [B, F]
+
+  mismatch = (in_swing == in_contact).float()  # [B, F]
+  cost = torch.sum(mismatch, dim=1)
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      active = ((linear_norm + angular_norm) > command_threshold).float()
+      cost = cost * active
+      if active.any():
+        walking = active > 0
+        env.extras["log"]["Metrics/gait_clock_contact_match_mean"] = (
+          1.0 - mismatch[walking].mean()
+        )
+      return cost
+
+  env.extras["log"]["Metrics/gait_clock_contact_match_mean"] = 1.0 - mismatch.mean()
+  return cost
+
+
 def feet_slip(
   env: ManagerBasedRlEnv,
   sensor_name: str,

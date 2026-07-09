@@ -1334,6 +1334,36 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       cfg.rewards["phase_delta_nominal"].params.update(
         {"taper_start": tether_taper_start, "taper_end": tether_taper_end}
       )
+    # Ground the clock to the feet (doc 15 R36, v50 clock-death): nothing
+    # made the phase MEAN footfalls. The tether pins only the clock's rate,
+    # and feet_swing_height_clock's height tracking is too loose to bind
+    # (at NUgus's ~1.5 cm clearance a frozen clock still collects ~0.96 of
+    # its max), so v50 froze its clock by iter 250 -- the froude floor
+    # priced a dead clock at 0.02/step vs the fixed-1.0 tether's 0.2 --
+    # and walked unclocked at 2 m/s. This contact/window mismatch cost
+    # cannot be satisfied by a frozen clock while stepping: the cheapest
+    # response is to steer the owned clock to match the feet, making the
+    # phase a truthful footfall register the cadence tether then pins in
+    # physical units. Off by default (0.0) to preserve legacy behavior.
+    phase_contact_w = _env_float("PHASE_CONTACT_W", 0.0)
+    if phase_contact_w > 0:
+      phase_contact_w = -phase_contact_w
+    if phase_contact_w != 0.0:
+      cfg.rewards["gait_clock_contact"] = RewardTermCfg(
+        func=mdp.gait_clock_contact_mismatch_cost,
+        weight=phase_contact_w,
+        params={
+          "sensor_name": "feet_ground_contact",
+          "period": gait_period,
+          # Must match foot_swing_height's windows or the two clock
+          # consumers would demand contradictory contact states.
+          "swing_ratio": 0.45,
+          "command_name": "twist",
+          "command_threshold": 0.05,
+          "phase_source": "policy",
+          "action_term_name": "phase_delta",
+        },
+      )
 
   # Shared-bus voltage model (doc 17 power-network section): per-servo
   # supply sags with fleet current (battery + harness) and chain

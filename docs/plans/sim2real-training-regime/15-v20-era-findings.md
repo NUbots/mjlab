@@ -547,6 +547,57 @@ in the untethered band. Seed 1, otherwise the v48 stack: a pure ablation
 of the cadence target. A linear ``target_mode`` (intercept+slope) remains
 available for a fitted target if ever wanted.
 
+## R36 (2026-07-10): v50 clock-death — the phase never meant footfalls
+
+v50 (froude target, seed 1) ran 10k clean and walked at 2.08 m/s track /
+0.007 fell / 0.83 forcerange — but with `phase_delta_raw_mean` ≈ 0.0001
+from **iteration 250 onward**. The policy froze its clock in the first
+250 iterations, never recovered, and learned a fully unclocked gait,
+paying the tether (−0.13/step at the end) as a flat tax. Three causes,
+in increasing order of importance:
+
+1. **The froude floor priced clock-death at 0.02/step.** Early commands
+   are slow, so the target sat at the 0.35 floor: a dead clock cost
+   (0.35)²·0.2 ≈ 0.024/step vs 0.2/step under the fixed-1.0 tether that
+   kept v48/v49's clocks alive. The policy bought clock-freedom cheap
+   before it ever learned to use the clock, and by the time the target
+   climbed to 0.89 the unclocked gait was fully sunk.
+2. **`raw_min = 0.0` is a gradient-dead trap.** All negative action
+   samples clamp to raw = 0 with identical outcome, so once the head's
+   mean drifted negative there was no restoring signal. In v48 negative
+   raw ran the clock *backwards* and paid (raw−1)² ≈ 0.58/step — a
+   strong wall. The insurance clamp built the trapdoor.
+3. **Nothing grounds the phase to the gait.** `policy_phase` feeds only
+   the sin/cos observation and the tether; `feet_swing_height_clock`
+   (0.75) nominally times the swing arc off the clock, but at NUgus's
+   ~1.5 cm foot clearance a frozen clock's desired-height-0 still
+   collects exp(−0.015²/0.05²) ≈ 0.96 of max. To a policy learning to
+   walk from scratch, a rotating input it hasn't learned to use is
+   self-generated observation noise — freezing it simplified its own
+   inputs for pennies.
+
+Consequences worth stating plainly: **the policy does not need the clock
+to walk** (v50 is the ablation: 2.08 m/s unclocked, though −6% track and
+2.3× fell vs v48 suggests the flat tether tax and/or lost metronome cost
+something). And **all cadence-era numbers (R35 sweep included) describe
+the clock, not the feet** — the sweep measured phase rate, which tracked
+the froude law only because v48's policy voluntarily coupled its clock
+to its gait. That coupling is optional and fragile.
+
+v51 response (`gen_v51`): ground the clock. New
+`gait_clock_contact_mismatch_cost` (`PHASE_CONTACT_W=0.3`) charges each
+foot whose contact state contradicts its clock window (same windows as
+`foot_swing_height`: swing = foot_phase < 0.45, offsets 0/0.5). A frozen
+clock cannot satisfy it while stepping, and since the policy owns the
+clock, the cheapest response is steering the phase to truthfully track
+its own footfalls — which the froude tether then pins in physical units.
+Plus `raw_min = 0.35` (= target floor): the clock physically cannot die,
+and the boundary is no longer an attractor the grounding term can't pull
+away from. Success criteria: `gait_clock_contact_match_mean` → ~1,
+`phase_delta_raw_mean` tracking `phase_delta_target_mean`, capability
+within noise of v48, and a *footfall* cadence (not just clock cadence)
+following the froude curve in the post-hoc sweep.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not

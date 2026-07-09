@@ -229,6 +229,82 @@ def test_clock_owned_cadence_target_env_knobs(monkeypatch):
   assert phase_action.raw_max == 2.5
 
 
+def test_gait_clock_contact_mismatch_cost():
+  """R36: the contact/window mismatch cost grounds the clock to the feet."""
+  from mjlab.tasks.velocity.mdp.rewards import gait_clock_contact_mismatch_cost
+
+  env = _make_phase_env(num_envs=2, command=torch.tensor([[0.5, 0.0, 0.0]] * 2))
+  action = _make_phase_action(env, period=0.7)
+  # Put both envs at phase 0.2: foot0 (offset 0.0) in swing (0.2 < 0.45),
+  # foot1 (offset 0.5 -> 0.7) in stance.
+  action._policy_phase = torch.full((2,), 0.2)
+
+  contact_sensor = MagicMock()
+  # env0 matches the windows (foot0 airborne, foot1 planted); env1 is the
+  # exact contradiction.
+  contact_sensor.data.found = torch.tensor([[0, 1], [1, 0]])
+  env.scene.__getitem__ = MagicMock(return_value=contact_sensor)
+
+  cost = gait_clock_contact_mismatch_cost(
+    env,
+    sensor_name="feet_ground_contact",
+    period=0.7,
+    swing_ratio=0.45,
+    command_name="twist",
+    phase_source="policy",
+  )
+  assert cost[0].item() == 0.0
+  assert cost[1].item() == 2.0
+
+  # A frozen clock cannot satisfy the term while the feet alternate: with
+  # phase stuck at 0.0, foot0 is permanently "in swing", so any stance on
+  # foot0 (or swing on foot1) is charged every step.
+  action._policy_phase = torch.zeros(2)
+  contact_sensor.data.found = torch.tensor([[1, 0], [0, 1]])
+  cost = gait_clock_contact_mismatch_cost(
+    env,
+    sensor_name="feet_ground_contact",
+    period=0.7,
+    swing_ratio=0.45,
+    command_name="twist",
+    phase_source="policy",
+  )
+  assert cost[0].item() == 2.0  # both feet contradict the frozen windows
+  assert cost[1].item() == 0.0  # the half-cycle where the freeze "matches"
+
+  # Standing gate: no cost when the command is below threshold.
+  env.command_manager.get_command = MagicMock(
+    return_value=torch.tensor([[0.0, 0.0, 0.0]] * 2)
+  )
+  cost = gait_clock_contact_mismatch_cost(
+    env,
+    sensor_name="feet_ground_contact",
+    period=0.7,
+    swing_ratio=0.45,
+    command_name="twist",
+    phase_source="policy",
+  )
+  assert torch.all(cost == 0.0)
+
+
+def test_clock_owned_phase_contact_env_knob(monkeypatch):
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_owned")
+  monkeypatch.setenv("PHASE_CONTACT_W", "0.3")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  term = cfg.rewards["gait_clock_contact"]
+  assert term.weight == -0.3
+  assert term.params["phase_source"] == "policy"
+  # Windows must agree with foot_swing_height or the two clock consumers
+  # would demand contradictory contact states.
+  assert (
+    term.params["swing_ratio"] == cfg.rewards["foot_swing_height"].params["swing_ratio"]
+  )
+  assert term.params["period"] == cfg.rewards["foot_swing_height"].params["period"]
+
+
 def test_clock_owned_cadence_target_defaults_legacy(monkeypatch):
   monkeypatch.setenv("MJLAB_VARIANT", "clock_owned")
 
@@ -244,6 +320,8 @@ def test_clock_owned_cadence_target_defaults_legacy(monkeypatch):
   assert isinstance(phase_action, PhaseDeltaActionCfg)
   assert phase_action.raw_min is None
   assert phase_action.raw_max is None
+  # The clock-grounding term is opt-in; legacy configs must not grow it.
+  assert "gait_clock_contact" not in cfg.rewards
 
 
 def test_gait_clock_uses_policy_phase():
