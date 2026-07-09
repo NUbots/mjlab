@@ -54,7 +54,7 @@ spec:
                 - name: NNODES
                   value: "2"
                 - name: MJLAB_LOG_STAMP
-                  value: "v46-heldspeed-20260709-112742"
+                  value: "v46-heldspeed-20260709-113946"
                 - name: UV_LINK_MODE
                   value: copy
                 - name: MJLAB_VARIANT
@@ -91,6 +91,10 @@ spec:
                   value: "6000"
                 - name: VIDEO_ENV_IDS
                   value: "0,-1"
+                - name: VIDEO_HEIGHT
+                  value: "720"
+                - name: VIDEO_WIDTH
+                  value: "1280"
                 - name: PHASE_DELTA_STRONG_ITERS
                   value: "1000"
                 - name: PHASE_DELTA_STRONG_W
@@ -305,7 +309,7 @@ spec:
                 # reached early in a run (yaw ramps to +/-0.5 by ~iter 250 so the
                 # policy learns to rotate).
                 - name: GIT_COMMIT
-                  value: "9a7cff07fb4b112cf9529ada5599344e9994b51e"
+                  value: "b406150a77c5353bdecdd410b8f55ff8d81c51a6"
                 # Resume/continuation: set per cell by gen-gridsearch.sh. When
                 # RESUME=true the run continues from WANDB_RUN_PATH's latest
                 # checkpoint (rsl-rl adds MAX_ITERATIONS more iterations).
