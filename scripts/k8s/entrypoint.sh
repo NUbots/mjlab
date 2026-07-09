@@ -155,6 +155,9 @@ if [[ "${VIDEO:-0}" == "1" ]]; then
     --video
     --video-length "${VIDEO_LENGTH:-1000}"
     --video-interval "${VIDEO_INTERVAL:-6000}"
+    # Alternate captures between a push-cohort robot (env 0; cohort = the
+    # first indices) and a clean-cohort one (env -1 = last).
+    --video-env-ids "${VIDEO_ENV_IDS:-0,-1}"
   )
 fi
 

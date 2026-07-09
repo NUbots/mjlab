@@ -30,6 +30,10 @@ class TrainConfig:
   video: bool = False
   video_length: int = 200
   video_interval: int = 2000
+  video_env_ids: str = ""
+  """Comma-separated world indices to cycle the rendered robot through,
+  one per capture (negative counts from the end, e.g. "0,-1"). Empty
+  keeps the viewer-config env."""
   enable_nan_guard: bool = False
   torchrunx_log_dir: str | None = None
   wandb_run_path: str | None = None
@@ -134,12 +138,18 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
 
   # Only record videos on rank 0 to avoid multiple workers writing to the same files.
   if cfg.video and rank == 0:
+    cycle_ids = (
+      tuple(int(i) for i in cfg.video_env_ids.split(",") if i.strip())
+      if cfg.video_env_ids
+      else None
+    )
     env = VideoRecorder(
       env,
       video_folder=Path(log_dir) / "videos" / "train",
       step_trigger=lambda step: step % cfg.video_interval == 0,
       video_length=cfg.video_length,
       disable_logger=True,
+      cycle_env_ids=cycle_ids,
     )
     print("[INFO] Recording videos during training.")
 
