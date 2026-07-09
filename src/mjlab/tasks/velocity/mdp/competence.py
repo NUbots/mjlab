@@ -973,6 +973,27 @@ class joule_lambda_shadow:
     }
 
 
+def _evidence_masked(
+  values: torch.Tensor,
+  evidence: torch.Tensor,
+  floor: float = 1.0,
+) -> torch.Tensor:
+  """Zero out bins without evidence for the histogram views.
+
+  The stratified buffers hold priors or noise where nothing was measured:
+  ``push_survival`` keeps its optimistic 1.0 prior in every dv bin never
+  shoved (rendered as a plateau of fake max-survival above the real
+  data), and the hazard curves show falls/steps spikes from bins with a
+  handful of steps (1 fall in 2 steps renders as hazard 0.5 next to
+  well-sampled bins at ~1e-4). The scalar readouts already refuse to let
+  such bins testify (`_interp_crossing` exposure clamp,
+  `_attained_frontier` min_weight); this applies the same rule to the
+  W&B histogram renderings. Zero means "no data here", and the paired
+  evidence histograms (push_events_by_dv) disambiguate where needed.
+  """
+  return torch.where(evidence > floor, values, torch.zeros_like(values))
+
+
 def _interp_crossing(
   hazards: torch.Tensor,
   bin_width: float,
@@ -1208,23 +1229,32 @@ class competence_diagnostics:
         return
       t = self._tracker
       n = t.n_cmd_buckets
+      # Evidence-masked views: bins without measurements render as zero
+      # instead of leaking priors (push_survival's 1.0) or falls/steps
+      # noise spikes from near-empty bins (see _evidence_masked).
+      hazard_speed = _evidence_masked(
+        t.bucket_hazard, t.bucket_exposure + t._bucket_steps
+      )
+      hazard_rho = _evidence_masked(t.rho_hazard, t.rho_exposure + t._rho_steps)
+      attain_speed = _evidence_masked(t.attain_by_speed, t.attain_by_speed_weight)
+      push_surv = _evidence_masked(t.push_survival, t.push_survival_weight)
       wandb.log(
         {
           "frontier/hazard_by_speed": wandb.Histogram(
             np_histogram=(
-              t.bucket_hazard.cpu().numpy(),
+              hazard_speed.cpu().numpy(),
               np.linspace(0.0, t.speed_bin_width * n, n + 1),
             )
           ),
           "frontier/attain_by_speed": wandb.Histogram(
             np_histogram=(
-              t.attain_by_speed.cpu().numpy(),
+              attain_speed.cpu().numpy(),
               np.linspace(0.0, t.speed_bin_width * n, n + 1),
             )
           ),
           "frontier/hazard_by_rho": wandb.Histogram(
             np_histogram=(
-              t.rho_hazard.cpu().numpy(),
+              hazard_rho.cpu().numpy(),
               np.linspace(0.0, 1.6, n + 1),
             )
           ),
@@ -1236,11 +1266,12 @@ class competence_diagnostics:
           ),
           # Survival frontier (R23): survival rate per shove |dv_xy| bin -
           # the curve the push governor consumes - plus its evidence
-          # weight, so a prior-held 1.0 in an unvisited bin is not read
-          # as demonstrated competence.
+          # weight. The governor still reads the raw prior-held buffer;
+          # only the rendering is masked (a wall of prior 1.0s above the
+          # delivered dv range reads as fake demonstrated competence).
           "frontier/push_survival_by_dv": wandb.Histogram(
             np_histogram=(
-              t.push_survival.cpu().numpy(),
+              push_surv.cpu().numpy(),
               np.linspace(0.0, t.n_push_bins * t.push_bin_width, t.n_push_bins + 1),
             )
           ),

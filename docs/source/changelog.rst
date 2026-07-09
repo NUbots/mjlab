@@ -30,6 +30,17 @@ Added
 Fixed
 ^^^^^
 
+- The frontier histogram views (``push_survival_by_dv``, ``hazard_by_rho``,
+  ``hazard_by_speed``, ``attain_by_speed``) are now evidence-masked: bins
+  without measurements render as zero instead of leaking their priors.
+  ``push_survival`` holds an optimistic 1.0 prior in every dv bin never
+  shoved, which rendered as a plateau of fake max-survival above the
+  delivered range, and the hazard curves showed ``falls/steps`` noise
+  spikes from bins with a handful of steps (1 fall in 2 steps renders as
+  hazard 0.5 next to well-sampled bins at ~1e-4). The scalar readouts
+  already refused to let such bins testify; the histograms now follow the
+  same rule. The governor still consumes the raw prior-held buffers.
+
 - The NUgus left shoulder-pitch pivot was mirrored with the wrong sign
   (local ``y`` flipped where the model's convention flips ``z``), placing
   the pitch axis 21 mm fore of its true position and swinging the whole

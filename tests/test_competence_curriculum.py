@@ -1357,6 +1357,30 @@ def test_interp_crossing_and_binned_quantile() -> None:
   assert _binned_quantile(torch.zeros(32), 0.5, 0.75) == pytest.approx(0.0)
 
 
+def test_evidence_masked_histogram_views() -> None:
+  """Histogram views must not render priors/noise from unmeasured bins:
+  push_survival's 1.0 prior showed a plateau of fake max-survival above
+  the delivered dv range, and hazard curves showed falls/steps spikes
+  from bins with a couple of steps."""
+  from mjlab.tasks.velocity.mdp.competence import _evidence_masked
+
+  # push_survival-style buffer: 1.0 prior everywhere, evidence in bins
+  # 0..3 only. The prior wall above the data must render as zero.
+  survival = torch.ones(8)
+  survival[2] = 0.6
+  weight = torch.tensor([5.0, 4.0, 3.0, 2.0, 0.0, 0.0, 0.0, 0.0])
+  masked = _evidence_masked(survival, weight)
+  assert torch.equal(masked[:4], survival[:4])
+  assert torch.all(masked[4:] == 0.0)
+
+  # hazard-style buffer: a near-empty bin (1 fall / 2 steps) spikes to
+  # 0.5 next to well-sampled bins at ~1e-4; the spike must not render.
+  hazard = torch.tensor([1e-4, 2e-4, 0.5, 0.0])
+  exposure = torch.tensor([5000.0, 5000.0, 0.6, 0.0])
+  masked = _evidence_masked(hazard, exposure)
+  assert torch.equal(masked, torch.tensor([1e-4, 2e-4, 0.0, 0.0]))
+
+
 def test_frontier_controller_climbs_glides_and_floors() -> None:
   """R20: difficulty slews toward attained_frontier x headroom, glides
   (never cascades) when the frontier retreats, and fall cuts cannot
