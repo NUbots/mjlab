@@ -150,9 +150,11 @@ TRAIN_ARGS=(
 # policy steps (24/iter, so 6000 = every 250 iterations; 1000 steps = one
 # full 20 s episode at 50 Hz). The rsl-rl W&B logger finds the mp4s in the
 # log dir and uploads each as wandb.Video automatically.
+# tyro bools are not store-true flags: --video must be given an explicit
+# True (a bare --video eats the next flag as its value; crashed v49 boot 1).
 if [[ "${VIDEO:-0}" == "1" ]]; then
   TRAIN_ARGS+=(
-    --video
+    --video True
     --video-length "${VIDEO_LENGTH:-1000}"
     --video-interval "${VIDEO_INTERVAL:-6000}"
     # Alternate captures between a push-cohort robot (env 0; cohort = the
