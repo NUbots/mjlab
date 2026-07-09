@@ -1666,6 +1666,22 @@ gen_v48() {
 }
 
 
+# BATCH=v49: the v48 champion stack at a fresh seed, on the instrumented
+# pin: W&B training videos (async recorder, alternating push/clean cohort
+# robots every 250 iters), per-episode push_fall_dt attribution + windowed
+# EMA, and exposure-clamped frontier readouts. No physics or observation
+# changes vs v48; with seed 2 it is a seed-replicate of the champion
+# result rather than a repeat of the same experiment.
+gen_v49() {
+  gen_v48
+  export SEED="2"
+  export MJLAB_LOG_STAMP="v49-video-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v49-video-instrumented__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v49,bus-voltage,videos,seed-2,batch-v49,gridsearch"
+  emit_manifest "mj-gs-v49-video"
+}
+
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -2779,6 +2795,7 @@ case "$BATCH" in
   v46) gen_v46; expected=4 ;;
   v47) gen_v47; expected=5 ;;
   v48) gen_v48; expected=6 ;;
+  v49) gen_v49; expected=7 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
