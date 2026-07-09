@@ -75,6 +75,31 @@ un-starred items overnight — they need design attention.
     doc 10 one-sided foot_flat isn't enough, replace with a clock-windowed
     pre-touchdown attitude target (heel-first: slight toe-up at touchdown).
     Cost: low (clock gating machinery exists). When: after R5 results.
+11b. ⭐ **Arm-flail damping** (user observation, 2026-07-10: arms flail
+    hard in every walk, persisting to late training). Why joule_heating
+    doesn't catch it: the term is Σ τ² over ALL joints, and arm links are
+    ~0.3 kg on MX-64s while the legs are XH540s carrying the whole 7.5 kg
+    robot — leg torques dominate the sum by orders of magnitude, so the
+    energy gradient is nearly blind to arm motion (τ² is doubly blind to
+    the high-velocity/low-torque regime flailing lives in; see item 10).
+    Also suspect the flailing is partly BOUGHT by the angular_momentum
+    penalty: arms are the cheapest way to cancel root angmom
+    (reaction-wheel function), so it may be functional, not waste.
+    FIRST: verify with an eval rollout (correlate arm joint velocity with
+    root angmom cancellation; log arm |qd| mean and arm share of Σ|τ·qd|)
+    before suppressing — if functional, prefer smoothing over pose-holds
+    or we may destabilize the walk. Cells, in preference order:
+    (a) per-servo-class energy: replace τ² with (τ/Kt)² (true I²R joule
+    heating; MX-64's smaller Kt then upweights arm heating for free, no
+    magic constants);
+    (b) arm-scoped joint_acc/action_rate cost (damps flail, keeps slow
+    functional swing);
+    (c) arm pose-hold to nominal while walking (strongest suppression,
+    highest risk of removing balance function);
+    (d) arm action-scale reduction (crude, changes the action space).
+    Cost: low ((a),(b),(d) are knobs/small terms). When: next reward-
+    shaping batch after v51 settles the clock-grounding question; (a) is
+    also pre-hardware hygiene independent of flailing.
 
 ## Domain randomization
 
