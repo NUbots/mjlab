@@ -165,6 +165,31 @@ def test_phase_delta_nominal_cost_taper_releases_tether():
   assert math.isclose(cost[2].item(), 0.0, abs_tol=1e-6)  # released
 
 
+def test_phase_delta_nominal_cost_froude_target():
+  # Physical dynamic-similarity target: period = k*L*Fr^p / v,
+  # raw_target = period_action / period. Cross-check the analytic value
+  # at 0.8 m/s (measured sweep landed dead-on here).
+  L, g, k, p, period_action = 0.495, 9.81, 2.3, 0.3, 0.7
+  v = 0.8
+  froude = v * v / (g * L)
+  period_phys = k * L * froude**p / v
+  raw_target = period_action / period_phys  # ~0.903
+  env = _make_phase_env(num_envs=1, command=torch.tensor([[v, 0.0, 0.0]]))
+  action = _make_phase_action(env, period=period_action)
+  action.process_actions(torch.tensor([[raw_target]]))
+  cost = phase_delta_nominal_cost(env, target_mode="froude", leg_length=L, gravity=g)
+  assert math.isclose(cost[0].item(), 0.0, abs_tol=1e-5)
+  target_mean = env.extras["log"]["Metrics/phase_delta_target_mean"]
+  assert math.isclose(target_mean.item(), raw_target, rel_tol=1e-4)
+  # Higher speed -> higher cadence target (shorter period).
+  env_fast = _make_phase_env(num_envs=1, command=torch.tensor([[1.2, 0.0, 0.0]]))
+  action_fast = _make_phase_action(env_fast, period=period_action)
+  action_fast.process_actions(torch.tensor([[1.0]]))
+  phase_delta_nominal_cost(env_fast, target_mode="froude", leg_length=L, gravity=g)
+  target_fast = env_fast.extras["log"]["Metrics/phase_delta_target_mean"].item()
+  assert target_fast > raw_target
+
+
 def test_phase_delta_raw_bounds_clamp():
   env = _make_phase_env(num_envs=2)
   cfg = PhaseDeltaActionCfg(
@@ -183,8 +208,8 @@ def test_phase_delta_raw_bounds_clamp():
 
 def test_clock_owned_cadence_target_env_knobs(monkeypatch):
   monkeypatch.setenv("MJLAB_VARIANT", "clock_owned")
-  monkeypatch.setenv("PHASE_TARGET_INTERCEPT", "0.22")
-  monkeypatch.setenv("PHASE_TARGET_SLOPE", "0.84")
+  monkeypatch.setenv("PHASE_TARGET_MODE", "froude")
+  monkeypatch.setenv("PHASE_LEG_LENGTH", "0.495")
   monkeypatch.setenv("PHASE_TETHER_TAPER_START", "1.35")
   monkeypatch.setenv("PHASE_TETHER_TAPER_END", "1.56")
   monkeypatch.setenv("PHASE_RAW_MIN", "0.0")
@@ -194,8 +219,8 @@ def test_clock_owned_cadence_target_env_knobs(monkeypatch):
 
   cfg = nubots_nugus_rough_env_cfg()
   params = cfg.rewards["phase_delta_nominal"].params
-  assert params["target_intercept"] == 0.22
-  assert params["target_slope"] == 0.84
+  assert params["target_mode"] == "froude"
+  assert params["leg_length"] == 0.495
   assert params["taper_start"] == 1.35
   assert params["taper_end"] == 1.56
   phase_action = cfg.actions["phase_delta"]
@@ -211,6 +236,7 @@ def test_clock_owned_cadence_target_defaults_legacy(monkeypatch):
 
   cfg = nubots_nugus_rough_env_cfg()
   params = cfg.rewards["phase_delta_nominal"].params
+  assert params["target_mode"] == "linear"
   assert params["target_intercept"] == 1.0
   assert params["target_slope"] == 0.0
   assert "taper_start" not in params

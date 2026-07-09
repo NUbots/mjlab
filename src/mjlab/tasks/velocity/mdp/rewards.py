@@ -490,34 +490,49 @@ def phase_delta_nominal_cost(
   action_term_name: str = "phase_delta",
   command_name: str | None = "twist",
   command_threshold: float = 0.05,
+  target_mode: str = "linear",
   target_intercept: float = 1.0,
   target_slope: float = 0.0,
   target_min: float = 0.35,
   target_max: float = 1.3,
   ang_speed_gain: float = 0.25,
+  leg_length: float = 0.495,
+  gravity: float = 9.81,
+  stride_coef: float = 2.3,
+  stride_exp: float = 0.3,
   taper_start: float | None = None,
   taper_end: float | None = None,
 ) -> torch.Tensor:
   """Penalize deviation of the phase step from a cadence target.
 
   :class:`mjlab.envs.mdp.actions.PhaseDeltaAction` scales each policy action by
-  ``step_dt / period``. Cost is ``(raw_action - target)^2`` where the target is
-  ``clamp(target_intercept + target_slope * v_eff, target_min, target_max)``
-  and ``v_eff = |v_lin_cmd| + ang_speed_gain * |w_cmd|``. Defaults reduce to
-  the legacy fixed target of 1.0 (nominal cadence). The speed-dependent form
-  follows the measured cadence law of a trained policy (doc 17 cadence sweep):
-  self-chosen ``raw`` tracks commanded speed, so a fixed target taxes slow
-  walking.
+  ``step_dt / period``. Cost is ``(raw_action - target)^2`` where ``target`` is
+  a cadence goal (in nominal-rate units, 1.0 = the action's ``period``) and
+  ``v_eff = |v_lin_cmd| + ang_speed_gain * |w_cmd|``.
+
+  Two ``target_mode`` s:
+
+  - ``"linear"`` (default): ``clamp(target_intercept + target_slope*v_eff,
+    target_min, target_max)``. Defaults reduce to the legacy fixed target of
+    1.0 (nominal cadence).
+  - ``"froude"``: a physically-derived target from dynamic similarity
+    (Alexander). Relative stride length ``s/L = stride_coef * Fr^stride_exp``
+    with ``Fr = v_eff^2 / (g*L)``, so the full-cycle period is ``s/v_eff`` and
+    ``target = period_action / period``. The only constants are the measured
+    ``leg_length`` (with known ``gravity``) and Alexander's cross-species
+    coefficients ``stride_coef=2.3``, ``stride_exp=0.3`` — none fit to a
+    specific policy, unlike a regression on measured cadence.
 
   When ``taper_start``/``taper_end`` are set, the cost fades linearly to zero
   between those command speeds — used to release the tether above the walk-run
-  Froude boundary (Fr=0.5, v*=sqrt(0.5*g*L)) where a pendulum-derived cadence
-  target has no physical basis. Gated off when standing. No global
-  episode-time reference is used.
+  Froude boundary (Fr=0.5, v*=sqrt(0.5*g*L)) where the walk dynamic-similarity
+  law does not hold (running is a spring-mass, not pendulum, regime). Gated off
+  when standing. No global episode-time reference is used.
   """
   from mjlab.envs.mdp.actions.phase_delta import get_phase_delta_action
 
-  raw = get_phase_delta_action(env, action_term_name).raw_action.squeeze(-1)
+  action_term = get_phase_delta_action(env, action_term_name)
+  raw = action_term.raw_action.squeeze(-1)
   command = (
     env.command_manager.get_command(command_name) if command_name is not None else None
   )
@@ -533,7 +548,21 @@ def phase_delta_nominal_cost(
   linear_norm = torch.norm(command[:, :2], dim=1)
   angular_norm = torch.abs(command[:, 2])
   v_eff = linear_norm + ang_speed_gain * angular_norm
-  target = torch.clamp(target_intercept + target_slope * v_eff, target_min, target_max)
+  if target_mode == "froude":
+    # Dynamic similarity (Alexander): s/L = stride_coef * Fr^stride_exp, so
+    # full-cycle period = stride_coef*sqrt(L/g)*(v/sqrt(gL))^(2*exp-1) = s/v.
+    # Convert to nominal-rate units via the action's own gait period. Floor
+    # v_eff so the v->0 singularity (period->inf) resolves to target_min.
+    v_floor = torch.clamp(v_eff, min=1e-2)
+    froude = v_floor.square() / (gravity * leg_length)
+    period_phys = stride_coef * leg_length * froude.pow(stride_exp) / v_floor
+    target = torch.clamp(
+      float(action_term.cfg.period) / period_phys, target_min, target_max
+    )
+  else:
+    target = torch.clamp(
+      target_intercept + target_slope * v_eff, target_min, target_max
+    )
   deviation = torch.abs(raw - target)
   cost = torch.square(raw - target)
 

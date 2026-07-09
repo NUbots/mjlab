@@ -131,6 +131,10 @@ spec:
                   value: "${JOINT_ACC_W}"
                 - name: PHASE_DELTA_W
                   value: "${PHASE_DELTA_W}"
+                - name: PHASE_TARGET_MODE
+                  value: "${PHASE_TARGET_MODE}"
+                - name: PHASE_LEG_LENGTH
+                  value: "${PHASE_LEG_LENGTH}"
                 - name: PHASE_TARGET_INTERCEPT
                   value: "${PHASE_TARGET_INTERCEPT}"
                 - name: PHASE_TARGET_SLOPE

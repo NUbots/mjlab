@@ -505,10 +505,47 @@ Findings:
   produce a flight phase at all — so above the Froude boundary the right
   move is *no* target (release + measure later), not a guessed constant.
 
-v50 response: speed-dependent target `raw_target = clamp(0.22 + 0.84·v,
-0.35, 1.3)`, tether tapered to zero across 1.35→1.56 m/s, phase-delta
-action bounded [0, 2.5] as insurance in the untethered band. Seed 1,
-otherwise the v48 stack: a pure ablation of the cadence target.
+**Physical target, not a fit.** The obvious move — regress the sweep
+(`raw ≈ 0.22 + 0.84·v`) and use that as the target — is circular: it
+just tells the policy to keep doing what it already does, so the tether
+teaches nothing. Instead use the *physical* law and let the network
+override where it disagrees (it demonstrably will — it already deviates
+by up to 0.5 in raw). Dynamic similarity (Alexander & Jayes 1983;
+Alexander 1989): relative stride length `s/L = 2.3·Fr^0.3`, `Fr =
+v²/(gL)`, so full-cycle period `= s/v = 2.3·√(L/g)·(v/√(gL))^(−0.4)` and
+`raw_target = GAIT_PERIOD/period`. The only constants are `√(L/g)` (pure
+physics from the measured 0.495 m hip height and known g) and Alexander's
+cross-species coefficients 2.3 / 0.3 — none fit to our policy.
+
+Physical vs measured cadence (raw):
+
+| v | Froude period | net period | Froude raw | net raw |
+|---|---|---|---|---|
+| 0.2 | 1.35 s | 1.88 s | 0.52 | 0.37 |
+| 0.4 | 1.02 s | 1.13 s | 0.69 | 0.62 |
+| 0.6 | 0.87 s | 1.08 s | 0.81 | 0.65 |
+| 0.8 | 0.78 s | 0.80 s | 0.90 | 0.88 |
+| 1.0 | 0.71 s | 0.60 s | 0.99 | 1.17 |
+| 1.2 | 0.66 s | 0.60 s | 1.06 | 1.16 |
+| 1.4 | 0.62 s | 0.74 s | 1.13 | 0.94 |
+
+The physical curve threads the middle of the network's behavior (dead-on
+at 0.8 m/s) and crosses it near 0.9 m/s: the network walks *more
+cautiously* than biomechanical-optimal at low speed (a stiff servo robot
+without compliant tendons cannot cheaply coast a slow pendular gait) and
+*more aggressively* at mid speed. Two independent physical checks land
+where expected: the compound-pendulum leg resonance (uniform-rod model)
+is a 1.15 s full cycle, squarely in the walking band, and the walk-run
+boundary Fr=0.5 gives v* = 1.558 m/s — matching the taper endpoint
+chosen independently.
+
+v50 response: `target_mode="froude"` with L=0.495, tether tapered to zero
+across 1.35→1.56 m/s (above which the walk law is invalid — running is
+spring-mass, and we cannot assume these servos can even produce the
+required flight phase), phase-delta action bounded [0, 2.5] as insurance
+in the untethered band. Seed 1, otherwise the v48 stack: a pure ablation
+of the cadence target. A linear ``target_mode`` (intercept+slope) remains
+available for a fitted target if ever wanted.
 
 ## Corrections to earlier docs
 

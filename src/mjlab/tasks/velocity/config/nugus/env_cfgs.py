@@ -1309,20 +1309,23 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     if phase_delta_w > 0:
       phase_delta_w = -phase_delta_w
     cfg.rewards["phase_delta_nominal"].weight = phase_delta_w
-    # Speed-dependent cadence target (doc 17 cadence sweep, 2026-07-09):
-    # the v48 champion's self-chosen raw tracks commanded speed as
-    # raw ~ 0.22 + 0.84*v (period 1.9s at 0.2 m/s down to 0.6s at
-    # 1.2 m/s), so the legacy fixed target of 1.0 taxes slow walking.
-    # Defaults keep the legacy fixed-1.0 tether; the taper (off by
-    # default) releases the tether entirely across the walk-run Froude
-    # boundary (v* = sqrt(0.5*g*L) = 1.56 m/s for NUgus) where a
-    # walking-cadence target has no physical basis.
+    # Speed-dependent cadence target (doc 15 R35, cadence sweep 2026-07-09):
+    # the legacy fixed target of 1.0 taxes slow walking (the v48 champion
+    # pays |raw-1| ~ 0.7 every step at 0.2 m/s to walk slower). Two modes:
+    # "linear" (intercept + slope*v_eff) and "froude" (physical dynamic-
+    # similarity target from measured leg length + Alexander's cross-
+    # species stride law -- no per-policy fit constants). Defaults keep the
+    # legacy fixed-1.0 tether; the taper (off by default) releases it
+    # entirely across the walk-run Froude boundary (v* = sqrt(0.5*g*L) =
+    # 1.56 m/s for NUgus), where the walk law does not hold.
     cfg.rewards["phase_delta_nominal"].params.update(
       {
+        "target_mode": _env_str("PHASE_TARGET_MODE", "linear"),
         "target_intercept": _env_float("PHASE_TARGET_INTERCEPT", 1.0),
         "target_slope": _env_float("PHASE_TARGET_SLOPE", 0.0),
         "target_min": _env_float("PHASE_TARGET_MIN", 0.35),
         "target_max": _env_float("PHASE_TARGET_MAX", 1.3),
+        "leg_length": _env_float("PHASE_LEG_LENGTH", 0.495),
       }
     )
     tether_taper_start = _env_float("PHASE_TETHER_TAPER_START", 0.0)

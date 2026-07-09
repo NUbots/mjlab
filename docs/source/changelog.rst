@@ -8,19 +8,24 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
-- ``phase_delta_nominal_cost`` supports a speed-dependent cadence target:
-  ``target = clamp(intercept + slope * v_eff, min, max)`` where ``v_eff``
-  folds linear and (gain-scaled) angular command speed. A fixed-command
-  cadence sweep of the trained v48 policy measured its self-chosen phase
-  rate as ``raw ≈ 0.22 + 0.84·v`` (1.9 s period at 0.2 m/s down to 0.6 s
-  at 1.2 m/s), so the legacy fixed ``raw = 1.0`` tether taxed slow walking.
-  An optional taper fades the tether to zero across a command-speed band
-  (used at the walk→run Froude boundary, where a walking-cadence target
-  has no physical basis), and ``PhaseDeltaAction`` gained optional
-  ``raw_min``/``raw_max`` clamps on the phase-delta action as insurance
-  for the untethered band. Defaults preserve the legacy fixed-1.0
-  behavior; ``clock_owned`` exposes ``PHASE_TARGET_*``,
-  ``PHASE_TETHER_TAPER_*``, and ``PHASE_RAW_*`` environment knobs.
+- ``phase_delta_nominal_cost`` supports a speed-dependent cadence target,
+  in two modes selected by ``target_mode``. ``"linear"`` uses
+  ``clamp(intercept + slope * v_eff, min, max)``; ``"froude"`` derives the
+  target from dynamic similarity (Alexander) — relative stride length
+  ``s/L = 2.3 * Fr^0.3`` with ``Fr = v_eff^2 / (g L)`` gives a physical
+  cadence from the measured leg length and known gravity, with no
+  per-policy fit constants. A fixed-command cadence sweep of the trained
+  v48 policy showed its self-chosen phase rate tracks commanded speed
+  (1.9 s period at 0.2 m/s down to 0.6 s at 1.2 m/s, matching the Froude
+  law to within a step), so the legacy fixed ``raw = 1.0`` tether taxed
+  slow walking. An optional taper fades the tether to zero across a
+  command-speed band (used at the walk→run Froude boundary, where the walk
+  law does not hold), and ``PhaseDeltaAction`` gained optional
+  ``raw_min``/``raw_max`` clamps on the phase-delta action as insurance for
+  the untethered band. Defaults preserve the legacy fixed-1.0 behavior;
+  ``clock_owned`` exposes ``PHASE_TARGET_MODE``, ``PHASE_LEG_LENGTH``,
+  ``PHASE_TARGET_*``, ``PHASE_TETHER_TAPER_*``, and ``PHASE_RAW_*``
+  environment knobs.
 
 Fixed
 ^^^^^
