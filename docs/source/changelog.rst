@@ -30,6 +30,15 @@ Added
 Fixed
 ^^^^^
 
+- The NUgus left shoulder-pitch pivot was mirrored with the wrong sign
+  (local ``y`` flipped where the model's convention flips ``z``), placing
+  the pitch axis 21 mm fore of its true position and swinging the whole
+  left arm ~2.4 cm back and ~2.1 cm down relative to the mirrored right
+  arm in the standing pose. The correct pivot was confirmed by fitting the
+  servo-horn boss circle in both shoulder bracket meshes (center
+  ``y = -0.0100`` in both local frames, matching the right side's
+  ``-0.0106``). All left/right body pairs now mirror to sub-millimetre.
+
 - ``VideoRecorder`` falls back to the static ffmpeg bundled with
   ``imageio-ffmpeg`` when no ``ffmpeg`` binary is on PATH (headless
   training images commonly ship without one), instead of crashing on the
