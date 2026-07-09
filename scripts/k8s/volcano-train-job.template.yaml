@@ -91,6 +91,10 @@ spec:
                   value: "${VIDEO_INTERVAL}"
                 - name: VIDEO_ENV_IDS
                   value: "${VIDEO_ENV_IDS}"
+                - name: VIDEO_HEIGHT
+                  value: "${VIDEO_HEIGHT}"
+                - name: VIDEO_WIDTH
+                  value: "${VIDEO_WIDTH}"
                 - name: PHASE_DELTA_STRONG_ITERS
                   value: "${PHASE_DELTA_STRONG_ITERS}"
                 - name: PHASE_DELTA_STRONG_W

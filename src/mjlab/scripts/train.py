@@ -34,6 +34,8 @@ class TrainConfig:
   """Comma-separated world indices to cycle the rendered robot through,
   one per capture (negative counts from the end, e.g. "0,-1"). Empty
   keeps the viewer-config env."""
+  video_height: int | None = None
+  video_width: int | None = None
   enable_nan_guard: bool = False
   torchrunx_log_dir: str | None = None
   wandb_run_path: str | None = None
@@ -108,6 +110,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
 
   if rank == 0:
     print(f"[INFO] Logging experiment in directory: {log_dir}")
+
+  if cfg.video_height is not None:
+    cfg.env.viewer.height = cfg.video_height
+  if cfg.video_width is not None:
+    cfg.env.viewer.width = cfg.video_width
 
   env = ManagerBasedRlEnv(
     cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None

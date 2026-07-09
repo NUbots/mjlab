@@ -160,6 +160,10 @@ if [[ "${VIDEO:-0}" == "1" ]]; then
     # Alternate captures between a push-cohort robot (env 0; cohort = the
     # first indices) and a clean-cohort one (env -1 = last).
     --video-env-ids "${VIDEO_ENV_IDS:-0,-1}"
+    # Viewer default is 320x240; render at 720p (all cost is on the async
+    # worker thread, not the training loop).
+    --video-height "${VIDEO_HEIGHT:-720}"
+    --video-width "${VIDEO_WIDTH:-1280}"
   )
 fi
 
