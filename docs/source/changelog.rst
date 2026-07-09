@@ -5,6 +5,23 @@ Changelog
 Upcoming version (not yet released)
 -----------------------------------
 
+Added
+^^^^^
+
+- ``phase_delta_nominal_cost`` supports a speed-dependent cadence target:
+  ``target = clamp(intercept + slope * v_eff, min, max)`` where ``v_eff``
+  folds linear and (gain-scaled) angular command speed. A fixed-command
+  cadence sweep of the trained v48 policy measured its self-chosen phase
+  rate as ``raw ≈ 0.22 + 0.84·v`` (1.9 s period at 0.2 m/s down to 0.6 s
+  at 1.2 m/s), so the legacy fixed ``raw = 1.0`` tether taxed slow walking.
+  An optional taper fades the tether to zero across a command-speed band
+  (used at the walk→run Froude boundary, where a walking-cadence target
+  has no physical basis), and ``PhaseDeltaAction`` gained optional
+  ``raw_min``/``raw_max`` clamps on the phase-delta action as insurance
+  for the untethered band. Defaults preserve the legacy fixed-1.0
+  behavior; ``clock_owned`` exposes ``PHASE_TARGET_*``,
+  ``PHASE_TETHER_TAPER_*``, and ``PHASE_RAW_*`` environment knobs.
+
 Fixed
 ^^^^^
 

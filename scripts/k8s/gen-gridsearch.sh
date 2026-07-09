@@ -246,6 +246,16 @@ ENTROPY_END="${ENTROPY_END:-}"
 export STD_MIN
 STD_MIN="${STD_MIN:-}"
 export FEET_MIN_SEP FEET_MIN_SEP_SHARPNESS FEET_MIN_SEP_W PHASE_DELTA_W
+export PHASE_TARGET_INTERCEPT PHASE_TARGET_SLOPE PHASE_TARGET_MIN PHASE_TARGET_MAX
+export PHASE_TETHER_TAPER_START PHASE_TETHER_TAPER_END PHASE_RAW_MIN PHASE_RAW_MAX
+PHASE_TARGET_INTERCEPT="${PHASE_TARGET_INTERCEPT:-}"
+PHASE_TARGET_SLOPE="${PHASE_TARGET_SLOPE:-}"
+PHASE_TARGET_MIN="${PHASE_TARGET_MIN:-}"
+PHASE_TARGET_MAX="${PHASE_TARGET_MAX:-}"
+PHASE_TETHER_TAPER_START="${PHASE_TETHER_TAPER_START:-}"
+PHASE_TETHER_TAPER_END="${PHASE_TETHER_TAPER_END:-}"
+PHASE_RAW_MIN="${PHASE_RAW_MIN:-}"
+PHASE_RAW_MAX="${PHASE_RAW_MAX:-}"
 export JOB_REPLICAS MULTINODE MJLAB_LOG_STAMP
 JOB_REPLICAS="${JOB_REPLICAS:-1}"
 export NUM_ENVS
@@ -1685,6 +1695,34 @@ gen_v49() {
 }
 
 
+# BATCH=v50: speed-dependent cadence target (doc 17 cadence sweep,
+# 2026-07-09). The v48 champion's measured cadence law is raw ~ 0.22 +
+# 0.84*v (1.9s period at 0.2 m/s down to 0.6s at 1.2 m/s); the fixed
+# raw=1.0 tether taxes slow walking with |raw-1| ~ 0.7 every step. The
+# tether now tracks the measured line, fades to zero across the
+# walk-run Froude boundary (1.35 -> 1.56 m/s = Fr 0.5 for L=0.495) so
+# running-band cadence is free exploration, and the raw delta is
+# bounded [0, 2.5] as insurance where the tether is released. Seed 1:
+# apples-to-apples ablation against v48 (only the cadence target
+# changes).
+gen_v50() {
+  gen_v48
+  export SEED="1"
+  export PHASE_TARGET_INTERCEPT="0.22"
+  export PHASE_TARGET_SLOPE="0.84"
+  export PHASE_TARGET_MIN="0.35"
+  export PHASE_TARGET_MAX="1.3"
+  export PHASE_TETHER_TAPER_START="1.35"
+  export PHASE_TETHER_TAPER_END="1.56"
+  export PHASE_RAW_MIN="0.0"
+  export PHASE_RAW_MAX="2.5"
+  export MJLAB_LOG_STAMP="v50-cadence-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v50-cadence-target__8gpu-6144__s1__${BATCH}"
+  export WANDB_TAGS="clock_owned,v50,bus-voltage,cadence-target,froude,batch-v50,gridsearch"
+  emit_manifest "mj-gs-v50-cadence"
+}
+
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -2799,6 +2837,7 @@ case "$BATCH" in
   v47) gen_v47; expected=5 ;;
   v48) gen_v48; expected=6 ;;
   v49) gen_v49; expected=7 ;;
+  v50) gen_v50; expected=7 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

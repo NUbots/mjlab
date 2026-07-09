@@ -490,44 +490,70 @@ def phase_delta_nominal_cost(
   action_term_name: str = "phase_delta",
   command_name: str | None = "twist",
   command_threshold: float = 0.05,
+  target_intercept: float = 1.0,
+  target_slope: float = 0.0,
+  target_min: float = 0.35,
+  target_max: float = 1.3,
+  ang_speed_gain: float = 0.25,
+  taper_start: float | None = None,
+  taper_end: float | None = None,
 ) -> torch.Tensor:
-  """Penalize deviation of the phase step from the nominal cadence.
+  """Penalize deviation of the phase step from a cadence target.
 
   :class:`mjlab.envs.mdp.actions.PhaseDeltaAction` scales each policy action by
-  ``step_dt / period``. Cost is ``(raw_action - 1.0)^2``, zero when the policy
-  steps at the nominal rate and growing as the step size drifts. Gated off when
-  standing. No global episode-time reference is used.
+  ``step_dt / period``. Cost is ``(raw_action - target)^2`` where the target is
+  ``clamp(target_intercept + target_slope * v_eff, target_min, target_max)``
+  and ``v_eff = |v_lin_cmd| + ang_speed_gain * |w_cmd|``. Defaults reduce to
+  the legacy fixed target of 1.0 (nominal cadence). The speed-dependent form
+  follows the measured cadence law of a trained policy (doc 17 cadence sweep):
+  self-chosen ``raw`` tracks commanded speed, so a fixed target taxes slow
+  walking.
+
+  When ``taper_start``/``taper_end`` are set, the cost fades linearly to zero
+  between those command speeds — used to release the tether above the walk-run
+  Froude boundary (Fr=0.5, v*=sqrt(0.5*g*L)) where a pendulum-derived cadence
+  target has no physical basis. Gated off when standing. No global
+  episode-time reference is used.
   """
   from mjlab.envs.mdp.actions.phase_delta import get_phase_delta_action
 
   raw = get_phase_delta_action(env, action_term_name).raw_action.squeeze(-1)
-  deviation = torch.abs(raw - 1.0)
-  cost = torch.square(raw - 1.0)
+  command = (
+    env.command_manager.get_command(command_name) if command_name is not None else None
+  )
 
-  if command_name is not None:
-    command = env.command_manager.get_command(command_name)
-    if command is not None:
-      linear_norm = torch.norm(command[:, :2], dim=1)
-      angular_norm = torch.abs(command[:, 2])
-      total_command = linear_norm + angular_norm
-      active = (total_command > command_threshold).float()
-      cost = cost * active
-      if active.any():
-        walking = active > 0
-        env.extras["log"]["Metrics/phase_delta_nominal_error_mean"] = cost[
-          walking
-        ].mean()
-        # p95 of |rate deviation|: distinguishes "escape hatch used rarely
-        # but really" (mean ~0, p95 high — e.g. push recovery) from "never
-        # deviates at all" (both ~0). The F3 collapse verdict rested on the
-        # MEAN alone, which cannot see tail usage.
-        env.extras["log"]["Metrics/phase_delta_dev_p95"] = torch.quantile(
-          deviation[walking], 0.95
-        )
-      return cost
+  if command is None:
+    target_const = min(max(target_intercept, target_min), target_max)
+    deviation = torch.abs(raw - target_const)
+    cost = torch.square(raw - target_const)
+    env.extras["log"]["Metrics/phase_delta_nominal_error_mean"] = cost.mean()
+    env.extras["log"]["Metrics/phase_delta_dev_p95"] = torch.quantile(deviation, 0.95)
+    return cost
 
-  env.extras["log"]["Metrics/phase_delta_nominal_error_mean"] = cost.mean()
-  env.extras["log"]["Metrics/phase_delta_dev_p95"] = torch.quantile(deviation, 0.95)
+  linear_norm = torch.norm(command[:, :2], dim=1)
+  angular_norm = torch.abs(command[:, 2])
+  v_eff = linear_norm + ang_speed_gain * angular_norm
+  target = torch.clamp(target_intercept + target_slope * v_eff, target_min, target_max)
+  deviation = torch.abs(raw - target)
+  cost = torch.square(raw - target)
+
+  total_command = linear_norm + angular_norm
+  active = (total_command > command_threshold).float()
+  cost = cost * active
+  if taper_start is not None and taper_end is not None and taper_end > taper_start:
+    taper = torch.clamp((taper_end - v_eff) / (taper_end - taper_start), 0.0, 1.0)
+    cost = cost * taper
+  if active.any():
+    walking = active > 0
+    env.extras["log"]["Metrics/phase_delta_nominal_error_mean"] = cost[walking].mean()
+    env.extras["log"]["Metrics/phase_delta_target_mean"] = target[walking].mean()
+    # p95 of |rate deviation|: distinguishes "escape hatch used rarely
+    # but really" (mean ~0, p95 high — e.g. push recovery) from "never
+    # deviates at all" (both ~0). The F3 collapse verdict rested on the
+    # MEAN alone, which cannot see tail usage.
+    env.extras["log"]["Metrics/phase_delta_dev_p95"] = torch.quantile(
+      deviation[walking], 0.95
+    )
   return cost
 
 

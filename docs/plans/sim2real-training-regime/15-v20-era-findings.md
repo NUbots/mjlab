@@ -471,6 +471,45 @@ Lessons banked:
 Relaunched clean: ratio steady at 0.812 (designed sag), tracking 2.37
 by iter 1750.
 
+## R35 (2026-07-09): the cadence tether is mispriced — measured cadence law
+
+A fixed-command cadence sweep of the v48 champion (model_9999; 24
+envs/speed, 120-step settle, 180-step measure, CPU eval on the exact
+training config) measured the policy's self-chosen phase rate against
+the fixed 0.7 s tether (raw target 1.0, tail weight −0.2):
+
+| cmd v (m/s) | raw | eff. period | \|raw−1\| | Froude |
+|---|---|---|---|---|
+| 0.2 | 0.372 | 1.880 s | 0.69 | 0.008 |
+| 0.4 | 0.618 | 1.132 s | 0.46 | 0.033 |
+| 0.6 | 0.649 | 1.078 s | 0.46 | 0.074 |
+| 0.8 | 0.880 | 0.796 s | 0.36 | 0.132 |
+| 1.0 | 1.170 | 0.598 s | 0.32 | 0.206 |
+| 1.2 | 1.164 | 0.601 s | 0.28 | 0.297 |
+| 1.4 | 0.942 | 0.743 s | 0.31 | 0.404 |
+
+Findings:
+
+- **The policy has a monotonic speed→cadence law** (least-squares
+  `raw ≈ 0.22 + 0.84·v` through 1.2 m/s) and pays the tether penalty
+  every step to express it. Heaviest tax at low speed: at 0.2 m/s it
+  wants 1.9 s deliberate steps, |raw−1| ≈ 0.7.
+- **In the 0.8–1.2 m/s band its chosen 0.6–0.8 s brackets the
+  dynamic-similarity prior** (0.82 s full cycle for L = 0.495 m): the
+  clock is holding back the *physically correct* cadence at off-nominal
+  speeds, not restraining a degenerate one.
+- The 1.4 m/s row is edge-of-envelope (frontier 1.37, Fr 0.40 near the
+  walk→run boundary at Fr 0.5 ⇒ v* = 1.56 m/s) — least trustworthy.
+- Running is a spring-mass (SLIP) regime, not pendulum: cadence there is
+  a near-constant resonance, and we cannot verify these servos can
+  produce a flight phase at all — so above the Froude boundary the right
+  move is *no* target (release + measure later), not a guessed constant.
+
+v50 response: speed-dependent target `raw_target = clamp(0.22 + 0.84·v,
+0.35, 1.3)`, tether tapered to zero across 1.35→1.56 m/s, phase-delta
+action bounded [0, 2.5] as insurance in the untethered band. Seed 1,
+otherwise the v48 stack: a pure ablation of the cadence target.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not

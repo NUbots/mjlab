@@ -997,11 +997,18 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   joint_pos_action.scale = NUGUS_ACTION_SCALE  # ~0.245 rad (0.25 * e/s * 5).
 
   if variant in ("clock_learned", "clock_owned"):
+    # Optional bounds on the raw phase-delta action. Insurance for runs
+    # that taper the cadence tether off at high speed: keeps the clock
+    # monotonic (no backwards phase) and bounds spin rate.
+    raw_min_s = os.environ.get("PHASE_RAW_MIN")
+    raw_max_s = os.environ.get("PHASE_RAW_MAX")
     cfg.actions["phase_delta"] = PhaseDeltaActionCfg(
       entity_name="robot",
       period=gait_period,
       command_name="twist",
       command_threshold=0.05,
+      raw_min=float(raw_min_s) if raw_min_s else None,
+      raw_max=float(raw_max_s) if raw_max_s else None,
     )
 
   cfg.viewer.body_name = "torso"
@@ -1302,6 +1309,28 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     if phase_delta_w > 0:
       phase_delta_w = -phase_delta_w
     cfg.rewards["phase_delta_nominal"].weight = phase_delta_w
+    # Speed-dependent cadence target (doc 17 cadence sweep, 2026-07-09):
+    # the v48 champion's self-chosen raw tracks commanded speed as
+    # raw ~ 0.22 + 0.84*v (period 1.9s at 0.2 m/s down to 0.6s at
+    # 1.2 m/s), so the legacy fixed target of 1.0 taxes slow walking.
+    # Defaults keep the legacy fixed-1.0 tether; the taper (off by
+    # default) releases the tether entirely across the walk-run Froude
+    # boundary (v* = sqrt(0.5*g*L) = 1.56 m/s for NUgus) where a
+    # walking-cadence target has no physical basis.
+    cfg.rewards["phase_delta_nominal"].params.update(
+      {
+        "target_intercept": _env_float("PHASE_TARGET_INTERCEPT", 1.0),
+        "target_slope": _env_float("PHASE_TARGET_SLOPE", 0.0),
+        "target_min": _env_float("PHASE_TARGET_MIN", 0.35),
+        "target_max": _env_float("PHASE_TARGET_MAX", 1.3),
+      }
+    )
+    tether_taper_start = _env_float("PHASE_TETHER_TAPER_START", 0.0)
+    tether_taper_end = _env_float("PHASE_TETHER_TAPER_END", 0.0)
+    if tether_taper_end > tether_taper_start > 0.0:
+      cfg.rewards["phase_delta_nominal"].params.update(
+        {"taper_start": tether_taper_start, "taper_end": tether_taper_end}
+      )
 
   # Shared-bus voltage model (doc 17 power-network section): per-servo
   # supply sags with fleet current (battery + harness) and chain

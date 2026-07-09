@@ -118,6 +118,108 @@ def test_phase_delta_nominal_cost_at_and_off_nominal():
   assert "Metrics/phase_delta_nominal_error_mean" in env.extras["log"]
 
 
+def test_phase_delta_nominal_cost_speed_dependent_target():
+  # Measured cadence law (doc 17 sweep): raw_target = 0.22 + 0.84 * v.
+  # Env 0 walks at 0.5 m/s (target 0.64), env 1 at 1.0 m/s (target 1.06).
+  env = _make_phase_env(
+    num_envs=2,
+    command=torch.tensor([[0.5, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+  )
+  action = _make_phase_action(env, period=0.7)
+  action.process_actions(torch.tensor([[0.64], [1.06]]))
+  cost = phase_delta_nominal_cost(env, target_intercept=0.22, target_slope=0.84)
+  # Each env sits exactly on its own speed's target: zero cost for both.
+  assert math.isclose(cost[0].item(), 0.0, abs_tol=1e-6)
+  assert math.isclose(cost[1].item(), 0.0, abs_tol=1e-6)
+  # Off-target by 0.5 at 0.5 m/s costs 0.25.
+  action.process_actions(torch.tensor([[1.14], [1.06]]))
+  cost = phase_delta_nominal_cost(env, target_intercept=0.22, target_slope=0.84)
+  assert math.isclose(cost[0].item(), 0.25, abs_tol=1e-6)
+  target_mean = env.extras["log"]["Metrics/phase_delta_target_mean"]
+  assert math.isclose(target_mean.item(), (0.64 + 1.06) / 2, abs_tol=1e-6)
+
+
+def test_phase_delta_nominal_cost_target_clamped():
+  # Very slow command: unclamped target 0.22 + 0.84*0.1 = 0.304 < min 0.35.
+  env = _make_phase_env(num_envs=1, command=torch.tensor([[0.1, 0.0, 0.0]]))
+  action = _make_phase_action(env, period=0.7)
+  action.process_actions(torch.tensor([[0.35]]))
+  cost = phase_delta_nominal_cost(
+    env, target_intercept=0.22, target_slope=0.84, target_min=0.35
+  )
+  assert math.isclose(cost[0].item(), 0.0, abs_tol=1e-6)
+
+
+def test_phase_delta_nominal_cost_taper_releases_tether():
+  # Walk-run taper 1.35 -> 1.56 m/s: full cost below, zero above, linear
+  # fade between.
+  env = _make_phase_env(
+    num_envs=3,
+    command=torch.tensor([[1.0, 0.0, 0.0], [1.455, 0.0, 0.0], [1.7, 0.0, 0.0]]),
+  )
+  action = _make_phase_action(env, period=0.7)
+  action.process_actions(torch.tensor([[2.0], [2.0], [2.0]]))
+  cost = phase_delta_nominal_cost(env, taper_start=1.35, taper_end=1.56)
+  assert math.isclose(cost[0].item(), 1.0, abs_tol=1e-6)  # full tether
+  assert math.isclose(cost[1].item(), 0.5, abs_tol=1e-3)  # midpoint
+  assert math.isclose(cost[2].item(), 0.0, abs_tol=1e-6)  # released
+
+
+def test_phase_delta_raw_bounds_clamp():
+  env = _make_phase_env(num_envs=2)
+  cfg = PhaseDeltaActionCfg(
+    entity_name="robot",
+    period=0.7,
+    command_name="twist",
+    command_threshold=0.05,
+    raw_min=0.0,
+    raw_max=2.5,
+  )
+  action = PhaseDeltaAction(cfg, env)
+  action.process_actions(torch.tensor([[-1.0], [5.0]]))
+  assert math.isclose(action.raw_action[0].item(), 0.0, abs_tol=1e-6)
+  assert math.isclose(action.raw_action[1].item(), 2.5, abs_tol=1e-6)
+
+
+def test_clock_owned_cadence_target_env_knobs(monkeypatch):
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_owned")
+  monkeypatch.setenv("PHASE_TARGET_INTERCEPT", "0.22")
+  monkeypatch.setenv("PHASE_TARGET_SLOPE", "0.84")
+  monkeypatch.setenv("PHASE_TETHER_TAPER_START", "1.35")
+  monkeypatch.setenv("PHASE_TETHER_TAPER_END", "1.56")
+  monkeypatch.setenv("PHASE_RAW_MIN", "0.0")
+  monkeypatch.setenv("PHASE_RAW_MAX", "2.5")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  params = cfg.rewards["phase_delta_nominal"].params
+  assert params["target_intercept"] == 0.22
+  assert params["target_slope"] == 0.84
+  assert params["taper_start"] == 1.35
+  assert params["taper_end"] == 1.56
+  phase_action = cfg.actions["phase_delta"]
+  assert isinstance(phase_action, PhaseDeltaActionCfg)
+  assert phase_action.raw_min == 0.0
+  assert phase_action.raw_max == 2.5
+
+
+def test_clock_owned_cadence_target_defaults_legacy(monkeypatch):
+  monkeypatch.setenv("MJLAB_VARIANT", "clock_owned")
+
+  from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_rough_env_cfg
+
+  cfg = nubots_nugus_rough_env_cfg()
+  params = cfg.rewards["phase_delta_nominal"].params
+  assert params["target_intercept"] == 1.0
+  assert params["target_slope"] == 0.0
+  assert "taper_start" not in params
+  phase_action = cfg.actions["phase_delta"]
+  assert isinstance(phase_action, PhaseDeltaActionCfg)
+  assert phase_action.raw_min is None
+  assert phase_action.raw_max is None
+
+
 def test_gait_clock_uses_policy_phase():
   env = _make_phase_env(num_envs=1)
   action = _make_phase_action(env, period=0.8)

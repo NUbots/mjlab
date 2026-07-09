@@ -61,6 +61,12 @@ class PhaseDeltaActionCfg(ActionTermCfg):
   scale: float | None = None
   """Override delta scale; defaults to ``step_dt / period`` each step."""
 
+  raw_min: float | None = None
+  """Lower clamp on the raw phase-delta action (None = unbounded)."""
+
+  raw_max: float | None = None
+  """Upper clamp on the raw phase-delta action (None = unbounded)."""
+
   def build(self, env: ManagerBasedRlEnv) -> PhaseDeltaAction:
     return PhaseDeltaAction(self, env)
 
@@ -106,6 +112,8 @@ class PhaseDeltaAction(ActionTerm):
     return self._env.step_dt / self.cfg.period
 
   def process_actions(self, actions: torch.Tensor) -> None:
+    if self.cfg.raw_min is not None or self.cfg.raw_max is not None:
+      actions = torch.clamp(actions, min=self.cfg.raw_min, max=self.cfg.raw_max)
     self._raw_actions[:] = actions
     raw = actions.squeeze(-1)
     scale = self._delta_scale()

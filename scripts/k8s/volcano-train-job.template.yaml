@@ -131,6 +131,22 @@ spec:
                   value: "${JOINT_ACC_W}"
                 - name: PHASE_DELTA_W
                   value: "${PHASE_DELTA_W}"
+                - name: PHASE_TARGET_INTERCEPT
+                  value: "${PHASE_TARGET_INTERCEPT}"
+                - name: PHASE_TARGET_SLOPE
+                  value: "${PHASE_TARGET_SLOPE}"
+                - name: PHASE_TARGET_MIN
+                  value: "${PHASE_TARGET_MIN}"
+                - name: PHASE_TARGET_MAX
+                  value: "${PHASE_TARGET_MAX}"
+                - name: PHASE_TETHER_TAPER_START
+                  value: "${PHASE_TETHER_TAPER_START}"
+                - name: PHASE_TETHER_TAPER_END
+                  value: "${PHASE_TETHER_TAPER_END}"
+                - name: PHASE_RAW_MIN
+                  value: "${PHASE_RAW_MIN}"
+                - name: PHASE_RAW_MAX
+                  value: "${PHASE_RAW_MAX}"
                 - name: FEET_MIN_SEP
                   value: "${FEET_MIN_SEP}"
                 - name: FEET_MIN_SEP_W
