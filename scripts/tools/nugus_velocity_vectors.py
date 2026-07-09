@@ -51,9 +51,9 @@ _KNOWN_ENV_KEYS = (
 
 @dataclass
 class Args:
-  variant: Literal["clock_anneal", "self_paced", "clock_persist", "clock_learned", "clock_owned"] = (
-    "clock_anneal"
-  )
+  variant: Literal[
+    "clock_anneal", "self_paced", "clock_persist", "clock_learned", "clock_owned"
+  ] = "clock_anneal"
   """MJLAB_VARIANT -- selects the gait-handoff curriculum."""
 
   terrain: Literal["flat", "rough"] = "flat"
