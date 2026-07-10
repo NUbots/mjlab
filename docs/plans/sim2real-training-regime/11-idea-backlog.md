@@ -100,6 +100,25 @@ un-starred items overnight — they need design attention.
     Cost: low ((a),(b),(d) are knobs/small terms). When: next reward-
     shaping batch after v51 settles the clock-grounding question; (a) is
     also pre-hardware hygiene independent of flailing.
+11c. **Foot-attitude blind spots** (user observation on the v51-s1 gait,
+    2026-07-10: lateral "heel-toe" rolling outside-edge to inside-edge,
+    feet yawed ~45 degrees). Two reward gaps make this free:
+    (i) `foot_flat` penalizes only SWING feet (deliberately, to allow
+    terrain conformance in stance), so edge-rolling DURING stance is
+    unpenalized — and it composes badly with the v51 contact windows,
+    which demand the foot stay planted through its stance window
+    (edge-rolling keeps "contact" while the body walks over the foot);
+    (ii) nothing constrains foot YAW anywhere in the stack (`foot_flat`
+    projects gravity into the foot frame; yaw about vertical is
+    invisible to it). The 45-degree stance plausibly load-shares sagittal
+    work across pitch+roll servos at ankle and hip simultaneously
+    (halves per-servo velocity/torque; relevant under velocity limits
+    and the bus-voltage torque tax) — geometric motor load-balancing.
+    Candidate fixes: stance-gated roll-attitude cost (roll only, keep
+    pitch free for heel-toe), and a foot-heading cost tying foot yaw to
+    body heading (walking-gated). Cost: low-medium. When: after the
+    v51-s2 seed replicate says whether these gaits are systematic or
+    seed lottery; do not stack with the v52 duty-factor change.
 
 ## Domain randomization
 
