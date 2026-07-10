@@ -1755,6 +1755,23 @@ gen_v51() {
   emit_manifest "mj-gs-v51-grounded"
 }
 
+# BATCH=v51s2: seed replicate of v51 (user request, 2026-07-10). v51's
+# capability regression (-27% track, 10x fell vs v48) is far outside the
+# unconstrained seed band (v48 vs v49: 2% track, 7% fell), but a binding
+# gait constraint amplifies seed variance (more distinct local optima),
+# and the s1 gait was visibly weird (45-degree yawed feet, lateral
+# edge-rolling "heel-toe" -- both living in reward blind spots: foot_flat
+# skips stance feet and nothing constrains foot yaw). s2 separates "the
+# windows cost this much" from "s1 drew a bad gait".
+gen_v51s2() {
+  gen_v51
+  export SEED="2"
+  export MJLAB_LOG_STAMP="v51s2-grounded-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v51-grounded-froude__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v51,bus-voltage,cadence-target,froude,clock-grounding,seed-2,batch-v51s2,gridsearch"
+  emit_manifest "mj-gs-v51s2-grounded"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -2872,6 +2889,7 @@ case "$BATCH" in
   v49) gen_v49; expected=7 ;;
   v50) gen_v50; expected=7 ;;
   v51) gen_v51; expected=8 ;;
+  v51s2) gen_v51s2; expected=9 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
