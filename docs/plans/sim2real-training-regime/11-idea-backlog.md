@@ -133,6 +133,22 @@ un-starred items overnight — they need design attention.
     a FOOT_HEADING_W ablation pair and read off the exact frontier and
     recovery cost before deciding. The stance-gated roll-attitude cost
     (i) stands on its own for bracket-loading reasons regardless.
+    UPDATE 2 (user, 2026-07-10): duck walk appears EARLY and SLOW too
+    (v51-s2 by iter 1600, pre-saturation), so velocity-limit sharing is
+    not the sole driver. Three-mechanism model, speed-layered:
+    (1) toe-out as lateral ballast at slow speed (long single support;
+    the froude slow-cadence tether amplifies this) — real physics, the
+    same reason toddlers toe-out; (2) quadratic energy penalties pay
+    half price for torque split across two servos (tau^2 vs
+    2*(tau/sqrt(2))^2 = tau^2/2) — the 45-degree stance lets every hip
+    and ankle torque be split; operates from iter 0 at all speeds, and
+    is also true I2R physics; (3) feet_distance measures
+    center-to-center body-Y only, so yawing widens effective support
+    for free. Mechanisms 1-2 apply to the real robot identically,
+    strengthening "honest optimal gait". Discriminating ablations if
+    ever wanted: wider feet_distance nominal or stiffer ankle-roll
+    authority (kills 1); linear-|tau| or per-servo thermal energy term
+    (removes 2's discount without banning the geometry).
     When: after the v51-s2 seed replicate; do not stack with the v52
     duty-factor change.
 
