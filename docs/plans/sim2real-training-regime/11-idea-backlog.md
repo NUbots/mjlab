@@ -149,8 +149,37 @@ un-starred items overnight — they need design attention.
     ever wanted: wider feet_distance nominal or stiffer ankle-roll
     authority (kills 1); linear-|tau| or per-servo thermal energy term
     (removes 2's discount without banning the geometry).
+    UPDATE 3 (user, 2026-07-10): possible fourth mechanism — the
+    command sampler moved from a box to radius-direction (ellipsoid)
+    sampling with the competence curriculum, making axis-pure extremes
+    (fast pure-forward AND fast pure-lateral) common where box corners
+    made diagonals the extremes. 45 degrees is the minimax servo
+    orientation serving both axis-pure extremes with the same geometry.
+    Discriminators: duck angle vs command direction within a rollout
+    (per-command reorientation vs fixed compromise angle), and timeline
+    (did duck predate the rho sampler? then ellipsoid amplified, not
+    caused).
     When: after the v51-s2 seed replicate; do not stack with the v52
     duty-factor change.
+11d. ⭐ **Take the head away from the policy** (user observation,
+    2026-07-10: head flails at a frequency unrelated to gait cadence).
+    Mechanism: parked exploration noise, not behavior — PPO's entropy
+    bonus pays to keep per-dim action std high wherever reward is flat,
+    and every summed penalty (tau^2, action_rate, joint_acc) is
+    leg-dominated, so the head dims are reward-flat and the entropy
+    parks there. White-at-policy-rate motion, hence the frequency
+    mismatch (functional motion would be gait-locked — same test
+    separates arm flail from arm function). Falsifiable: actor per-dim
+    log-std from any checkpoint should be largest on neck/head dims.
+    Fix (also a deployment-fidelity correction): on hardware the head
+    is the VISION system's actuator, not the walk policy's. Remove
+    neck_yaw/head_pitch from the action space and drive them with
+    scripted scan-pattern / ball-tracking-like trajectories as a
+    training disturbance the policy must tolerate. Strictly more
+    realistic than both current flail and a rigid head. Cost: medium
+    (action/obs dim change, from-scratch only — which is standard
+    anyway). When: bundle with the next from-scratch reward-shaping
+    batch (candidates: with 11b arm work).
 
 ## Domain randomization
 
