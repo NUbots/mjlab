@@ -114,11 +114,27 @@ un-starred items overnight — they need design attention.
     work across pitch+roll servos at ankle and hip simultaneously
     (halves per-servo velocity/torque; relevant under velocity limits
     and the bus-voltage torque tax) — geometric motor load-balancing.
-    Candidate fixes: stance-gated roll-attitude cost (roll only, keep
-    pitch free for heel-toe), and a foot-heading cost tying foot yaw to
-    body heading (walking-gated). Cost: low-medium. When: after the
-    v51-s2 seed replicate says whether these gaits are systematic or
-    seed lottery; do not stack with the v52 duty-factor change.
+    UPDATE (user, 2026-07-10): duck walk predates the bus-voltage model
+    (present since the first successful 10k run, pre current-obs), so
+    the driver is the VELOCITY limits, which exist in every era: two
+    orthogonal hip servos at w_max swinging the leg along the 45-degree
+    diagonal compose to sqrt(2)*w_max (+41% foot speed), and 45 degrees
+    is the equal-sharing optimum — matching the observed angle. The
+    frontier curriculum pushes the speed ceiling, so it selects for
+    this geometry every run. User has NOT decided the duck walk is bad:
+    it may be the honest optimal gait for this morphology (same status
+    as the froude cadence), and it likely also speeds recovery
+    stepping. Treat as a decision to PRICE, not a defect to fix:
+    (1) measure: vel_sat telemetry — do hip servos saturate in swing at
+    frontier speeds; eval sweep — foot yaw vs commanded speed (theory
+    predicts duck angle grows with speed, ~vanishes at 0.3 m/s);
+    (2) if hardware/RoboCup constraints (kick alignment, bracket edge
+    loading, downstream odometry assumptions) demand straight feet, run
+    a FOOT_HEADING_W ablation pair and read off the exact frontier and
+    recovery cost before deciding. The stance-gated roll-attitude cost
+    (i) stands on its own for bracket-loading reasons regardless.
+    When: after the v51-s2 seed replicate; do not stack with the v52
+    duty-factor change.
 
 ## Domain randomization
 
