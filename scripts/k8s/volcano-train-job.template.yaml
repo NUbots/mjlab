@@ -153,6 +153,10 @@ spec:
                   value: "${PHASE_RAW_MAX}"
                 - name: PHASE_CONTACT_W
                   value: "${PHASE_CONTACT_W}"
+                - name: HEAD_SCRIPTED
+                  value: "${HEAD_SCRIPTED}"
+                - name: JOULE_ELECTRICAL
+                  value: "${JOULE_ELECTRICAL}"
                 - name: FEET_MIN_SEP
                   value: "${FEET_MIN_SEP}"
                 - name: FEET_MIN_SEP_W

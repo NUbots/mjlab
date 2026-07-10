@@ -586,6 +586,38 @@ def phase_delta_nominal_cost(
   return cost
 
 
+def joule_heating_electrical(
+  env: ManagerBasedRlEnv,
+  kt: float | dict[str, float] = 2.0,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Per-servo I^2 R joule heating cost: ``sum (tau / Kt)^2`` (doc 15 R37).
+
+  The plain ``joint_torques_l2`` (``sum tau^2``) prices every servo's heat
+  by output torque, which is blind to the fact that a small-Kt servo draws
+  far more current per Nm and heats far more. Dividing by the per-servo
+  torque constant recovers electrical current ``i = tau / Kt`` and squares
+  it: true resistive heating, up to the (constant, per-servo) winding
+  resistance folded into the weight. For NUgus the MX-64 arm/head servos
+  (Kt ~ 1.5) are upweighted ~3x per Nm relative to the XH540 legs
+  (Kt ~ 2.68) with no fitted constants — the physically-correct reason arm
+  flail is not free. Uses the same ``kt`` regex map as the current
+  observation.
+  """
+  from mjlab.tasks.velocity.mdp.observations import _build_kt_tensor
+
+  asset: Entity = env.scene[asset_cfg.name]
+  actuator_ids = asset_cfg.actuator_ids
+  ids = (
+    torch.arange(asset.data.actuator_force.shape[1], device=env.device)
+    if isinstance(actuator_ids, slice)
+    else torch.as_tensor(actuator_ids, device=env.device)
+  )
+  kt_tensor = _build_kt_tensor(env, asset, f"joule_elec_{asset_cfg.name}", ids, kt)
+  current = asset.data.actuator_force[:, ids] / kt_tensor
+  return torch.sum(torch.square(current), dim=1)
+
+
 def gait_clock_contact_mismatch_cost(
   env: ManagerBasedRlEnv,
   sensor_name: str,

@@ -8,6 +8,24 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Off-policy scripted head (``ScriptedHeadAction``, ``HEAD_SCRIPTED`` knob
+  on ``clock_owned``): removes ``neck_yaw``/``head_pitch`` from the policy
+  action space and drives them saccadically (dwell at a fixation, then step
+  to a new random target so the servo PD produces the slew), per-env
+  randomized. On hardware the head is the vision system's actuator, not the
+  walk policy's; this both matches deployment and removes the parked-entropy
+  flail on those unloaded, reward-flat dims (doc 15 R37). The policy still
+  observes head state. Changes the action dimension, so it trains from
+  scratch.
+
+- ``joule_heating_electrical``: physical per-servo I²R energy cost
+  ``sum((tau / Kt)^2)`` instead of ``sum(tau^2)`` (``JOULE_ELECTRICAL``
+  knob). Dividing by the per-servo torque constant recovers electrical
+  current, so the small-Kt MX-64 arm/head servos are upweighted ~3× per Nm
+  relative to the XH540 legs with no fitted constants — the physically
+  correct reason arm flail is not free. The weight is scaled by ``Kt_leg²``
+  so the leg-dominated magnitude (and the anneal schedule) is preserved.
+
 - Gait-geometry observability metrics (logged to ``Episode_Metrics/*``, no
   gradient): ``foot_heel_toe_pitch_deg`` (fore-aft sole rocking) and
   ``foot_lateral_roll_deg`` (medial-lateral edge rocking), both

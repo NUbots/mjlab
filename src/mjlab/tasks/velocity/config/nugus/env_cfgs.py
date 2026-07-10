@@ -14,7 +14,11 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp import dr
-from mjlab.envs.mdp.actions import JointPositionActionCfg, PhaseDeltaActionCfg
+from mjlab.envs.mdp.actions import (
+  JointPositionActionCfg,
+  PhaseDeltaActionCfg,
+  ScriptedHeadActionCfg,
+)
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
@@ -45,6 +49,9 @@ _DEFAULT_MAX_ITERATIONS = nubots_nugus_ppo_runner_cfg().max_iterations
 _DEFAULT_GAIT_PERIOD = 0.7
 _DEFAULT_SWING_TARGET_HEIGHT = 0.08
 _DEFAULT_JOULE_W = -3e-4
+# Kt_leg^2 (2.68 Nm/A) — weight scale when swapping sum(tau^2) for the
+# electrical sum((tau/Kt)^2) so leg heating magnitude is preserved.
+_JOULE_ELECTRICAL_SCALE = 2.68**2
 _DEFAULT_PHASE_C_FRAC = 0.6
 _DEFAULT_STAND_W = -0.15
 _DEFAULT_EFFORT_LO = 0.7
@@ -771,6 +778,13 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   joule_w = _env_float("JOULE_W", _DEFAULT_JOULE_W)
   if joule_w > 0:
     joule_w = -joule_w
+  # Physical per-servo I^2 R energy (doc 15 R37): swap sum(tau^2) for
+  # sum((tau/Kt)^2). Scale the weight by Kt_leg^2 so the leg-dominated
+  # magnitude (hence the anneal schedule) is preserved while the smaller-Kt
+  # arm/head servos get their physically-correct ~3x uplift. Off by default.
+  joule_electrical = _env_bool("JOULE_ELECTRICAL", default=False)
+  if joule_electrical:
+    joule_w *= _JOULE_ELECTRICAL_SCALE
   phase_c_frac = _env_float("PHASE_C_FRAC", _DEFAULT_PHASE_C_FRAC)
   stand_w = _env_float("STAND_W", _DEFAULT_STAND_W)
   if stand_w > 0:
@@ -996,6 +1010,27 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
   joint_pos_action.scale = NUGUS_ACTION_SCALE  # ~0.245 rad (0.25 * e/s * 5).
+
+  # Off-policy scripted head (doc 15 R37, deployment fidelity): the head is
+  # the vision system's actuator on hardware, not the walk policy's. Remove
+  # neck_yaw/head_pitch from the policy action space (kills the parked-
+  # entropy flail on those unloaded, reward-flat dims) and drive them along
+  # a per-env-randomized scan the policy must stay upright through. The
+  # policy still OBSERVES head state (encoder feedback is realistic). This
+  # changes the action dimension, so HEAD_SCRIPTED runs train from scratch.
+  head_scripted = _env_bool("HEAD_SCRIPTED", default=False)
+  _HEAD_JOINTS = ("neck_yaw", "head_pitch")
+  if head_scripted:
+    joint_pos_action.actuator_names = tuple(
+      n for n in NUGUS_ACTION_SCALE if n not in _HEAD_JOINTS
+    )
+    joint_pos_action.scale = {
+      k: v for k, v in NUGUS_ACTION_SCALE.items() if k not in _HEAD_JOINTS
+    }
+    cfg.actions["scripted_head"] = ScriptedHeadActionCfg(
+      entity_name="robot",
+      joint_names=_HEAD_JOINTS,
+    )
 
   if variant in ("clock_learned", "clock_owned"):
     # Optional bounds on the raw phase-delta action. Insurance for runs
@@ -1438,6 +1473,12 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["feet_distance"].weight = -0.1
   cfg.rewards["foot_flat"].weight = foot_flat_w
   cfg.rewards["joule_heating"].weight = 0.0
+  if joule_electrical:
+    cfg.rewards["joule_heating"].func = mdp.joule_heating_electrical
+    cfg.rewards["joule_heating"].params = {
+      "kt": _NUGUS_CURRENT_KT,
+      "asset_cfg": SceneEntityCfg("robot"),
+    }
   cfg.rewards["joint_acc_l2"].weight = 0.0
   cfg.rewards["torque_rate"].weight = 0.0
   cfg.rewards["soft_landing"].weight = 0.0

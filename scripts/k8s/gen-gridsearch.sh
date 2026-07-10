@@ -251,6 +251,9 @@ export PHASE_TARGET_INTERCEPT PHASE_TARGET_SLOPE PHASE_TARGET_MIN PHASE_TARGET_M
 export PHASE_TETHER_TAPER_START PHASE_TETHER_TAPER_END PHASE_RAW_MIN PHASE_RAW_MAX
 export PHASE_CONTACT_W
 PHASE_CONTACT_W="${PHASE_CONTACT_W:-}"
+export HEAD_SCRIPTED JOULE_ELECTRICAL
+HEAD_SCRIPTED="${HEAD_SCRIPTED:-}"
+JOULE_ELECTRICAL="${JOULE_ELECTRICAL:-}"
 PHASE_TARGET_MODE="${PHASE_TARGET_MODE:-}"
 PHASE_LEG_LENGTH="${PHASE_LEG_LENGTH:-}"
 PHASE_TARGET_INTERCEPT="${PHASE_TARGET_INTERCEPT:-}"
@@ -1772,6 +1775,26 @@ gen_v51s2() {
   emit_manifest "mj-gs-v51s2-grounded"
 }
 
+# BATCH=v52: flail cluster on the v51-s2 champion config (doc 15 R37).
+# The arm/head flail transfers poorly. Two from-scratch interventions:
+# HEAD_SCRIPTED removes neck_yaw/head_pitch from the action space (21->19)
+# and drives them saccadically off-policy (deployment-correct: the head is
+# the vision system's actuator, and this kills the parked-entropy flail on
+# those unloaded, reward-flat dims); JOULE_ELECTRICAL swaps sum(tau^2) for
+# physical per-servo sum((tau/Kt)^2) so the small-Kt arms are upweighted
+# ~3x per Nm (prices flail correctly without banning reaction-wheel use).
+# Builds on the champion seed (s2); the new Episode_Metrics/* gait-geometry
+# + limb-speed terms log the arm/head flail falling and the duck evolving.
+gen_v52() {
+  gen_v51s2
+  export HEAD_SCRIPTED="1"
+  export JOULE_ELECTRICAL="1"
+  export MJLAB_LOG_STAMP="v52-flail-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v52-flail-cluster__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v52,bus-voltage,froude,clock-grounding,flail-cluster,scripted-head,electrical-joule,batch-v52,gridsearch"
+  emit_manifest "mj-gs-v52-flail"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -2890,6 +2913,7 @@ case "$BATCH" in
   v50) gen_v50; expected=7 ;;
   v51) gen_v51; expected=8 ;;
   v51s2) gen_v51s2; expected=9 ;;
+  v52) gen_v52; expected=10 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
