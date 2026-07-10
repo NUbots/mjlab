@@ -8,6 +8,14 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Gait-geometry observability metrics (logged to ``Episode_Metrics/*``, no
+  gradient): ``foot_heel_toe_pitch_deg`` (fore-aft sole rocking) and
+  ``foot_lateral_roll_deg`` (medial-lateral edge rocking), both
+  stance-gated; ``foot_toeout_deg`` (duck-walk foot yaw relative to the
+  torso, walking-gated); and ``arm_joint_speed`` / ``head_joint_speed``
+  (limb-flail magnitude). These make gait style and limb motion visible
+  over the training timeline without shaping the policy.
+
 - ``phase_delta_nominal_cost`` supports a speed-dependent cadence target,
   in two modes selected by ``target_mode``. ``"linear"`` uses
   ``clamp(intercept + slope * v_eff, min, max)``; ``"froude"`` derives the

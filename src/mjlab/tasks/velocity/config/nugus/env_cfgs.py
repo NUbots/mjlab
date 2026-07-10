@@ -17,6 +17,7 @@ from mjlab.envs.mdp import dr
 from mjlab.envs.mdp.actions import JointPositionActionCfg, PhaseDeltaActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.metrics_manager import MetricsTermCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -1561,6 +1562,64 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
           "apply_live": _env_bool("JOULE_LAMBDA_LIVE", default=False),
         },
       )
+
+  # Observability metrics (doc 15 R37 follow-up): pure logging, no
+  # gradient. Watch gait geometry and limb flail evolve over training.
+  # foot_heel_toe (fore-aft sole pitch) and foot_lateral_roll (medial-
+  # lateral sole roll, the outside/inside edge-rocking) are stance-gated;
+  # foot_toeout is the duck-walk yaw relative to torso; arm/head joint
+  # speed track flail magnitude (both limb groups carry little balance
+  # load, so speed there is a fairly direct read on wasted motion).
+  cfg.metrics["foot_heel_toe_pitch_deg"] = MetricsTermCfg(
+    func=mdp.foot_heel_toe_pitch_deg,
+    params={
+      "sensor_name": "feet_ground_contact",
+      "asset_cfg": SceneEntityCfg("robot", body_names=("left_foot", "right_foot")),
+      "sole_normal_axis": 0,
+    },
+  )
+  cfg.metrics["foot_lateral_roll_deg"] = MetricsTermCfg(
+    func=mdp.foot_lateral_roll_deg,
+    params={
+      "sensor_name": "feet_ground_contact",
+      "asset_cfg": SceneEntityCfg("robot", body_names=("left_foot", "right_foot")),
+      "sole_normal_axis": 0,
+    },
+  )
+  cfg.metrics["foot_toeout_deg"] = MetricsTermCfg(
+    func=mdp.foot_toeout_deg,
+    params={
+      "asset_cfg": SceneEntityCfg("robot", body_names=("left_foot", "right_foot")),
+      "torso_cfg": SceneEntityCfg("robot", body_names=("torso",)),
+      "foot_signs": (1.0, -1.0),
+      "command_name": "twist",
+      "command_threshold": 0.05,
+    },
+  )
+  cfg.metrics["arm_joint_speed"] = MetricsTermCfg(
+    func=mdp.joint_speed_abs,
+    params={
+      # Explicit motor joints: a `.*_shoulder_.*` regex would fullmatch the
+      # passive `*_backlash` siblings too and pollute the speed mean.
+      "asset_cfg": SceneEntityCfg(
+        "robot",
+        joint_names=(
+          "left_shoulder_pitch",
+          "left_shoulder_roll",
+          "left_elbow_pitch",
+          "right_shoulder_pitch",
+          "right_shoulder_roll",
+          "right_elbow_pitch",
+        ),
+      ),
+    },
+  )
+  cfg.metrics["head_joint_speed"] = MetricsTermCfg(
+    func=mdp.joint_speed_abs,
+    params={
+      "asset_cfg": SceneEntityCfg("robot", joint_names=("neck_yaw", "head_pitch"))
+    },
+  )
 
   # Apply play mode overrides.
   if play:
