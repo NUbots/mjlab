@@ -598,6 +598,72 @@ away from. Success criteria: `gait_clock_contact_match_mean` → ~1,
 within noise of v48, and a *footfall* cadence (not just clock cadence)
 following the froude curve in the post-hoc sweep.
 
+## R37 (2026-07-11): v51 verdict — grounding is a transfer win the sim frontier hid; duck walk is velocity-limit-optimal and grounding amplifies it
+
+v51 (contact-grounded froude clock) ran to 10k on both seeds. The final
+in-training frontier looked like a regression vs v48 (track 2.22 → 1.63
+s1 / 1.88 s2; clean_fell 0.003 → 0.033 s1 / 0.016 s2). But an eval sweep
+at PRACTICAL commands (0.3-0.75 m/s fwd + lateral/yaw/diagonal/stand, 128
+envs/cmd, 20 s) tells the opposite story — the frontier gap was almost
+entirely 2 m/s behaviour the robot never uses on grass. At practical
+speeds v51-s2 vs v48:
+
+- forward-walk tracking is nearly matched (0.3: 0.094 vs 0.077, 0.5:
+  0.116 vs 0.099, 0.75: 0.145 vs 0.134 m/s RMSE). v51's tracking penalty
+  is concentrated in LATERAL (0.147 vs 0.087) and YAW (0.073 vs 0.028),
+  not forward gait — a specific, targetable weakness.
+- falls/min at practical speeds are near-zero for both (v48 0.000
+  everywhere; v51-s2 tiny 0.02-0.05 only backward/lateral). The 5x
+  frontier fall gap evaporates in the usable envelope.
+- v51 WINS the two sim2real-critical metrics at every speed:
+  swing_height_err 0.044 vs 0.070 (-37%, the anti-shuffle / turf
+  clearance payoff) and slip_vel 0.036 vs 0.046 (-22%, real traction).
+
+So v51-s2 is plausibly the better TRANSFER policy despite losing the sim
+frontier. Grounding earned its place. Seed variance is real and s2 is the
+keeper (beats s1 on essentially everything: 0.113 vs 0.142 track, 0.007
+vs 0.028 fell) — s1 was the worse draw, confirming the user's instinct.
+
+Gait-geometry probe (foot yaw relative to body heading, calibrated to the
+standing pose; support-phase fractions), two open questions settled:
+
+1. **"Is v50 running?" — almost, exactly.** v50 flight fraction (both feet
+   airborne): 1.0 m/s 0%, 1.5 0.1%, 2.0 2.1%, 2.5 10.8%. At its ~2 m/s
+   training frontier it is ~2% airborne (occasional flight, mostly
+   fast-walk); by 2.5 it clearly bounds. The servos CAN produce flight,
+   and the walk→run transition is real (not a sim artifact) — retroactive
+   justification for releasing the cadence tether above Fr=0.5. v51-s2
+   develops flight earlier (2.8% at 1.5 m/s) — the forced clearance lifts
+   it off sooner.
+
+2. **Duck walk is velocity-limit-optimal AND grounding amplifies it.**
+   Duck angle (symmetric toe-out) grows monotonically and steeply with
+   forward speed in BOTH v51 seeds (s2: 17°/33°/50° at 0.3/0.5/0.75;
+   s1: 22°/30°/40°) — systematic, not seed lottery, confirming the
+   velocity-limit motor-sharing theory (two orthogonal hip servos at
+   w_max along the 45° diagonal → sqrt(2)*w_max foot speed). Lateral
+   commands induce big duck even at 0.3 m/s (28-30°) — the ellipsoid
+   second driver, confirmed. Pure yaw barely ducks (4-6°); backward
+   walking ducks INWARD (-9°, geometry reverses). NEW: v48 barely ducks
+   forward (small, sign-flipping ~noise; ducks only on the diagonal),
+   while v51 ducks hard and consistently — the contact-grounding windows
+   force a brisk single-support gait that recruits the duck geometry
+   harder than v48's slower, more-double-support gait needed to. So
+   grounding's clearance/slip win is paid for partly by leaning HARDER on
+   the duck. If the duck is judged acceptable (honest physics), v51 is
+   strictly good; if straight feet are ever required, v51 makes that
+   harder and FOOT_HEADING_W (backlog 11c) becomes more necessary. And
+   at high speed the duck DECREASES as flight sets in (v51-s2:
+   43°→27°→16° at 1.0/2.0/2.5) — once bounding, the aerial phase removes
+   the need for the yaw trick.
+
+Also verified from the v48 checkpoint directly (no rollout): the actor
+per-dim action log-std is UNIFORM ~0.13 across all 21 joints, falsifying
+the "entropy parks extra noise on the head" hypothesis (backlog 11d
+corrected). Head flail is uniform exploration noise on a light, unloaded,
+reward-flat joint — same noise everywhere, only the head has no restoring
+force.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not
