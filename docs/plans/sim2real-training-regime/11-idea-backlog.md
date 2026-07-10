@@ -163,14 +163,24 @@ un-starred items overnight — they need design attention.
     duty-factor change.
 11d. ⭐ **Take the head away from the policy** (user observation,
     2026-07-10: head flails at a frequency unrelated to gait cadence).
-    Mechanism: parked exploration noise, not behavior — PPO's entropy
-    bonus pays to keep per-dim action std high wherever reward is flat,
-    and every summed penalty (tau^2, action_rate, joint_acc) is
-    leg-dominated, so the head dims are reward-flat and the entropy
-    parks there. White-at-policy-rate motion, hence the frequency
-    mismatch (functional motion would be gait-locked — same test
-    separates arm flail from arm function). Falsifiable: actor per-dim
-    log-std from any checkpoint should be largest on neck/head dims.
+    Mechanism (CORRECTED after measurement, 2026-07-10): my first guess
+    was "entropy parks extra std on the reward-flat head dims". MEASURED
+    the v48 actor per-dim log_std (std_type=log, genuinely per-dim, 21
+    dims) directly from the checkpoint — it is UNIFORM ~0.13 across all
+    joints (legs, arms, head, phase all 0.1297-0.1300). So the head is
+    NOT allocated extra exploration noise; the prediction is falsified.
+    Real mechanism: exploration noise is uniform, but the SAME noise
+    produces a large visible excursion on the head because it is light
+    and carries no balance load (nothing resists it), while the reward
+    surface there is too flat for the policy to bother cancelling the
+    resulting motion with its mean output. Same noise everywhere, only
+    the head has no restoring force. Still white-at-policy-rate, hence
+    the frequency mismatch. Implication for fixes: a per-dim entropy or
+    std tweak will NOT help (std is already uniform) — the lever is
+    either removing the noise source (take head out of action space) or
+    giving the reward surface a reason to hold it (head-motion damping
+    cost). Same logic likely applies to the arms (light, low-load);
+    re-check the arm dims when the v51 checkpoints download.
     Fix (also a deployment-fidelity correction): on hardware the head
     is the VISION system's actuator, not the walk policy's. Remove
     neck_yaw/head_pitch from the action space and drive them with
