@@ -9,14 +9,16 @@ Added
 ^^^^^
 
 - Off-policy scripted head (``ScriptedHeadAction``, ``HEAD_SCRIPTED`` knob
-  on ``clock_owned``): removes ``neck_yaw``/``head_pitch`` from the policy
-  action space and drives them saccadically (dwell at a fixation, then step
-  to a new random target so the servo PD produces the slew), per-env
-  randomized. On hardware the head is the vision system's actuator, not the
-  walk policy's; this both matches deployment and removes the parked-entropy
-  flail on those unloaded, reward-flat dims (doc 15 R37). The policy still
-  observes head state. Changes the action dimension, so it trains from
-  scratch.
+  on ``clock_owned``): drives ``neck_yaw``/``head_pitch`` saccadically
+  off-policy (dwell at a fixation, then step to a new random target so the
+  servo PD produces the slew), per-env randomized. Applied after the
+  joint-position action, it overwrites the policy's head targets, so the
+  head is fully scripted and the policy's head outputs are discarded (no
+  flail reaches the sim; those reward-flat dims get zero gradient). On
+  hardware the head is the vision system's actuator, not the walk policy's,
+  so this matches deployment (doc 15 R37). The head stays in the action
+  vector so the left/right symmetry augmentation is unchanged; the policy
+  still observes head state.
 
 - ``joule_heating_electrical``: physical per-servo I²R energy cost
   ``sum((tau / Kt)^2)`` instead of ``sum(tau^2)`` (``JOULE_ELECTRICAL``

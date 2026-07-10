@@ -4,13 +4,17 @@ On the real robot the head is the vision system's actuator, not the walk
 policy's: it runs scan/tracking patterns the locomotion controller never
 commands. Training the walk policy to CONTROL the head is both unrealistic
 and wasteful (the head is light and unloaded, so its action dims just park
-exploration noise -> flail, doc 15 R37). This action term removes the head
-from the policy: it consumes zero policy action dims and instead drives the
-neck/head joints saccadically -- dwell at a fixation point, then step the
-target to a new random point so the servo PD produces a fast slew -- as a
-per-env-randomized disturbance the policy must stay upright through. The
-saccades matter: their fast slews impart angular-momentum impulses a smooth
-scan would not, which is the realistic head-motion disturbance.
+exploration noise -> flail, doc 15 R37). This action term drives the head
+off-policy: it consumes zero policy action dims and, applied AFTER the
+joint-position action, OVERWRITES the policy's head targets with a scripted
+saccade -- dwell at a fixation point, then step the target to a new random
+point so the servo PD produces a fast slew -- as a per-env-randomized
+disturbance the policy must stay upright through. The head stays in the
+joint-position action so the action vector (and the left/right symmetry
+augmentation's joint permutation) is unchanged; the policy's head outputs
+are simply discarded, so no flail reaches the sim and those reward-flat
+dims get zero gradient. The saccades matter: their fast slews impart
+angular-momentum impulses a smooth scan would not.
 """
 
 from __future__ import annotations

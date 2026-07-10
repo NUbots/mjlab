@@ -1012,21 +1012,19 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   joint_pos_action.scale = NUGUS_ACTION_SCALE  # ~0.245 rad (0.25 * e/s * 5).
 
   # Off-policy scripted head (doc 15 R37, deployment fidelity): the head is
-  # the vision system's actuator on hardware, not the walk policy's. Remove
-  # neck_yaw/head_pitch from the policy action space (kills the parked-
-  # entropy flail on those unloaded, reward-flat dims) and drive them along
-  # a per-env-randomized scan the policy must stay upright through. The
-  # policy still OBSERVES head state (encoder feedback is realistic). This
-  # changes the action dimension, so HEAD_SCRIPTED runs train from scratch.
+  # the vision system's actuator on hardware, not the walk policy's. The
+  # ScriptedHeadAction drives neck_yaw/head_pitch saccadically off-policy,
+  # applied AFTER joint_pos so it OVERWRITES the policy's head targets --
+  # the head is fully scripted and the policy's head outputs are discarded
+  # (no flail reaches the sim; the reward-flat head dims get zero gradient).
+  # The head stays in joint_pos (so the action vector and the 20-joint
+  # left/right symmetry augmentation are unchanged -- removing it would
+  # desync the mirror's joint permutation); the two discarded action dims
+  # are the small price for keeping the mirror intact. Policy still observes
+  # head state (encoder feedback is realistic).
   head_scripted = _env_bool("HEAD_SCRIPTED", default=False)
   _HEAD_JOINTS = ("neck_yaw", "head_pitch")
   if head_scripted:
-    joint_pos_action.actuator_names = tuple(
-      n for n in NUGUS_ACTION_SCALE if n not in _HEAD_JOINTS
-    )
-    joint_pos_action.scale = {
-      k: v for k, v in NUGUS_ACTION_SCALE.items() if k not in _HEAD_JOINTS
-    }
     cfg.actions["scripted_head"] = ScriptedHeadActionCfg(
       entity_name="robot",
       joint_names=_HEAD_JOINTS,
