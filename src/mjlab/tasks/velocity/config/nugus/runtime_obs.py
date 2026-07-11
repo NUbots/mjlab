@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import mujoco
 import numpy as np
+import torch
 
 from mjlab.asset_zoo.robots import NUGUS_MOTOR_JOINT_REGEX
 from mjlab.entity import Entity
@@ -42,6 +43,10 @@ class NugusVanillaIndices:
   gyro_adr: int
   imu_site_id: int
   action_scale: np.ndarray
+  # ctrl index of each motor joint's actuator, in MOTOR_JOINT_ORDER.
+  # mj ctrl slots are in actuator SPEC order, which differs from joint
+  # order — writing a joint-order vector to ctrl[:] scrambles servos.
+  ctrl_adr: np.ndarray
   layout: NugusRuntimeObsLayout
 
 
@@ -56,8 +61,26 @@ def build_vanilla_indices(env, layout: NugusRuntimeObsLayout) -> NugusVanillaInd
     raise ValueError(f"Unexpected motor joint order: {resolved}")
 
   model = env.sim.mj_model
-  qpos_adr = model.jnt_qposadr[joint_ids]
-  qvel_adr = model.jnt_dofadr[joint_ids]
+  # Resolve mj joint ids BY NAME (entity-local joint indices are not mj
+  # joint indices: the scene adds a free joint and attach prefixes).
+  mj_jnt_ids = []
+  for name in resolved:
+    jid = -1
+    for prefix in ("robot/", "nugus/", ""):
+      jid = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, prefix + name)
+      if jid >= 0:
+        break
+    if jid < 0:
+      raise ValueError(f"joint {name!r} not found in mj model")
+    mj_jnt_ids.append(jid)
+  qpos_adr = model.jnt_qposadr[mj_jnt_ids]
+  qvel_adr = model.jnt_dofadr[mj_jnt_ids]
+  # ctrl slot whose actuator drives each motor joint (JOINT transmission).
+  jnt_to_ctrl = {int(model.actuator_trnid[i, 0]): i for i in range(model.nu)}
+  try:
+    ctrl_adr = np.array([jnt_to_ctrl[jid] for jid in mj_jnt_ids], dtype=np.int64)
+  except KeyError as exc:
+    raise ValueError(f"motor joint without actuator: {exc}") from exc
   default_joint_pos = robot.data.default_joint_pos[0, joint_ids].detach().cpu().numpy()
 
   gyro_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, "robot/imu_ang_vel")
@@ -68,7 +91,16 @@ def build_vanilla_indices(env, layout: NugusRuntimeObsLayout) -> NugusVanillaInd
   imu_site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "imu")
 
   joint_action = env.action_manager.get_term("joint_pos")
-  scale = joint_action._scale[0, joint_ids].detach().cpu().numpy()
+  # _scale is [num_envs, action_dim] in ACTION-SLOT order (pinned equal to
+  # MOTOR_JOINT_ORDER by test_action_joint_order; the resolved-order guard
+  # above pins our joint order to the same) — indexing its columns with
+  # entity joint ids is wrong: those run over all 40 joints (backlash
+  # included) and overflow the 20-wide scale.
+  raw_scale = joint_action._scale
+  if isinstance(raw_scale, torch.Tensor):
+    scale = raw_scale[0].detach().cpu().numpy()
+  else:
+    scale = np.full(len(joint_ids), float(raw_scale))
 
   return NugusVanillaIndices(
     motor_qpos_adr=qpos_adr.copy(),
@@ -77,6 +109,7 @@ def build_vanilla_indices(env, layout: NugusRuntimeObsLayout) -> NugusVanillaInd
     gyro_adr=int(gyro_adr),
     imu_site_id=int(imu_site_id),
     action_scale=scale,
+    ctrl_adr=ctrl_adr,
     layout=layout,
   )
 
@@ -104,8 +137,18 @@ def build_actor_obs(
   sim_time: float,
   gait_period: float = 0.7,
   command_threshold: float = 0.05,
+  policy_phase: float | None = None,
 ) -> np.ndarray:
-  """Assemble the actor observation vector from vanilla ``MjData``."""
+  """Assemble the actor observation vector from vanilla ``MjData``.
+
+  ``last_action`` must be the FULL raw action vector the policy emitted
+  (21-wide for clock_owned: 20 joints + phase_delta) — the ``actions``
+  observation term is the raw action, not the joint targets. For
+  clock_owned policies pass ``policy_phase`` (the deployment-side
+  integration of the phase_delta channel; see
+  :func:`advance_policy_phase`) — the time-based ``sim_time /
+  gait_period`` clock is only correct for time-clocked variants.
+  """
   layout = indices.layout
   obs = np.zeros(layout.dim, dtype=np.float32)
 
@@ -126,9 +169,41 @@ def build_actor_obs(
     vx, vy, wz = command
     total = abs(vx) + abs(vy) + abs(wz)
     if total > command_threshold:
-      phase = (sim_time / gait_period) % 1.0
+      if policy_phase is not None:
+        phase = policy_phase % 1.0
+      else:
+        phase = (sim_time / gait_period) % 1.0
       angle = 2.0 * math.pi * phase
       obs[sl.start] = math.sin(angle)
       obs[sl.start + 1] = math.cos(angle)
 
   return obs
+
+
+def advance_policy_phase(
+  phase: float,
+  raw_delta: float,
+  command: tuple[float, float, float],
+  *,
+  step_dt: float,
+  period: float,
+  raw_min: float | None = None,
+  raw_max: float | None = None,
+  command_threshold: float = 0.05,
+) -> float:
+  """Deployment-side replica of ``PhaseDeltaAction``'s phase integration.
+
+  Each control tick advances the policy-owned gait phase by
+  ``(step_dt / period) * clamp(raw_delta)`` (mod 1); below the command
+  threshold the phase resets to zero (standing is a distinct clock
+  state). This is the contract the robot-side runtime must implement to
+  drive a clock_owned policy.
+  """
+  vx, vy, wz = command
+  if abs(vx) + abs(vy) + abs(wz) <= command_threshold:
+    return 0.0
+  if raw_min is not None or raw_max is not None:
+    lo = -math.inf if raw_min is None else raw_min
+    hi = math.inf if raw_max is None else raw_max
+    raw_delta = min(max(raw_delta, lo), hi)
+  return (phase + (step_dt / period) * raw_delta) % 1.0

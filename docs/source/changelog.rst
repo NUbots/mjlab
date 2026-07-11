@@ -85,6 +85,21 @@ Added
 Fixed
 ^^^^^
 
+- ``sim2sim_eval`` had not survived the mjwarp/backlash/clock_owned
+  migrations; four fixes restore it as the deployment-contract reference:
+  (1) ``build_vanilla_indices`` indexed the action-scale tensor with
+  entity joint ids (0–39, backlash included) instead of action slots;
+  (2) joint-order action targets were written across spec-order ``ctrl``
+  slots — now routed through a per-joint ``ctrl_adr`` map resolved by
+  name; (3) clock_owned policies were driven with a wall-clock gait
+  phase — ``advance_policy_phase`` in ``runtime_obs`` now replicates
+  ``PhaseDeltaAction``'s integration (the same function the robot-side
+  runtime must implement) and the driver feeds the policy-owned phase
+  and full 21-dim action vector; (4) the reset-state copy read
+  ``env.sim.mj_data`` (unbatched host mirror), broadcasting a scalar
+  into ``qpos``/``qvel``/``ctrl`` — now reads the batched
+  ``env.sim.data``.
+
 - Left-right mirror augmentation scrambled every per-actuator observation
   block: entity actuator columns are in spec order, but the mirror applied
   the motor-joint-order permutation, so mirrored ``actuator_current`` /

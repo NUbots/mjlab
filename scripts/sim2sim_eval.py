@@ -24,6 +24,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg
 from mjlab.tasks.velocity.config.nugus.runtime_obs import (
   actor_obs_layout_from_env,
+  advance_policy_phase,
   build_actor_obs,
   build_vanilla_indices,
   projected_gravity_from_data,
@@ -98,12 +99,16 @@ def _copy_reset_state(
   seed: int,
 ) -> np.ndarray:
   setup_env.reset(seed=seed)
-  src = setup_env.sim.mj_data
-  mj_data.qpos[:] = np.array(src.qpos[0], dtype=np.float64)
-  mj_data.qvel[:] = np.array(src.qvel[0], dtype=np.float64)
-  mj_data.ctrl[:] = np.array(src.ctrl[0], dtype=np.float64)
+  # env.sim.data is the BATCHED warp data ([num_envs, ...]); env.sim.mj_data
+  # is an unbatched host mirror whose [0] element is a scalar — indexing it
+  # silently broadcast a single float into the whole reset state.
+  src = setup_env.sim.data
+  mj_data.qpos[:] = np.asarray(src.qpos.numpy(), dtype=np.float64)[0]
+  mj_data.qvel[:] = np.asarray(src.qvel.numpy(), dtype=np.float64)[0]
+  ctrl = np.asarray(src.ctrl.numpy(), dtype=np.float64)[0]
+  mj_data.ctrl[:] = ctrl
   mujoco.mj_forward(mj_model, mj_data)
-  return np.array(src.ctrl[0], dtype=np.float64)
+  return ctrl
 
 
 def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
@@ -129,16 +134,30 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
     layout = actor_obs_layout_from_env(setup_env)
     indices = build_vanilla_indices(setup_env, layout)
     mj_model = setup_env.sim.mj_model
+    action_dim = setup_env.action_manager.total_action_dim
+    # clock_owned: the 21st action channel drives the policy-owned gait
+    # phase; replicate PhaseDeltaAction's integration deployment-side.
+    phase_cfg = None
+    if "phase_delta" in setup_env.action_manager.active_terms:
+      pd_cfg = setup_env.action_manager.get_term("phase_delta").cfg
+      phase_cfg = {
+        "period": float(pd_cfg.period),
+        "raw_min": pd_cfg.raw_min,
+        "raw_max": pd_cfg.raw_max,
+        "command_threshold": float(pd_cfg.command_threshold),
+      }
   finally:
     pass
 
   mj_data = mujoco.MjData(mj_model)
   metrics = EvalMetricsState()
 
+  n_joints = len(indices.motor_qpos_adr)
   for cmd_idx, command in enumerate(COMMAND_GRID):
     default_ctrl = _copy_reset_state(setup_env, mj_model, mj_data, cfg.seed + cmd_idx)
-    last_action = np.zeros(len(indices.motor_qpos_adr), dtype=np.float32)
+    last_action = np.zeros(action_dim, dtype=np.float32)
     sim_time = 0.0
+    policy_phase = 0.0
     steps = int(cfg.episode_length_s / CONTROL_DT)
     acc = metrics.per_command[cmd_idx]
     fell = False
@@ -154,6 +173,7 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
         last_action=last_action,
         sim_time=sim_time,
         gait_period=GAIT_PERIOD,
+        policy_phase=policy_phase if phase_cfg is not None else None,
       )
       if rma_window:
         if not frames:
@@ -167,8 +187,23 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
         net_input = obs[None, :]
       action = session.run(None, {input_name: net_input})[0][0]
       last_action = action.astype(np.float32)
-      target_ctrl = default_ctrl + indices.action_scale * last_action
-      mj_data.ctrl[:] = target_ctrl
+      if phase_cfg is not None and action_dim > n_joints:
+        policy_phase = advance_policy_phase(
+          policy_phase,
+          float(last_action[n_joints]),
+          command,
+          step_dt=CONTROL_DT,
+          period=phase_cfg["period"],
+          raw_min=phase_cfg["raw_min"],
+          raw_max=phase_cfg["raw_max"],
+          command_threshold=phase_cfg["command_threshold"],
+        )
+      # Joint targets: first n_joints action channels, written to each
+      # joint's own ctrl slot (ctrl is actuator SPEC order, not joint
+      # order).
+      mj_data.ctrl[indices.ctrl_adr] = (
+        default_ctrl[indices.ctrl_adr] + indices.action_scale * last_action[:n_joints]
+      )
 
       lin_b, ang_z = _root_twist_body(mj_data)
       cmd_lin = np.asarray(command[:2], dtype=np.float64)
