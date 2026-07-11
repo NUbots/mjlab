@@ -157,6 +157,18 @@ spec:
                   value: "${HEAD_SCRIPTED}"
                 - name: JOULE_ELECTRICAL
                   value: "${JOULE_ELECTRICAL}"
+                - name: RMA
+                  value: "${RMA}"
+                - name: RMA_WINDOW
+                  value: "${RMA_WINDOW}"
+                - name: RMA_Z_DIM
+                  value: "${RMA_Z_DIM}"
+                - name: RMA_EST_COEF
+                  value: "${RMA_EST_COEF}"
+                - name: RMA_ZHAT_MIX_START_ITER
+                  value: "${RMA_ZHAT_MIX_START_ITER}"
+                - name: RMA_ZHAT_MIX_END_ITER
+                  value: "${RMA_ZHAT_MIX_END_ITER}"
                 - name: FEET_MIN_SEP
                   value: "${FEET_MIN_SEP}"
                 - name: FEET_MIN_SEP_W

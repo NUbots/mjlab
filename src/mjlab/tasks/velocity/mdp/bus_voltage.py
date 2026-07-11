@@ -50,12 +50,21 @@ from mjlab.utils.lab_api.math import sample_uniform
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
-__all__ = ["bus_voltage_step", "servo_voltage", "V_NOMINAL"]
+__all__ = [
+  "bus_voltage_step",
+  "get_bus_state",
+  "servo_voltage",
+  "R_SRC_NOMINAL",
+  "V_NOMINAL",
+]
 
 _STATE: WeakKeyDictionary = WeakKeyDictionary()
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 V_NOMINAL = 14.8
+# Harness/battery source resistance (ohm) used before the first per-episode
+# resample; also the neutral value reported when the bus model is disabled.
+R_SRC_NOMINAL = 0.069
 
 
 class _BusState:
@@ -73,7 +82,7 @@ class _BusState:
     self.kt = kt_vec
     self.v_oc = torch.full((n,), V_NOMINAL, device=device)
     self.sag_per_s = torch.zeros(n, device=device)
-    self.r_src = torch.full((n,), 0.069, device=device)
+    self.r_src = torch.full((n,), R_SRC_NOMINAL, device=device)
     self.r_local = torch.zeros((n, nu), device=device)
     self.age_s = torch.zeros(n, device=device)
     self.base_forcerange: torch.Tensor | None = None
@@ -105,6 +114,16 @@ def _get_state(env: ManagerBasedRlEnv, kt: dict[str, float]) -> _BusState:
     state = _BusState(env, kt)
     _STATE[env] = state
   return state
+
+
+def get_bus_state(env: ManagerBasedRlEnv) -> _BusState | None:
+  """Return the env's bus state, or None if the bus model is not active.
+
+  Read-only accessor for observations that report the per-episode bus
+  latents (v_oc, sag_per_s, r_src) without creating state as a side effect
+  when the ``bus_voltage_step`` event is not configured.
+  """
+  return _STATE.get(env)
 
 
 def bus_voltage_step(

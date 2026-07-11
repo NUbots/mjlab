@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 import os
 from typing import TYPE_CHECKING, Literal
@@ -22,7 +23,10 @@ from mjlab.envs.mdp.actions import (
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.metrics_manager import MetricsTermCfg
-from mjlab.managers.observation_manager import ObservationTermCfg
+from mjlab.managers.observation_manager import (
+  ObservationGroupCfg,
+  ObservationTermCfg,
+)
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import (
@@ -34,7 +38,7 @@ from mjlab.sensor import (
   TerrainHeightSensorCfg,
 )
 from mjlab.tasks.velocity import mdp
-from mjlab.tasks.velocity.config.nugus.dr_observations import dr_ratios
+from mjlab.tasks.velocity.config.nugus.dr_observations import dr_extras, dr_ratios
 from mjlab.tasks.velocity.config.nugus.rl_cfg import nubots_nugus_ppo_runner_cfg
 from mjlab.tasks.velocity.config.nugus.vel_sat_telemetry import log_vel_sat_frac
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
@@ -795,6 +799,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   silence_clock = _env_bool("SILENCE_CLOCK", False)
   current_obs = _env_bool("CURRENT_OBS", False)
   bus_voltage = _env_bool("BUS_VOLTAGE", False)
+  rma = _env_bool("RMA", False)
+  rma_window = _env_int("RMA_WINDOW", 25)
   max_iterations = _env_int("MAX_ITERATIONS", _DEFAULT_MAX_ITERATIONS)
   # Phase curriculum boundaries are derived from PHASE_ITERATIONS, which is
   # decoupled from MAX_ITERATIONS (the latter only drives the
@@ -1660,12 +1666,65 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     },
   )
 
+  # RMA adaptation module (teacher-student latent swap): two extra
+  # observation groups feed the custom actor model (rl/rma.py).
+  # - "dr": the true DR realization (dr_ratios + dr_extras) consumed by the
+  #   teacher's param encoder to produce the latent z.
+  # - "history": a T-step window of the actor observation stream consumed by
+  #   the student's TCN estimator to infer z-hat at deployment. The terms
+  #   are deep copies of the (fully mutated) actor terms so the per-frame
+  #   layout equals the actor vector -- the exported student slices its
+  #   current obs out of the last history frame. Noise/delay cfgs are
+  #   copied too; the history stream draws its own noise/delay realization
+  #   (statistically identical to the actor's, not byte-identical), which
+  #   is fine: the estimator must work from the same corrupted stream the
+  #   robot sees, not a privileged clean one.
+  # dr_extras also joins the critic (dr_ratios predates the bus-voltage and
+  # current-sensor DR, so the critic never saw those realizations). Gated
+  # under RMA so RMA=0 stays byte-identical to pre-RMA configs.
+  # This block must stay AFTER every actor-term mutation above.
+  if rma:
+    cfg.observations["critic"].terms["dr_extras"] = ObservationTermCfg(
+      func=dr_extras,
+      params={"motor_asset_cfg": motor_cfg()},
+    )
+    cfg.observations["history"] = ObservationGroupCfg(
+      terms={
+        name: copy.deepcopy(term)
+        for name, term in cfg.observations["actor"].terms.items()
+      },
+      concatenate_terms=True,
+      enable_corruption=True,
+      history_length=rma_window,
+      flatten_history_dim=False,
+    )
+    cfg.observations["dr"] = ObservationGroupCfg(
+      terms={
+        "dr_ratios": ObservationTermCfg(
+          func=dr_ratios,
+          params={
+            "motor_asset_cfg": motor_cfg(),
+            "torso_body_name": "torso",
+            "foot_geom_names": geom_names,
+          },
+        ),
+        "dr_extras": ObservationTermCfg(
+          func=dr_extras,
+          params={"motor_asset_cfg": motor_cfg()},
+        ),
+      },
+      concatenate_terms=True,
+      enable_corruption=False,
+    )
+
   # Apply play mode overrides.
   if play:
     # Effectively infinite episode length.
     cfg.episode_length_s = int(1e9)
 
     cfg.observations["actor"].enable_corruption = False
+    if "history" in cfg.observations:
+      cfg.observations["history"].enable_corruption = False
     cfg.events.pop("push_robot", None)
     cfg.events["randomize_terrain"] = EventTermCfg(
       func=envs_mdp.randomize_terrain,

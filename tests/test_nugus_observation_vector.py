@@ -19,7 +19,9 @@ from mjlab.asset_zoo.robots.nugus.nugus_constants import (
 from mjlab.entity import Entity
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.velocity.config.nugus.dr_observations import (
+  DR_EXTRAS_DIM,
   DR_RATIOS_DIM,
+  dr_extras,
   dr_ratios,
   dr_ratios_torso_mass_index,
 )
@@ -272,5 +274,62 @@ def test_dr_ratios_change_across_resets(device, nugus_flat_cfg) -> None:
     second = dr_ratios(env)
     torso_mass_idx = dr_ratios_torso_mass_index()
     assert not torch.allclose(first[:, torso_mass_idx], second[:, torso_mass_idx])
+  finally:
+    env.close()
+
+
+def test_rma_groups_absent_by_default(nugus_flat_cfg) -> None:
+  """RMA unset must leave the observation spec byte-identical to pre-RMA."""
+  assert "history" not in nugus_flat_cfg.observations
+  assert "dr" not in nugus_flat_cfg.observations
+  assert "dr_extras" not in nugus_flat_cfg.observations["critic"].terms
+
+
+def test_rma_groups_cfg(monkeypatch) -> None:
+  monkeypatch.setenv("RMA", "1")
+  monkeypatch.setenv("RMA_WINDOW", "7")
+  cfg = nubots_nugus_flat_env_cfg()
+
+  history = cfg.observations["history"]
+  assert history.history_length == 7
+  assert history.flatten_history_dim is False
+  assert history.enable_corruption is True
+  # Per-frame layout must equal the actor vector: same terms, same order.
+  assert list(history.terms.keys()) == list(cfg.observations["actor"].terms.keys())
+
+  dr_group = cfg.observations["dr"]
+  assert list(dr_group.terms.keys()) == ["dr_ratios", "dr_extras"]
+  assert dr_group.enable_corruption is False
+
+  # The critic sees the same extended privileged vector as the encoder.
+  assert "dr_extras" in cfg.observations["critic"].terms
+
+
+def test_rma_env_group_dims_and_extras_defaults(device, monkeypatch) -> None:
+  """Live env: group shapes and nominal dr_extras segments (bus/current off)."""
+  monkeypatch.setenv("RMA", "1")
+  monkeypatch.setenv("RMA_WINDOW", "5")
+  cfg = nubots_nugus_flat_env_cfg()
+  cfg.scene.num_envs = 4
+  cfg.seed = 1
+  env = ManagerBasedRlEnv(cfg=cfg, device=device)
+  try:
+    env.reset(seed=1)
+    obs = env.observation_manager.compute()
+    actor_dim = obs["actor"].shape[-1]
+    assert obs["history"].shape == (4, 5, actor_dim)
+    assert obs["dr"].shape == (4, DR_RATIOS_DIM + DR_EXTRAS_DIM)
+
+    extras = dr_extras(env)
+    n = 20
+    bus = extras[:, n : n + 3]
+    gain = extras[:, n + 3 : n + 3 + n]
+    offset = extras[:, n + 3 + n :]
+    # Bus model and current-sensor DR are off in this config: segments hold
+    # their nominal/identity values (dim stays stable across knobs).
+    assert torch.allclose(bus[:, 0], torch.ones_like(bus[:, 0]))
+    assert torch.allclose(bus[:, 1], torch.zeros_like(bus[:, 1]))
+    assert torch.allclose(gain, torch.ones_like(gain))
+    assert torch.allclose(offset, torch.zeros_like(offset))
   finally:
     env.close()

@@ -38,12 +38,12 @@ from mjlab.envs.mdp.actions.phase_delta import PhaseDeltaAction as PhaseDeltaAct
 from mjlab.envs.mdp.actions.phase_delta import (
   PhaseDeltaActionCfg as PhaseDeltaActionCfg,
 )
+from mjlab.envs.mdp.actions.phase_delta import (
+  get_phase_delta_action as get_phase_delta_action,
+)
 from mjlab.envs.mdp.actions.scripted_head import (
   ScriptedHeadAction as ScriptedHeadAction,
 )
 from mjlab.envs.mdp.actions.scripted_head import (
   ScriptedHeadActionCfg as ScriptedHeadActionCfg,
-)
-from mjlab.envs.mdp.actions.phase_delta import (
-  get_phase_delta_action as get_phase_delta_action,
 )

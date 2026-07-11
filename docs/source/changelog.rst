@@ -8,6 +8,23 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- RMA-style adaptation module (``RMA`` knob, NUgus velocity task): a
+  concurrent teacher-student latent swap to recover the capability lost to
+  wide domain randomization. A param encoder maps the true per-env DR
+  realization (``dr_ratios`` plus the new ``dr_extras`` — encoder bias,
+  bus-voltage latents, current-sensor calibration) to a compact latent
+  ``z`` conditioning the policy; a fixed-window TCN estimator regresses
+  ``z_hat`` from a T-step actor-observation history concurrently with PPO
+  (stop-grad both ways). New ``"dr"`` and ``"history"`` observation groups,
+  mirror rules for both, ``RmaActor``/``RmaPPO`` in ``mjlab.rl.rma``, and a
+  single-input ONNX student export (flat time-major history window; the
+  current obs is the last frame). Knobs: ``RMA_WINDOW``, ``RMA_Z_DIM``,
+  ``RMA_EST_COEF``, ``RMA_ZHAT_MIX_START_ITER``/``END_ITER`` (late-training
+  anneal from z to z_hat), ``RMA_EVAL_PATH=teacher|student`` in
+  ``nugus_eval.py``. With ``RMA`` unset nothing changes. ``dr_extras`` also
+  joins the critic under the knob (those DR realizations were previously
+  invisible to it).
+
 - Off-policy scripted head (``ScriptedHeadAction``, ``HEAD_SCRIPTED`` knob
   on ``clock_owned``): drives ``neck_yaw``/``head_pitch`` saccadically
   off-policy (dwell at a fixation, then step to a new random target so the
@@ -67,6 +84,17 @@ Added
 
 Fixed
 ^^^^^
+
+- Left-right mirror augmentation scrambled every per-actuator observation
+  block: entity actuator columns are in spec order, but the mirror applied
+  the motor-joint-order permutation, so mirrored ``actuator_current`` /
+  ``servo_voltage`` samples cross-wired servos across limbs (e.g. shoulder
+  current read from a hip) in half of every ``MIRROR_AUG`` batch, and the
+  critic's ``dr_ratios`` kp/kd/effort segments were mirrored with the same
+  wrong permutation. Now mirrored with a spec-order permutation (current
+  additionally gets the joint sign — it is signed, not a magnitude). The
+  symmetry-augmentation callback also now raises on observation groups it
+  does not recognize instead of silently dropping them.
 
 - The frontier histogram views (``push_survival_by_dv``, ``hazard_by_rho``,
   ``hazard_by_speed``, ``attain_by_speed``) are now evidence-masked: bins

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -304,6 +305,21 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
     map_location=device,
   )
   policy = runner.get_inference_policy(device=device)
+
+  # RMA checkpoints (train and eval with RMA=1 so the env groups and actor
+  # class match): RMA_EVAL_PATH selects which latent drives the policy.
+  #   teacher (default) — encoder(z) from the true DR params.
+  #   student           — estimator z-hat from the obs history window.
+  # The same command grid under both paths measures the adaptation gap,
+  # which is the experiment's primary readout.
+  actor = getattr(runner.alg, "_raw_actor", None)
+  zhat_mix = getattr(actor, "zhat_mix", None)
+  if zhat_mix is not None:
+    eval_path = os.environ.get("RMA_EVAL_PATH", "teacher").strip().lower()
+    if eval_path not in ("teacher", "student"):
+      raise ValueError(f"RMA_EVAL_PATH must be teacher|student, got {eval_path!r}")
+    zhat_mix.fill_(1.0 if eval_path == "student" else 0.0)
+    print(f"[INFO] RMA eval path: {eval_path} (zhat_mix={float(zhat_mix):.1f})")
 
   twist = cast(UniformVelocityCommand, unwrapped.command_manager.get_term("twist"))
   robot = unwrapped.scene["robot"]

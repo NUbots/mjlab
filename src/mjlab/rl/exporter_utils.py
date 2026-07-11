@@ -48,7 +48,7 @@ def get_base_metadata(
   ]
   joint_stiffness = env.sim.mj_model.actuator_gainprm[ctrl_ids_natural, 0]
   joint_damping = -env.sim.mj_model.actuator_biasprm[ctrl_ids_natural, 2]
-  return {
+  metadata: dict[str, list | str | float] = {
     "run_path": run_path,
     "joint_names": list(robot.joint_names),
     "joint_stiffness": joint_stiffness.tolist(),
@@ -60,6 +60,21 @@ def get_base_metadata(
     if isinstance(joint_action._scale, torch.Tensor)
     else joint_action._scale,
   }
+  # RMA student export: the ONNX input is a flat T-frame history window
+  # (time-major, oldest first) whose per-frame layout equals the actor
+  # observation vector (observation_names above). The deployment side
+  # keeps a ring buffer of that vector, seeded by repeating the first
+  # frame (matches the training CircularBuffer backfill on reset).
+  obs_mgr = env.observation_manager
+  if "history" in obs_mgr.active_terms:
+    history_dims = obs_mgr.group_obs_term_dim["history"]
+    window = int(history_dims[0][0])
+    frame_dim = sum(int(dims[-1]) for dims in history_dims)
+    metadata["rma"] = 1
+    metadata["history_window"] = window
+    metadata["history_obs_dim"] = frame_dim
+    metadata["history_layout"] = "time_major_oldest_first"
+  return metadata
 
 
 def attach_metadata_to_onnx(

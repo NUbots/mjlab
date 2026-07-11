@@ -1,4 +1,4 @@
-"""Critic-only observation of sampled domain-randomization parameters."""
+"""Privileged observations of sampled domain-randomization parameters."""
 
 from __future__ import annotations
 
@@ -9,7 +9,13 @@ from weakref import WeakKeyDictionary
 import torch
 
 from mjlab.entity import Entity
+from mjlab.envs.mdp.dr.actuator import get_current_sensor_buffers
 from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.tasks.velocity.mdp.bus_voltage import (
+  R_SRC_NOMINAL,
+  V_NOMINAL,
+  get_bus_state,
+)
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -23,6 +29,19 @@ _EPS = 1e-8
 DR_RATIOS_NUM_ACTUATORS = 20
 DR_RATIOS_NUM_MOTOR_DOFS = 20
 DR_RATIOS_DIM = 5 * DR_RATIOS_NUM_ACTUATORS + 1 + 3 + 2
+
+# ``dr_extras`` layout (segment offsets; every per-servo segment is in
+# motor-joint order, i.e. the same order as joint_pos/joint_vel/actions):
+#   [0:20]   encoder bias (rad)
+#   [20]     bus open-circuit voltage / V_NOMINAL
+#   [21]     bus sag rate (V/min)
+#   [22]     bus source resistance (ohm)
+#   [23:43]  current-sensor gain
+#   [43:63]  current-sensor offset (A)
+# The mirror map (mirror_map.py) depends on these offsets.
+DR_EXTRAS_NUM_MOTOR_DOFS = 20
+DR_EXTRAS_NUM_BUS = 3
+DR_EXTRAS_DIM = DR_EXTRAS_NUM_MOTOR_DOFS + DR_EXTRAS_NUM_BUS + 2 * 20
 
 
 @dataclass
@@ -171,3 +190,84 @@ def dr_ratios_effort_slice(n_actuators: int = DR_RATIOS_NUM_ACTUATORS) -> slice:
 def dr_ratios_torso_mass_index(n_actuators: int = DR_RATIOS_NUM_ACTUATORS) -> int:
   """Index of the torso mass ratio within ``dr_ratios``."""
   return 5 * n_actuators
+
+
+@dataclass
+class _DrExtrasCache:
+  motor_joint_ids: torch.Tensor
+  # act_to_joint[j] = actuator column (entity spec order) carrying the servo
+  # of motor joint j. Actuator/spec order differs from joint order (see
+  # tests/test_nugus_observation_vector.py), so the current-sensor buffers
+  # must be permuted into joint order before concatenation.
+  act_to_joint: torch.Tensor
+  buffers_cfg: SceneEntityCfg
+
+
+_EXTRAS_CACHE: WeakKeyDictionary[ManagerBasedRlEnv, _DrExtrasCache] = (
+  WeakKeyDictionary()
+)
+
+
+def _resolve_extras_cache(
+  env: ManagerBasedRlEnv, motor_asset_cfg: SceneEntityCfg
+) -> _DrExtrasCache:
+  cached = _EXTRAS_CACHE.get(env)
+  if cached is not None:
+    return cached
+
+  motor_cfg = SceneEntityCfg(
+    motor_asset_cfg.name,
+    joint_names=motor_asset_cfg.joint_names,
+    preserve_order=motor_asset_cfg.preserve_order,
+  )
+  motor_cfg.resolve(env.scene)
+  asset: Entity = env.scene[motor_asset_cfg.name]
+  joint_ids = motor_cfg.joint_ids
+  assert isinstance(joint_ids, list)
+  joint_names = [asset.joint_names[i] for i in joint_ids]
+  actuator_names = list(asset.actuator_names)
+  act_to_joint = [actuator_names.index(name) for name in joint_names]
+
+  cached = _DrExtrasCache(
+    motor_joint_ids=torch.tensor(joint_ids, device=env.device, dtype=torch.long),
+    act_to_joint=torch.tensor(act_to_joint, device=env.device, dtype=torch.long),
+    buffers_cfg=SceneEntityCfg(motor_asset_cfg.name),
+  )
+  _EXTRAS_CACHE[env] = cached
+  return cached
+
+
+def dr_extras(
+  env: ManagerBasedRlEnv,
+  motor_asset_cfg: SceneEntityCfg = _DEFAULT_MOTOR_ASSET_CFG,
+) -> torch.Tensor:
+  """Privileged DR realizations not covered by :func:`dr_ratios`.
+
+  ``dr_ratios`` predates the bus-voltage model and the current-sensor
+  calibration DR, so those realizations (plus encoder bias) never reached
+  the critic. This term completes the privileged vector for both the
+  critic and the RMA teacher encoder. Layout is documented next to
+  ``DR_EXTRAS_DIM``. When the bus model or current-sensor DR is disabled,
+  the corresponding segments hold their nominal (identity) values so the
+  dimension is stable across knob combinations.
+  """
+  cache = _resolve_extras_cache(env, motor_asset_cfg)
+  asset: Entity = env.scene[motor_asset_cfg.name]
+
+  bias = asset.data.encoder_bias[:, cache.motor_joint_ids]
+
+  state = get_bus_state(env)
+  if state is None:
+    bus = torch.tensor([[1.0, 0.0, R_SRC_NOMINAL]], device=env.device).expand(
+      env.num_envs, DR_EXTRAS_NUM_BUS
+    )
+  else:
+    bus = torch.stack(
+      [state.v_oc / V_NOMINAL, state.sag_per_s * 60.0, state.r_src], dim=-1
+    )
+
+  gain, offset, _ = get_current_sensor_buffers(env, cache.buffers_cfg)
+  return torch.cat(
+    [bias, bus, gain[:, cache.act_to_joint], offset[:, cache.act_to_joint]],
+    dim=-1,
+  )

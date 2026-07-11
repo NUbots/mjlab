@@ -109,12 +109,20 @@ def mirror_joint_vector(
 
 
 def _term_slices(
-  term_names: list[str], term_dims: list[tuple[int, ...]]
+  term_names: list[str],
+  term_dims: list[tuple[int, ...]],
+  last_dim_only: bool = False,
 ) -> dict[str, slice]:
+  """Build per-term slices into a group's concatenated observation.
+
+  ``last_dim_only`` is for 3D history groups (``flatten_history_dim=False``),
+  whose term dims are ``(T, D_i)`` concatenated along the LAST dim: the slice
+  must span ``D_i``, not ``T * D_i``.
+  """
   slices: dict[str, slice] = {}
   offset = 0
   for name, dims in zip(term_names, term_dims, strict=True):
-    size = int(np.prod(dims))
+    size = int(dims[-1]) if last_dim_only else int(np.prod(dims))
     slices[name] = slice(offset, offset + size)
     offset += size
   return slices
@@ -146,9 +154,20 @@ class NugusMirrorMap:
   joint_perm: torch.Tensor
   joint_sign: torch.Tensor
   dr_joint_perm: torch.Tensor
+  # Actuator/spec-order mirror map. Entity actuator columns (model.ctrl,
+  # actuator_current / servo_voltage observations, and dr_ratios' per-
+  # actuator segments) are in SPEC order, which differs from the motor
+  # joint order (see tests/test_nugus_observation_vector.py) -- applying
+  # the joint-order permutation to them scrambles servos cross-limb.
+  ctrl_perm: torch.Tensor
+  ctrl_sign: torch.Tensor
   motor_joint_ids: torch.Tensor
   default_joint_pos: torch.Tensor
   height_scan_grid: tuple[int, int] | None = None
+  # Slices for the RMA "history" (3D, per-frame == actor layout) and "dr"
+  # groups; None when those groups are not configured (RMA off).
+  history_slices: dict[str, slice] | None = None
+  dr_slices: dict[str, slice] | None = None
 
   @classmethod
   def from_env(cls, env: ManagerBasedRlEnv) -> NugusMirrorMap:
@@ -157,6 +176,18 @@ class NugusMirrorMap:
     critic_names = obs_mgr.active_terms["critic"]
     actor_slices = _term_slices(actor_names, obs_mgr.group_obs_term_dim["actor"])
     critic_slices = _term_slices(critic_names, obs_mgr.group_obs_term_dim["critic"])
+    history_slices = None
+    if "history" in obs_mgr.active_terms:
+      history_slices = _term_slices(
+        obs_mgr.active_terms["history"],
+        obs_mgr.group_obs_term_dim["history"],
+        last_dim_only=True,
+      )
+    dr_slices = None
+    if "dr" in obs_mgr.active_terms:
+      dr_slices = _term_slices(
+        obs_mgr.active_terms["dr"], obs_mgr.group_obs_term_dim["dr"]
+      )
 
     robot = env.scene["robot"]
     motor_cfg = SceneEntityCfg("robot", joint_names=(NUGUS_MOTOR_JOINT_REGEX,))
@@ -172,6 +203,7 @@ class NugusMirrorMap:
 
     joint_perm, joint_sign = build_joint_mirror_indices(MOTOR_JOINT_ORDER)
     dr_joint_perm, _ = build_joint_mirror_indices(MOTOR_JOINT_ORDER)
+    ctrl_perm, ctrl_sign = build_joint_mirror_indices(tuple(robot.actuator_names))
     default_joint_pos = robot.data.default_joint_pos[0, joint_ids].clone()
 
     return cls(
@@ -180,9 +212,13 @@ class NugusMirrorMap:
       joint_perm=joint_perm,
       joint_sign=joint_sign,
       dr_joint_perm=dr_joint_perm,
+      ctrl_perm=ctrl_perm,
+      ctrl_sign=ctrl_sign,
       motor_joint_ids=torch.tensor(joint_ids, dtype=torch.long),
       default_joint_pos=default_joint_pos,
       height_scan_grid=_terrain_height_scan_grid_shape(env),
+      history_slices=history_slices,
+      dr_slices=dr_slices,
     )
 
   def _mirror_base_ang_vel(self, obs: torch.Tensor, sl: slice) -> None:
@@ -214,14 +250,27 @@ class NugusMirrorMap:
       return
     obs[..., sl] = mirror_joint_vector(block, self.joint_perm, self.joint_sign)
 
+  def _permute(self, values: torch.Tensor, perm: torch.Tensor) -> torch.Tensor:
+    """Left-right permutation along the last dim, no sign flip."""
+    return values[..., perm.to(values.device)]
+
   def _mirror_dr_ratios(self, obs: torch.Tensor, sl: slice) -> None:
     block = obs[..., sl].clone()
     n = DR_RATIOS_NUM_ACTUATORS
-    for seg_start in range(0, 5 * n, n):
-      seg = slice(seg_start, seg_start + n)
-      block[..., seg] = mirror_joint_vector(
-        block[..., seg], self.dr_joint_perm, torch.ones(n)
+    # kp/kd/effort segments are indexed by actuator ctrl ids -> SPEC order;
+    # armature/frictionloss are indexed by motor joint dofs -> JOINT order
+    # (see dr_observations._resolve_cache). Positive ratios: permute only.
+    for i, perm in enumerate(
+      (
+        self.ctrl_perm,  # kp_scale
+        self.ctrl_perm,  # kd_scale
+        self.ctrl_perm,  # effort_ratio
+        self.dr_joint_perm,  # armature_ratio
+        self.dr_joint_perm,  # frictionloss_ratio
       )
+    ):
+      seg = slice(i * n, (i + 1) * n)
+      block[..., seg] = self._permute(block[..., seg], perm)
     torso_mass_idx = 5 * n
     com_start = torso_mass_idx + 1
     block[..., com_start + 1] *= -1.0
@@ -230,6 +279,38 @@ class NugusMirrorMap:
       ..., [1, 0]
     ]
     obs[..., sl] = block
+
+  def _mirror_dr_extras(self, obs: torch.Tensor, sl: slice) -> None:
+    # Layout pinned in dr_observations.DR_EXTRAS_DIM: encoder_bias (20,
+    # joint order), bus latents (3, chassis-level: identity), current-
+    # sensor gain/offset (20+20, joint order). Encoder bias offsets the
+    # joint-angle reading, so it transforms like a joint position (perm +
+    # sign); gain/offset are per-servo calibration constants that follow
+    # their servo (perm only).
+    block = obs[..., sl].clone()
+    n = self.dr_joint_perm.numel()
+    block[..., :n] = mirror_joint_vector(
+      block[..., :n], self.dr_joint_perm, self.joint_sign
+    )
+    gain_start = n + 3
+    for seg_start in (gain_start, gain_start + n):
+      seg = slice(seg_start, seg_start + n)
+      block[..., seg] = self._permute(block[..., seg], self.dr_joint_perm)
+    obs[..., sl] = block
+
+  def _mirror_actuator_current(self, obs: torch.Tensor, sl: slice) -> None:
+    # Sensed current is SIGNED (tau / Kt, no abs) and the columns are in
+    # actuator SPEC order: mirror = spec-order permutation with the joint
+    # sign (mirrored torque flips where the joint angle flips). The per-
+    # servo sensor offset does not flip with the sign, so this rule is off
+    # by up to 2*|offset| (<= 0.2 A) on sign-flipped channels -- below the
+    # 0.25 A observation noise floor.
+    out = mirror_joint_vector(obs[..., sl], self.ctrl_perm, self.ctrl_sign)
+    obs[..., sl] = out
+
+  def _mirror_servo_voltage(self, obs: torch.Tensor, sl: slice) -> None:
+    # Positive supply voltage per servo, SPEC order: permutation only.
+    obs[..., sl] = self._permute(obs[..., sl], self.ctrl_perm)
 
   def _mirror_foot_pair(self, obs: torch.Tensor, sl: slice) -> None:
     block = obs[..., sl]
@@ -241,29 +322,55 @@ class NugusMirrorMap:
     block[..., 1] *= -1.0
     obs[..., sl] = block.reshape(*obs.shape[:-1], 6)
 
-  def mirror_actor_obs(self, obs: torch.Tensor) -> torch.Tensor:
-    out = obs.clone()
-    for name, sl in self.actor_slices.items():
+  def _apply_actor_rules(self, out: torch.Tensor, slices: dict[str, slice]) -> None:
+    """Apply per-term actor mirror rules in place.
+
+    Every rule indexes only the last (feature) dim, so this works
+    unchanged on the 3D ``[B, T, D]`` history group (broadcast over T).
+    """
+    for name, sl in slices.items():
       if name == "base_ang_vel":
         self._mirror_base_ang_vel(out, sl)
       elif name == "projected_gravity":
         self._mirror_projected_gravity(out, sl)
       elif name in ("joint_pos", "joint_vel", "actions"):
         self._mirror_joint_block(out, sl)
-      elif name in ("actuator_current", "servo_voltage"):
-        # Per-servo magnitudes in actuator order: left/right permutation
-        # only, no sign flip (current is |tau|-scaled, voltage positive).
-        out[..., sl] = mirror_joint_vector(
-          out[..., sl],
-          self.dr_joint_perm,
-          torch.ones_like(self.joint_sign, device=out.device),
-        )
+      elif name == "actuator_current":
+        self._mirror_actuator_current(out, sl)
+      elif name == "servo_voltage":
+        self._mirror_servo_voltage(out, sl)
       elif name == "command":
         self._mirror_command(out, sl)
       elif name == "gait_clock":
         self._mirror_gait_clock(out, sl)
       else:
         raise ValueError(f"No actor mirror rule for observation term {name!r}")
+
+  def mirror_actor_obs(self, obs: torch.Tensor) -> torch.Tensor:
+    out = obs.clone()
+    self._apply_actor_rules(out, self.actor_slices)
+    return out
+
+  def mirror_history_obs(self, obs: torch.Tensor) -> torch.Tensor:
+    """Mirror the RMA history group ``[B, T, D]`` (per-frame actor layout)."""
+    if self.history_slices is None:
+      raise ValueError("history group not configured in this env")
+    out = obs.clone()
+    self._apply_actor_rules(out, self.history_slices)
+    return out
+
+  def mirror_dr_obs(self, obs: torch.Tensor) -> torch.Tensor:
+    """Mirror the RMA privileged DR group (dr_ratios + dr_extras)."""
+    if self.dr_slices is None:
+      raise ValueError("dr group not configured in this env")
+    out = obs.clone()
+    for name, sl in self.dr_slices.items():
+      if name == "dr_ratios":
+        self._mirror_dr_ratios(out, sl)
+      elif name == "dr_extras":
+        self._mirror_dr_extras(out, sl)
+      else:
+        raise ValueError(f"No dr mirror rule for observation term {name!r}")
     return out
 
   def mirror_critic_obs(self, obs: torch.Tensor) -> torch.Tensor:
@@ -275,19 +382,12 @@ class NugusMirrorMap:
         self._mirror_base_ang_vel(out, sl)
       elif name == "projected_gravity":
         self._mirror_projected_gravity(out, sl)
-      elif name in (
-        "joint_pos",
-        "joint_vel",
-        "actions",
-        "actuator_current",
-        "servo_voltage",
-      ):
-        if name in ("actuator_current", "servo_voltage"):
-          out[..., sl] = mirror_joint_vector(
-            out[..., sl], self.dr_joint_perm, torch.ones_like(self.joint_sign)
-          )
-        else:
-          self._mirror_joint_block(out, sl)
+      elif name in ("joint_pos", "joint_vel", "actions"):
+        self._mirror_joint_block(out, sl)
+      elif name == "actuator_current":
+        self._mirror_actuator_current(out, sl)
+      elif name == "servo_voltage":
+        self._mirror_servo_voltage(out, sl)
       elif name == "command":
         self._mirror_command(out, sl)
       elif name in ("foot_height", "foot_air_time", "foot_contact"):
@@ -296,6 +396,8 @@ class NugusMirrorMap:
         self._mirror_foot_contact_forces(out, sl)
       elif name == "dr_ratios":
         self._mirror_dr_ratios(out, sl)
+      elif name == "dr_extras":
+        self._mirror_dr_extras(out, sl)
       elif name == "gait_clock":
         self._mirror_gait_clock(out, sl)
       elif name == "height_scan":
@@ -420,18 +522,23 @@ def nugus_symmetry_augmentation(
   obs_aug: TensorDict | None
   if obs is not None:
     batch_size = obs.batch_size[0]
-    actor_obs = obs["actor"]
-    assert isinstance(actor_obs, torch.Tensor)
-    mirrored_actor = mirror_map.mirror_actor_obs(actor_obs)
-    fields: dict[str, torch.Tensor] = {
-      "actor": torch.cat([actor_obs, mirrored_actor], dim=0),
+    # Mirror EVERY group present. Unknown groups must raise: silently
+    # passing one through un-mirrored (or dropping it, as this callback
+    # once did) corrupts half of every augmented batch for that group.
+    mirror_fns = {
+      "actor": mirror_map.mirror_actor_obs,
+      "critic": mirror_map.mirror_critic_obs,
+      "dr": mirror_map.mirror_dr_obs,
+      "history": mirror_map.mirror_history_obs,
     }
-    if "critic" in obs.keys():
-      critic_obs = obs["critic"]
-      assert isinstance(critic_obs, torch.Tensor)
-      fields["critic"] = torch.cat(
-        [critic_obs, mirror_map.mirror_critic_obs(critic_obs)], dim=0
-      )
+    fields: dict[str, torch.Tensor] = {}
+    for key in obs.keys():
+      mirror_fn = mirror_fns.get(str(key))
+      if mirror_fn is None:
+        raise ValueError(f"No mirror rule for observation group {key!r}")
+      group_obs = obs[key]
+      assert isinstance(group_obs, torch.Tensor)
+      fields[str(key)] = torch.cat([group_obs, mirror_fn(group_obs)], dim=0)
     obs_aug = TensorDict(fields, batch_size=[batch_size * 2])  # ty: ignore[invalid-argument-type]
   else:
     obs_aug = None

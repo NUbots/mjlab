@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import sys
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
 import mujoco
 import numpy as np
+import onnx
 import onnxruntime as ort
 import tyro
 from nugus_eval import (
@@ -62,6 +64,11 @@ def _load_onnx_session(cfg: Sim2SimEvalConfig) -> tuple[ort.InferenceSession, Pa
   return session, path
 
 
+def _read_onnx_metadata(path: Path) -> dict[str, str]:
+  model = onnx.load(str(path))
+  return {entry.key: entry.value for entry in model.metadata_props}
+
+
 def _fallen(data: mujoco.MjData) -> bool:
   gravity_b = projected_gravity_from_data(data)
   tilt = np.arctan2(np.linalg.norm(gravity_b[:2]), -gravity_b[2])
@@ -103,6 +110,11 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
   configure_torch_backends()
   session, onnx_path = _load_onnx_session(cfg)
   input_name = session.get_inputs()[0].name
+  # RMA student policies take a flat T-frame history window (time-major,
+  # oldest first) of the actor obs vector; the window length rides in the
+  # ONNX metadata written at export.
+  onnx_meta = _read_onnx_metadata(onnx_path)
+  rma_window = int(onnx_meta["history_window"]) if "rma" in onnx_meta else 0
 
   env_cfg = load_env_cfg(TASK_ID, play=False)
   env_cfg.scene.num_envs = 1
@@ -131,6 +143,7 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
     acc = metrics.per_command[cmd_idx]
     fell = False
     ep_len_s = 0.0
+    frames: deque[np.ndarray] = deque(maxlen=rma_window or 1)
 
     for _ in range(steps):
       obs = build_actor_obs(
@@ -142,7 +155,17 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
         sim_time=sim_time,
         gait_period=GAIT_PERIOD,
       )
-      action = session.run(None, {input_name: obs[None, :]})[0][0]
+      if rma_window:
+        if not frames:
+          # Seed with the first frame (matches training-side CircularBuffer
+          # backfill on reset).
+          frames.extend([obs] * rma_window)
+        else:
+          frames.append(obs)
+        net_input = np.concatenate(list(frames), axis=0)[None, :]
+      else:
+        net_input = obs[None, :]
+      action = session.run(None, {input_name: net_input})[0][0]
       last_action = action.astype(np.float32)
       target_ctrl = default_ctrl + indices.action_scale * last_action
       mj_data.ctrl[:] = target_ctrl

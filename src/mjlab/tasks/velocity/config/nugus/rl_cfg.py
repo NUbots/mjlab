@@ -7,6 +7,7 @@ from mjlab.rl import (
   RslRlOnPolicyRunnerCfg,
   RslRlPpoAlgorithmCfg,
 )
+from mjlab.rl.rma import RmaModelCfg, RmaPpoAlgorithmCfg
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -41,45 +42,81 @@ def _symmetry_cfg() -> dict | None:
 def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   """Create RL runner configuration for NUbots Nugus velocity task."""
   gamma = _env_float("GAMMA", 0.99)
-  return RslRlOnPolicyRunnerCfg(
-    actor=RslRlModelCfg(
+  rma = _env_bool("RMA", default=False)
+
+  distribution_cfg = {
+    "class_name": "GaussianDistribution",
+    "init_std": 1.0,
+    "std_type": "log",
+    # Hard sigma floor (STD_MIN): on the corrected physics every late-run
+    # degradation began after std sank below ~0.15 regardless of entropy
+    # coefficient (v16c held coef 0.01 and std was still crushed to
+    # 0.087) — the reward economics pay for killing action noise until
+    # the policy overfits a narrow action tube and ordinary pushes
+    # become OOD. Clamp the distribution's std_range instead of fighting
+    # the economics through the entropy bonus.
+    "std_range": (_env_float("STD_MIN", 1e-6), 4.0),
+  }
+
+  if rma:
+    # RMA adaptation module (rl/rma.py): custom actor with the DR-param
+    # encoder + history estimator, custom PPO with the concurrent
+    # regression loss, and the extra obs groups routed to the actor set.
+    actor_cfg: RslRlModelCfg = RmaModelCfg(
       hidden_dims=(512, 256, 128),
       activation="elu",
       obs_normalization=True,
-      distribution_cfg={
-        "class_name": "GaussianDistribution",
-        "init_std": 1.0,
-        "std_type": "log",
-        # Hard sigma floor (STD_MIN): on the corrected physics every late-run
-        # degradation began after std sank below ~0.15 regardless of entropy
-        # coefficient (v16c held coef 0.01 and std was still crushed to
-        # 0.087) — the reward economics pay for killing action noise until
-        # the policy overfits a narrow action tube and ordinary pushes
-        # become OOD. Clamp the distribution's std_range instead of fighting
-        # the economics through the entropy bonus.
-        "std_range": (_env_float("STD_MIN", 1e-6), 4.0),
+      distribution_cfg=distribution_cfg,
+      class_name="mjlab.rl.rma:RmaActor",
+      rma_cfg={
+        "z_dim": _env_int("RMA_Z_DIM", 16),
+        "encoder_hidden_dims": (128, 64),
+        "tcn_channels": (32, 32),
+        "tcn_kernel": 5,
+        "tcn_stride": 2,
       },
-    ),
+    )
+    algorithm_cfg: RslRlPpoAlgorithmCfg = RmaPpoAlgorithmCfg(
+      class_name="mjlab.rl.rma:RmaPPO",
+      est_loss_coef=_env_float("RMA_EST_COEF", 1.0),
+    )
+    obs_groups = {
+      "actor": ("actor", "dr", "history"),
+      "critic": ("critic",),
+    }
+  else:
+    actor_cfg = RslRlModelCfg(
+      hidden_dims=(512, 256, 128),
+      activation="elu",
+      obs_normalization=True,
+      distribution_cfg=distribution_cfg,
+    )
+    algorithm_cfg = RslRlPpoAlgorithmCfg()
+    obs_groups = {"actor": ("actor",), "critic": ("critic",)}
+
+  algorithm_cfg.value_loss_coef = 1.0
+  algorithm_cfg.use_clipped_value_loss = True
+  algorithm_cfg.clip_param = 0.2
+  algorithm_cfg.entropy_coef = 0.01
+  algorithm_cfg.num_learning_epochs = 5
+  algorithm_cfg.num_mini_batches = 4
+  algorithm_cfg.learning_rate = 1.0e-3
+  algorithm_cfg.schedule = "adaptive"
+  algorithm_cfg.gamma = gamma
+  algorithm_cfg.lam = 0.95
+  algorithm_cfg.desired_kl = 0.01
+  algorithm_cfg.max_grad_norm = 1.0
+  algorithm_cfg.symmetry_cfg = _symmetry_cfg()
+
+  return RslRlOnPolicyRunnerCfg(
+    actor=actor_cfg,
     critic=RslRlModelCfg(
       hidden_dims=(512, 256, 128),
       activation="elu",
       obs_normalization=True,
     ),
-    algorithm=RslRlPpoAlgorithmCfg(
-      value_loss_coef=1.0,
-      use_clipped_value_loss=True,
-      clip_param=0.2,
-      entropy_coef=0.01,
-      num_learning_epochs=5,
-      num_mini_batches=4,
-      learning_rate=1.0e-3,
-      schedule="adaptive",
-      gamma=gamma,
-      lam=0.95,
-      desired_kl=0.01,
-      max_grad_norm=1.0,
-      symmetry_cfg=_symmetry_cfg(),
-    ),
+    algorithm=algorithm_cfg,
+    obs_groups=obs_groups,
     experiment_name="nugus_velocity",
     save_interval=250,
     num_steps_per_env=24,

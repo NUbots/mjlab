@@ -26,9 +26,10 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _optimizer_hygiene_enabled() -> bool:
-  return _env_bool("ENTROPY_DECAY", default=False) or os.environ.get("LR_CAP") not in (
-    None,
-    "",
+  return (
+    _env_bool("ENTROPY_DECAY", default=False)
+    or os.environ.get("LR_CAP") not in (None, "")
+    or _env_int("RMA_ZHAT_MIX_END_ITER", 0) > 0
   )
 
 
@@ -44,6 +45,30 @@ def _apply_entropy_decay(runner: VelocityOnPolicyRunner, iteration: int) -> None
     frac = min(max(iteration / (max_iters - 1), 0.0), 1.0)
     coef = start + (end - start) * frac
   runner.alg.entropy_coef = coef
+
+
+def _apply_zhat_mix_anneal(runner: VelocityOnPolicyRunner, iteration: int) -> None:
+  """Linearly blend the RMA actor's latent from encoder-z to estimator
+  z-hat over [RMA_ZHAT_MIX_START_ITER, RMA_ZHAT_MIX_END_ITER].
+
+  Off unless the end iter is set (> 0). Late-run annealing makes the
+  policy roll out on the same latent it will see on hardware, closing the
+  teacher-student distribution gap before export. The mix lives in a
+  model buffer, so it checkpoints/restores with the actor.
+  """
+  end = _env_int("RMA_ZHAT_MIX_END_ITER", 0)
+  if end <= 0:
+    return
+  actor = getattr(runner.alg, "_raw_actor", None)
+  mix_buf = getattr(actor, "zhat_mix", None)
+  if mix_buf is None:
+    return
+  start = _env_int("RMA_ZHAT_MIX_START_ITER", 0)
+  if end <= start:
+    alpha = 1.0 if iteration >= end else 0.0
+  else:
+    alpha = min(max((iteration - start) / (end - start), 0.0), 1.0)
+  mix_buf.fill_(alpha)
 
 
 def _apply_lr_cap(runner: VelocityOnPolicyRunner, iteration: int) -> None:
@@ -74,6 +99,7 @@ class NugusOnPolicyRunner(VelocityOnPolicyRunner):
 
     def update_with_hygiene() -> dict[str, float]:
       _apply_entropy_decay(self, self.current_learning_iteration)
+      _apply_zhat_mix_anneal(self, self.current_learning_iteration)
       loss_dict = original_update()
       _apply_lr_cap(self, self.current_learning_iteration)
       return loss_dict
