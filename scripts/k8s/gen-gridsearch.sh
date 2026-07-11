@@ -1803,6 +1803,28 @@ gen_v52() {
   emit_manifest "mj-gs-v52-flail"
 }
 
+# BATCH=v53: RMA concurrent adaptation module on the v52 champion config.
+# Wide DR makes the policy hedge; RMA lets it specialize at runtime: an
+# encoder maps the true DR realization (dr_ratios + dr_extras, 169 dims)
+# to a 16-dim latent z conditioning the policy, while a fixed-window TCN
+# estimator concurrently regresses z_hat from a 25-step obs history
+# (stop-grad both ways; Loss/estimation is the z-error readout). The
+# exported ONNX is the deployable student (history ring buffer in,
+# actions out). Also the first run with the actuator-order mirror fix:
+# every MIRROR_AUG run since v48 trained on mirrored samples whose
+# current/voltage channels were cross-wired between servos, so v53-vs-v52
+# comparisons carry that fix as a confound (in v53's favor). Eval:
+# nugus_eval with RMA_EVAL_PATH=teacher vs student on the same grid is
+# the adaptation-gap readout; zhat anneal knobs left off for run one.
+gen_v53() {
+  gen_v52
+  export RMA="1"
+  export MJLAB_LOG_STAMP="v53-rma-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v53-rma-adapt__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v53,bus-voltage,froude,clock-grounding,flail-cluster,scripted-head,electrical-joule,rma,adaptation,mirror-fix,batch-v53,gridsearch"
+  emit_manifest "mj-gs-v53-rma"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -2922,6 +2944,7 @@ case "$BATCH" in
   v51) gen_v51; expected=8 ;;
   v51s2) gen_v51s2; expected=9 ;;
   v52) gen_v52; expected=10 ;;
+  v53) gen_v53; expected=11 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
