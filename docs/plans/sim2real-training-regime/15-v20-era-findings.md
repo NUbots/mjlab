@@ -664,6 +664,64 @@ corrected). Head flail is uniform exploration noise on a light, unloaded,
 reward-flat joint — same noise everywhere, only the head has no restoring
 force.
 
+## R38 (2026-07-12): v53 RMA verdict — specialization beats hedging; the student's only tax is cold-start falls. Plus: the mirror had been scrambling per-actuator obs since v48
+
+v53 = v52 champion + the RMA concurrent adaptation module (encoder maps
+the true DR realization dr_ratios+dr_extras (169) to z (16) conditioning
+the policy; TCN estimator regresses z_hat from a 25-step obs history
+concurrently with PPO, stop-grad both ways; run uod84pdx, pin 16318c9).
+
+Training: the strongest run of the lineage on every axis — final track
+2.01 (v52 1.53, +31%), clean_fell 0.0079 (v52 0.041, 5x fewer),
+pushed_fell 0.088 (-33%), contact_match 0.947 held, arm 1.21 held.
+Estimation loss fell 0.119 -> 0.0046 and never plateaued; capability
+ROSE through the late run (track 1.84 -> 2.02 from iter 4500) — the
+signature of stop-hedging-start-specializing. Duck: 8.7 deg mid-run,
+~20 deg final (v52: 28) — partially returns with speed, consistent with
+velocity-limit-optimality at the frontier (R37).
+
+Eval (fixed grid, 128 envs/cmd, 20 s):
+
+| metric          | v48   | v51s2 | v53 teacher | v53 student |
+|-----------------|-------|-------|-------------|-------------|
+| lin_vel_rmse    | 0.086 | 0.113 | 0.099       | 0.105       |
+| ang_vel_rmse    | 0.300 | 0.342 | **0.199**   | 0.216       |
+| falls/min       | 0.000 | 0.007 | 0.005       | **0.028**   |
+| slip_vel        | 0.046 | 0.037 | **0.030**   | 0.031       |
+| swing_height_err| 0.070 | 0.044 | 0.045       | 0.046       |
+
+- Teacher is the best policy produced so far: ang tracking -40% vs all
+  prior, best slip, near-zero falls. The information was worth exactly
+  what the hedging had been costing.
+- Student (the deployable path: z_hat from history only) holds tracking
+  within 6-8% and slip/swing at par, but falls 6x the teacher
+  (0.028/min ~ one per 35 min). Falls skew early-episode (steps 87-553)
+  -> cold-start z_hat on backfilled windows, and the policy never rolled
+  out under its own estimator (zhat_mix stayed 0 all run). v54 = v53 +
+  the anneal tail (mix 0->1 over iters 7000-9000) is the designed fix.
+- z-collapse falsified: per-dim z std 0.06-0.15 (mean 0.096) vs
+  estimation residual 0.068 — the estimator recovers ~50% of the latent
+  variance from 0.5 s of history. The unrecovered half is presumably the
+  slow/weakly-excited params (bus sag, frictions at low load).
+
+CONFOUND, and a finding in its own right: v53 is also the first run with
+the actuator-order mirror fix. Entity actuator columns are in SPEC order,
+not motor-joint order; the symmetry augmentation had been applying the
+joint-order permutation to them, so every MIRROR_AUG run since v48
+trained on mirrored samples whose actuator_current/servo_voltage channels
+were cross-wired between servos (shoulder current read from a hip) and
+whose critic dr_ratios kp/kd/effort segments were scrambled. Policies
+plausibly learned to distrust current/voltage obs. v53's gains are
+RMA+fix jointly; if attribution ever matters, the ablation is
+mirror-fix-only (no RMA) — not queued, since both changes are
+independently justified and permanent.
+
+Ops scar tissue: the v53 first launch trained 4 iterations of plain
+MLPModel because the manifest baked the OLD GIT_COMMIT — manifests
+resolve the pin at GENERATION time (env > configmap.yaml > HEAD), so the
+invariant is pin FIRST, generate SECOND, apply THIRD, and the boot check
+must verify both the `HEAD is now at` line and `Actor Model: RmaActor`.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not
