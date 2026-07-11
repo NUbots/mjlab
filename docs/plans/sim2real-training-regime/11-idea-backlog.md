@@ -207,6 +207,23 @@ un-starred items overnight — they need design attention.
     after the winner; watch slip metrics.
 15. **Restore full-width mass/payload DR** — already doc 10 R14.
 
+15c. ⭐ **Perturbed sim2sim gate: adaptation evidence before hardware**
+    (from Trent's observation, 2026-07-12: the vanilla backend is "just
+    another realization" — DR + the RMA student IS the sysid, so
+    cross-engine transfer should work if the gap is in-envelope, and the
+    v53 student passing the fixed D1 gate with zero falls confirmed it).
+    Extend `sim2sim_eval` to sweep a few servo/physics perturbations in
+    vanilla MuJoCo — ±10% kp/kd (scale `NugusServoParams`), sagged
+    effort limits (bus-brownout proxy), heavier torso, low friction —
+    and compare student tracking/falls across cells, ideally against a
+    frozen-`z_hat` ablation (feed the zero-history prior instead of the
+    estimator output). Student degrading gracefully where the ablation
+    degrades hard = direct evidence the ADAPTATION transfers, not just
+    the mean policy. Cost: low (loop over `build_servo_params`
+    perturbations + one ONNX ablation flag). When: before first hardware
+    deployment of an RMA student; strongest pre-hardware evidence
+    available.
+
 ## Hygiene
 
 15b. ⭐ **Randomize initial episode clocks.** All envs start at
