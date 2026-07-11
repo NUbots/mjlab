@@ -180,6 +180,81 @@ def build_actor_obs(
   return obs
 
 
+@dataclass
+class NugusServoParams:
+  """Nominal per-joint DC-servo constants, in MOTOR_JOINT_ORDER.
+
+  The compiled MJCF actuators are pure TORQUE motors (gainprm=[1,0,0]);
+  mjlab computes the servo PD + DC torque-speed clip in Python every
+  physics step (``DcMotorActuator``). Any vanilla-MuJoCo or hardware-side
+  consumer must run the same loop — on the real robot the Dynamixel
+  firmware provides it, in sim2sim :func:`dc_servo_torque` emulates it.
+  Joint friction/armature/viscous damping are joint properties baked into
+  the compiled model, so only the PD + clip live here.
+  """
+
+  kp: np.ndarray
+  kd: np.ndarray
+  saturation_effort: np.ndarray
+  effort_limit: np.ndarray
+  velocity_limit: np.ndarray
+
+
+def build_servo_params(env) -> NugusServoParams:
+  """Collect nominal (un-randomized) servo constants per motor joint."""
+  robot: Entity = env.scene["robot"]
+  per_joint: dict[str, tuple[float, float, float, float, float]] = {}
+  for actuator in robot.actuators:
+    cfg = actuator.cfg
+    for name in actuator._target_names:
+      key = name.split("/")[-1]
+      per_joint[key] = (
+        float(cfg.stiffness),
+        float(cfg.damping),
+        float(getattr(cfg, "saturation_effort", cfg.effort_limit)),
+        float(cfg.effort_limit),
+        float(getattr(cfg, "velocity_limit", math.inf)),
+      )
+  rows = [per_joint[name] for name in MOTOR_JOINT_ORDER]
+  arr = np.array(rows, dtype=np.float64)
+  return NugusServoParams(
+    kp=arr[:, 0],
+    kd=arr[:, 1],
+    saturation_effort=arr[:, 2],
+    effort_limit=arr[:, 3],
+    velocity_limit=arr[:, 4],
+  )
+
+
+def dc_servo_torque(
+  qpos: np.ndarray,
+  qvel: np.ndarray,
+  target: np.ndarray,
+  params: NugusServoParams,
+) -> np.ndarray:
+  """Replica of ``IdealPdActuator.compute`` + ``DcMotorActuator._clip_effort``.
+
+  ``tau = kp * (target - q) - kd * qdot`` clipped to the DC torque-speed
+  curve: at zero velocity the motor can produce ``saturation_effort``,
+  falling linearly to zero at ``velocity_limit``, additionally capped at
+  the continuous ``effort_limit``.
+  """
+  tau = params.kp * (target - qpos) - params.kd * qvel
+  vel_at_lim = params.velocity_limit * (
+    1.0 + params.effort_limit / params.saturation_effort
+  )
+  vel = np.clip(qvel, -vel_at_lim, vel_at_lim)
+  top = np.minimum(
+    params.saturation_effort * (1.0 - vel / params.velocity_limit),
+    params.effort_limit,
+  )
+  bottom = np.maximum(
+    params.saturation_effort * (-1.0 - vel / params.velocity_limit),
+    -params.effort_limit,
+  )
+  return np.clip(tau, bottom, top)
+
+
 def advance_policy_phase(
   phase: float,
   raw_delta: float,

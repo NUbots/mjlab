@@ -22,11 +22,14 @@ from nugus_eval import (
 
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg
+from mjlab.tasks.velocity.config.nugus.mirror_map import MOTOR_JOINT_ORDER
 from mjlab.tasks.velocity.config.nugus.runtime_obs import (
   actor_obs_layout_from_env,
   advance_policy_phase,
   build_actor_obs,
+  build_servo_params,
   build_vanilla_indices,
+  dc_servo_torque,
   projected_gravity_from_data,
 )
 from mjlab.utils.torch import configure_torch_backends
@@ -133,8 +136,20 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
   try:
     layout = actor_obs_layout_from_env(setup_env)
     indices = build_vanilla_indices(setup_env, layout)
+    servo = build_servo_params(setup_env)
     mj_model = setup_env.sim.mj_model
     action_dim = setup_env.action_manager.total_action_dim
+    # Head joints are driven off-policy in training (HEAD_SCRIPTED) and by
+    # the vision system on hardware: the policy's head channels are
+    # untrained noise, so hold the head at its default pose here.
+    head_slots = np.array(
+      [
+        i
+        for i, name in enumerate(MOTOR_JOINT_ORDER)
+        if name in ("neck_yaw", "head_pitch")
+      ],
+      dtype=np.int64,
+    )
     # clock_owned: the 21st action channel drives the policy-owned gait
     # phase; replicate PhaseDeltaAction's integration deployment-side.
     phase_cfg = None
@@ -154,7 +169,7 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
 
   n_joints = len(indices.motor_qpos_adr)
   for cmd_idx, command in enumerate(COMMAND_GRID):
-    default_ctrl = _copy_reset_state(setup_env, mj_model, mj_data, cfg.seed + cmd_idx)
+    _copy_reset_state(setup_env, mj_model, mj_data, cfg.seed + cmd_idx)
     last_action = np.zeros(action_dim, dtype=np.float32)
     sim_time = 0.0
     policy_phase = 0.0
@@ -198,12 +213,13 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
           raw_max=phase_cfg["raw_max"],
           command_threshold=phase_cfg["command_threshold"],
         )
-      # Joint targets: first n_joints action channels, written to each
-      # joint's own ctrl slot (ctrl is actuator SPEC order, not joint
-      # order).
-      mj_data.ctrl[indices.ctrl_adr] = (
-        default_ctrl[indices.ctrl_adr] + indices.action_scale * last_action[:n_joints]
-      )
+      # Position targets (JointPositionAction semantics: default pose +
+      # scale * action). The compiled actuators are TORQUE motors — the
+      # servo PD runs outside MuJoCo (Dynamixel firmware on hardware), so
+      # each physics substep computes the DC-motor torque from the held
+      # target and writes it to the joint's own ctrl slot (spec order).
+      target = indices.default_joint_pos + indices.action_scale * last_action[:n_joints]
+      target[head_slots] = indices.default_joint_pos[head_slots]
 
       lin_b, ang_z = _root_twist_body(mj_data)
       cmd_lin = np.asarray(command[:2], dtype=np.float64)
@@ -215,6 +231,13 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
       acc.ang_count += 1
 
       for _ in range(int(CONTROL_DT / PHYSICS_DT)):
+        tau = dc_servo_torque(
+          mj_data.qpos[indices.motor_qpos_adr],
+          mj_data.qvel[indices.motor_qvel_adr],
+          target,
+          servo,
+        )
+        mj_data.ctrl[indices.ctrl_adr] = tau
         mujoco.mj_step(mj_model, mj_data)
         sim_time += PHYSICS_DT
         if _fallen(mj_data):

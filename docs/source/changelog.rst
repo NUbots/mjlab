@@ -98,7 +98,14 @@ Fixed
   and full 21-dim action vector; (4) the reset-state copy read
   ``env.sim.mj_data`` (unbatched host mirror), broadcasting a scalar
   into ``qpos``/``qvel``/``ctrl`` — now reads the batched
-  ``env.sim.data``.
+  ``env.sim.data``; (5) position targets were written into the compiled
+  actuators, which are pure TORQUE motors — the servo PD lives outside
+  MuJoCo (Dynamixel firmware on hardware, ``DcMotorActuator`` in
+  training), so ``runtime_obs`` gained ``dc_servo_torque`` /
+  ``build_servo_params`` replicating the PD + DC torque-speed clip at
+  every physics substep. With the contract complete, the v53 RMA
+  student walks every eval command for full 30 s episodes in vanilla
+  MuJoCo with zero falls.
 
 - Left-right mirror augmentation scrambled every per-actuator observation
   block: entity actuator columns are in spec order, but the mirror applied
