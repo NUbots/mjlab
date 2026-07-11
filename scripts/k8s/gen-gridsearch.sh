@@ -1825,6 +1825,27 @@ gen_v53() {
   emit_manifest "mj-gs-v53-rma"
 }
 
+# BATCH=v54: v53 + the z-hat anneal tail. v53's eval verdict: teacher is
+# the best policy of the lineage (ang RMSE -40%), student holds tracking
+# within 6-8% but falls 6x more often (0.028/min, cold-start z-hat on
+# backfilled windows; falls skew early-episode) because the policy never
+# rolled out on its own estimator (zhat_mix stayed 0). Classic RMA
+# phase-2, folded into the tail: iterations 7000->9000 blend the policy's
+# latent from encoder-z to detached z-hat, and past 9000 it trains fully
+# student-conditioned (encoder freezes: no PPO gradient reaches it at
+# mix=1, so the regression target goes static and the estimator locks
+# in). Success = student falls back near teacher levels on the same
+# eval grid with tracking held.
+gen_v54() {
+  gen_v53
+  export RMA_ZHAT_MIX_START_ITER="7000"
+  export RMA_ZHAT_MIX_END_ITER="9000"
+  export MJLAB_LOG_STAMP="v54-rma-anneal-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v54-rma-anneal__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v54,bus-voltage,froude,clock-grounding,flail-cluster,scripted-head,electrical-joule,rma,adaptation,zhat-anneal,mirror-fix,batch-v54,gridsearch"
+  emit_manifest "mj-gs-v54-rma-anneal"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -2945,6 +2966,7 @@ case "$BATCH" in
   v51s2) gen_v51s2; expected=9 ;;
   v52) gen_v52; expected=10 ;;
   v53) gen_v53; expected=11 ;;
+  v54) gen_v54; expected=12 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
