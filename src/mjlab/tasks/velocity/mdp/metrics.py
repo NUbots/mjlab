@@ -27,6 +27,7 @@ __all__ = [
   "foot_heel_toe_pitch_deg",
   "foot_lateral_roll_deg",
   "foot_toeout_deg",
+  "foot_torso_yaw_signed",
   "joint_speed_abs",
 ]
 
@@ -104,6 +105,33 @@ def foot_lateral_roll_deg(
   return _contact_mean(roll.abs() * _RAD2DEG, in_contact)
 
 
+def foot_torso_yaw_signed(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg,
+  torso_cfg: SceneEntityCfg,
+  foot_signs: tuple[float, ...] = (1.0, -1.0),
+) -> torch.Tensor:
+  """Per-foot signed yaw relative to the torso heading, radians ``[B, F]``.
+
+  ``foot_signs`` flips the right foot so toe-OUT reads positive on both
+  feet and toe-IN negative. Shared by the ``foot_toeout_deg`` metric and
+  the ``foot_toein_cost`` reward so the two cannot disagree on geometry.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  foot_quat = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :]  # [B, F, 4]
+  num_feet = foot_quat.shape[1]
+  torso_quat = asset.data.body_link_quat_w[:, torso_cfg.body_ids, :][:, 0, :]  # [B, 4]
+  # quat_mul requires matching shapes (no broadcast): expand torso to feet.
+  torso_inv = quat_conjugate(torso_quat).unsqueeze(1).expand(-1, num_feet, -1)
+  rel = quat_mul(torso_inv.reshape(-1, 4), foot_quat.reshape(-1, 4)).reshape(
+    foot_quat.shape
+  )  # [B, F, 4]
+  w, x, y, z = rel[..., 0], rel[..., 1], rel[..., 2], rel[..., 3]
+  yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))  # [B, F]
+  signs = torch.tensor(foot_signs, device=yaw.device, dtype=yaw.dtype)
+  return yaw * signs
+
+
 def foot_toeout_deg(
   env: ManagerBasedRlEnv,
   asset_cfg: SceneEntityCfg = _ROBOT,
@@ -120,19 +148,8 @@ def foot_toeout_deg(
   Averaged over feet; walking-gated so the standing pose (feet forward)
   does not dominate. Near-zero neutral offset (<0.5 deg) is ignored.
   """
-  asset: Entity = env.scene[asset_cfg.name]
-  foot_quat = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :]  # [B, F, 4]
-  num_feet = foot_quat.shape[1]
-  torso_quat = asset.data.body_link_quat_w[:, torso_cfg.body_ids, :][:, 0, :]  # [B, 4]
-  # quat_mul requires matching shapes (no broadcast): expand torso to feet.
-  torso_inv = quat_conjugate(torso_quat).unsqueeze(1).expand(-1, num_feet, -1)
-  rel = quat_mul(torso_inv.reshape(-1, 4), foot_quat.reshape(-1, 4)).reshape(
-    foot_quat.shape
-  )  # [B, F, 4]
-  w, x, y, z = rel[..., 0], rel[..., 1], rel[..., 2], rel[..., 3]
-  yaw = torch.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))  # [B, F]
-  signs = torch.tensor(foot_signs, device=yaw.device, dtype=yaw.dtype)
-  toeout = (yaw * signs).mean(dim=1) * _RAD2DEG  # [B]
+  signed_yaw = foot_torso_yaw_signed(env, asset_cfg, torso_cfg, foot_signs)
+  toeout = signed_yaw.mean(dim=1) * _RAD2DEG  # [B]
 
   if command_name is not None:
     command = env.command_manager.get_command(command_name)

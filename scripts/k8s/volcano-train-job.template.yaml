@@ -167,6 +167,10 @@ spec:
                   value: "${RMA_EST_COEF}"
                 - name: RMA_E2E
                   value: "${RMA_E2E}"
+                - name: FOOT_TOEIN_W
+                  value: "${FOOT_TOEIN_W}"
+                - name: FOOT_TOEIN_MARGIN
+                  value: "${FOOT_TOEIN_MARGIN}"
                 - name: RMA_ZHAT_MIX_START_ITER
                   value: "${RMA_ZHAT_MIX_START_ITER}"
                 - name: RMA_ZHAT_MIX_END_ITER

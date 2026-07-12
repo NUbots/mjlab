@@ -824,6 +824,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   if foot_flat_w > 0:
     foot_flat_w = -foot_flat_w
   foot_flat_onesided = _env_bool("FOOT_FLAT_ONESIDED", default=False)
+  foot_toein_w = _env_float("FOOT_TOEIN_W", 0.0)
+  if foot_toein_w > 0:
+    foot_toein_w = -foot_toein_w
   clearance_per_corner = _env_bool("CLEARANCE_PER_CORNER", default=False)
   swing_height_source = _env_str("SWING_HEIGHT_SOURCE", "min_corner")
   if swing_height_source not in ("min_corner", "center"):
@@ -1444,6 +1447,27 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["foot_flat"].params["sole_normal_axis"] = 0
   cfg.rewards["foot_flat"].params["one_sided_pitch"] = foot_flat_onesided
   cfg.rewards["foot_flat"].params["command_threshold"] = 0.02
+
+  # Toe-IN (pigeon-toe) guard: v55 discovered the inward duck variant.
+  # Policy-equivalent to toe-out (same hip velocity composition; both are
+  # left-right symmetric so mirror aug cannot split them), but the knees
+  # collide in reality and the sim does not model it (the leg collision
+  # boxes carry contype/conaffinity 0). One-sided cost past a small
+  # margin; the possibly velocity-optimal outward duck stays untouched
+  # (doc 15 R37). Off by default; enable v56+.
+  if foot_toein_w != 0.0:
+    cfg.rewards["foot_toein"] = RewardTermCfg(
+      func=mdp.foot_toein_cost,
+      weight=foot_toein_w,
+      params={
+        "asset_cfg": SceneEntityCfg("robot", body_names=("left_foot", "right_foot")),
+        "torso_cfg": SceneEntityCfg("robot", body_names=("torso",)),
+        "foot_signs": (1.0, -1.0),
+        "margin": _env_float("FOOT_TOEIN_MARGIN", 0.05),
+        "command_name": "twist",
+        "command_threshold": 0.05,
+      },
+    )
 
   cfg.rewards["feet_distance"].params["asset_cfg"].site_names = site_names
   cfg.rewards["feet_distance"].params["nominal_distance"] = (

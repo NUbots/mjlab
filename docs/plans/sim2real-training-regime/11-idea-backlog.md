@@ -285,6 +285,14 @@ un-starred items overnight — they need design attention.
     Cost: moderate (model change + tests; no env change). When: after the
     v55 e2e verdict — v55 decides whether the anchor stays, 15d decides
     how the prior/gate/heads work; they compose.
+    v56 CONFIG NOTES (Trent, 2026-07-12): also enable
+    ``FOOT_TOEIN_W=-2.0`` (pigeon-toe guard — v55 developed the toe-IN
+    duck, knee-colliding on hardware, free in sim since the leg collision
+    boxes are contype/conaffinity 0; truth fix = enable left-right leg
+    self-collision via bitmasks, own attributable run) and
+    ``JOULE_W=-3e-3`` (10x — Trent suspects the current -3e-4 is too
+    small to influence the final walk; watch Episode_Reward/joule_heating
+    share and arm_joint_speed for confirmation it now binds).
 
 ## Hygiene
 

@@ -12,6 +12,7 @@ from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import BuiltinSensor, ContactSensor
 from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
+from mjlab.tasks.velocity.mdp.metrics import foot_torso_yaw_signed
 from mjlab.tasks.velocity.mdp.observations import _gait_base_phase
 from mjlab.tasks.velocity.mdp.terrain_utils import terrain_normal_from_sensors
 from mjlab.utils.lab_api.math import quat_apply, quat_apply_inverse
@@ -677,6 +678,41 @@ def gait_clock_contact_mismatch_cost(
       return cost
 
   env.extras["log"]["Metrics/gait_clock_contact_match_mean"] = 1.0 - mismatch.mean()
+  return cost
+
+
+def foot_toein_cost(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg,
+  torso_cfg: SceneEntityCfg,
+  foot_signs: tuple[float, ...] = (1.0, -1.0),
+  margin: float = 0.05,
+  command_name: str | None = "twist",
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """One-sided cost on toe-IN (pigeon-toed) foot yaw relative to the torso.
+
+  Toe-out (duck) and toe-in are equivalent under the policy's objective —
+  the same hip-servo velocity-composition trick, and both are left-right
+  symmetric so mirror augmentation cannot separate them — but reality
+  distinguishes them: toe-in points the knees inward and they collide,
+  which the sim does not model (the thigh/shin collision boxes carry
+  contype/conaffinity 0). This charges only the inward sign past a small
+  ``margin`` (radians), quadratically per foot, leaving the possibly
+  velocity-optimal outward duck untouched (doc 15 R37). Walking-gated
+  like the ``foot_toeout_deg`` metric, whose yaw math it shares.
+  """
+  signed_yaw = foot_torso_yaw_signed(env, asset_cfg, torso_cfg, foot_signs)
+  violation = torch.clamp(-signed_yaw - margin, min=0.0)  # [B, F]
+  cost = torch.sum(torch.square(violation), dim=1)
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      active = ((linear_norm + angular_norm) > command_threshold).float()
+      cost = cost * active
   return cost
 
 

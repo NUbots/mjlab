@@ -13,6 +13,7 @@ from mjlab.tasks.velocity.mdp.metrics import (
   foot_toeout_deg,
   joint_speed_abs,
 )
+from mjlab.tasks.velocity.mdp.rewards import foot_toein_cost
 
 
 def _quat_from_axis_angle(
@@ -195,3 +196,55 @@ def test_joint_speed_abs():
   )
   out = joint_speed_abs(env, asset_cfg=cfg)
   assert torch.allclose(out, torch.tensor([2.0, 3.0]))  # mean(|1|,|-3|), mean(|2|,|4|)
+
+
+def test_toein_cost_charges_inward_only():
+  """One-sided: toe-out is free, toe-in past the margin is charged."""
+  n = 2
+  # Toe-OUT 15 deg: left +15, right -15 about vertical.
+  lq = torch.tensor([_quat_from_axis_angle((0, 0, 1), math.radians(15))]).expand(n, 4)
+  rq = torch.tensor([_quat_from_axis_angle((0, 0, 1), math.radians(-15))]).expand(n, 4)
+  torso = torch.tensor([[1.0, 0, 0, 0]]).expand(n, 4)
+  cmd = torch.tensor([[0.5, 0.0, 0.0]]).expand(n, 3)
+
+  env_out, _ = _make_env(
+    foot_quats=torch.stack([lq, rq], dim=1),
+    torso_quat=torso,
+    found=torch.ones(n, 2),
+    command=cmd,
+  )
+  out = foot_toein_cost(env_out, asset_cfg=_feet_cfg(), torso_cfg=_torso_cfg())
+  assert torch.allclose(out, torch.zeros(n))
+
+  # Toe-IN 15 deg (swap the yaw signs): charged quadratically past margin.
+  env_in, _ = _make_env(
+    foot_quats=torch.stack([rq, lq], dim=1),
+    torso_quat=torso,
+    found=torch.ones(n, 2),
+    command=cmd,
+  )
+  cost = foot_toein_cost(env_in, asset_cfg=_feet_cfg(), torso_cfg=_torso_cfg())
+  expected = 2 * (math.radians(15) - 0.05) ** 2  # two feet, margin 0.05 rad
+  assert torch.allclose(cost, torch.full((n,), expected), atol=1e-4)
+
+  # Small toe-in inside the margin (2 deg < 0.05 rad) is free.
+  lq2 = torch.tensor([_quat_from_axis_angle((0, 0, 1), math.radians(-2))]).expand(n, 4)
+  rq2 = torch.tensor([_quat_from_axis_angle((0, 0, 1), math.radians(2))]).expand(n, 4)
+  env_sm, _ = _make_env(
+    foot_quats=torch.stack([lq2, rq2], dim=1),
+    torso_quat=torso,
+    found=torch.ones(n, 2),
+    command=cmd,
+  )
+  small = foot_toein_cost(env_sm, asset_cfg=_feet_cfg(), torso_cfg=_torso_cfg())
+  assert torch.allclose(small, torch.zeros(n))
+
+  # Standing (command below threshold) gates the cost off.
+  env_stand, _ = _make_env(
+    foot_quats=torch.stack([rq, lq], dim=1),
+    torso_quat=torso,
+    found=torch.ones(n, 2),
+    command=torch.zeros(n, 3),
+  )
+  gated = foot_toein_cost(env_stand, asset_cfg=_feet_cfg(), torso_cfg=_torso_cfg())
+  assert torch.allclose(gated, torch.zeros(n))

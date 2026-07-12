@@ -84,6 +84,20 @@ Added
   clock at iteration 250 and simply walked unclocked. Exposed on
   ``clock_owned`` via the ``PHASE_CONTACT_W`` knob (off by default).
 
+- ``foot_toein_cost`` (``FOOT_TOEIN_W`` / ``FOOT_TOEIN_MARGIN`` knobs, off
+  by default): one-sided cost on pigeon-toed (toe-IN) foot yaw relative to
+  the torso. The v55 run discovered the inward duck variant — equivalent
+  to toe-out under the policy's objective (same hip velocity composition;
+  both left-right symmetric, so mirror augmentation cannot separate them)
+  but the knees collide on the real robot, and the sim does not model it:
+  the thigh/shin collision boxes carry ``contype``/``conaffinity`` 0
+  (collision-shaped ghosts — only the feet actually collide). The cost
+  charges only the inward sign past a small margin, leaving the possibly
+  velocity-optimal outward duck untouched. Shares its yaw math with the
+  ``foot_toeout_deg`` metric. Enabling left↔right leg self-collision (the
+  truth fix) is tracked separately — it changes physics for every run and
+  deserves its own attributable experiment.
+
 Fixed
 ^^^^^
 
