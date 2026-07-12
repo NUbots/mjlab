@@ -267,6 +267,18 @@ un-starred items overnight — they need design attention.
     the gait's systematic biases (duck drift, slip) that kinematic
     odometry cannot; trained across the DR envelope so it is robust to
     realization; sim gives its RMSE spec for free (add to eval battery).
+    v_hat tracks TRUE velocity including push-induced motion: the
+    supervision target is ground-truth base_lin_vel and push_robot events
+    are in the training distribution, so the loss forces the net to
+    separate "walking at command" from "shoved" (observable via
+    stance-leg kinematics — planted feet make base translation a
+    joint-angle measurement — plus gyro/gravity transients and current
+    spikes). Limits to document: ~1-3 tick causal latency on impulses;
+    ballistic coasting during flight; body-frame velocity (integration
+    drifts — localization fuses with vision). Bonus: v_hat_z is a natural
+    early-fall-detection signal. Acceptance spec: eval v_hat RMSE
+    CONDITIONED on push windows separately from steady gait (the hard
+    case and the one that costs localization most).
     Optional later head: foot-contact probabilities. Fast path: if the
     v55 probe confirms, train a post-hoc frozen-trunk readout on rollout
     data and splice into the existing ONNX — odometry without retraining.
