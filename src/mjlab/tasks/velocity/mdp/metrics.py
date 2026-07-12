@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 __all__ = [
   "foot_heel_toe_pitch_deg",
   "foot_lateral_roll_deg",
+  "foot_toein_deg",
   "foot_toeout_deg",
   "foot_torso_yaw_signed",
   "joint_speed_abs",
@@ -159,6 +160,36 @@ def foot_toeout_deg(
       active = ((linear_norm + angular_norm) > command_threshold).float()
       toeout = toeout * active
   return toeout
+
+
+def foot_toein_deg(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg = _ROBOT,
+  torso_cfg: SceneEntityCfg = _ROBOT,
+  foot_signs: tuple[float, ...] = (1.0, -1.0),
+  command_name: str | None = "twist",
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Inward-only (pigeon-toe) foot yaw magnitude (deg), max over feet.
+
+  ``foot_toeout_deg`` is a signed MEAN over feet and envs, so a policy
+  that toes-in for one command regime while toeing-out hard elsewhere
+  still reads positive — the v55 inward-duck sighting was invisible in
+  the mean. This logs only the inward component (zero when toed out), so
+  any pigeon-toe shows up regardless of what the average is doing.
+  Walking-gated like the signed metric.
+  """
+  signed_yaw = foot_torso_yaw_signed(env, asset_cfg, torso_cfg, foot_signs)
+  toein = torch.clamp(-signed_yaw, min=0.0).max(dim=1).values * _RAD2DEG  # [B]
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      active = ((linear_norm + angular_norm) > command_threshold).float()
+      toein = toein * active
+  return toein
 
 
 def joint_speed_abs(

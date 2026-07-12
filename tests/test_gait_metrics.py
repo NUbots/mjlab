@@ -248,3 +248,29 @@ def test_toein_cost_charges_inward_only():
   )
   gated = foot_toein_cost(env_stand, asset_cfg=_feet_cfg(), torso_cfg=_torso_cfg())
   assert torch.allclose(gated, torch.zeros(n))
+
+
+def test_toein_metric_sees_inward_through_outward_mean():
+  """Inward-only metric: reads the pigeon-toe even when one foot toes out."""
+  from mjlab.tasks.velocity.mdp.metrics import foot_toein_deg
+
+  n = 2
+  lq_out = torch.tensor([_quat_from_axis_angle((0, 0, 1), math.radians(30))]).expand(
+    n, 4
+  )
+  rq_in = torch.tensor([_quat_from_axis_angle((0, 0, 1), math.radians(10))]).expand(
+    n, 4
+  )  # right foot +10 = inward after the -1 sign
+  torso = torch.tensor([[1.0, 0, 0, 0]]).expand(n, 4)
+  env, _ = _make_env(
+    foot_quats=torch.stack([lq_out, rq_in], dim=1),
+    torso_quat=torso,
+    found=torch.ones(n, 2),
+    command=torch.tensor([[0.5, 0.0, 0.0]]).expand(n, 3),
+  )
+  # Signed mean = (30 - 10) / 2 = +10 (looks toed-out)...
+  mean = foot_toeout_deg(env, asset_cfg=_feet_cfg(), torso_cfg=_torso_cfg())
+  assert torch.all(mean > 5.0)
+  # ...but the inward metric still reports the 10-deg pigeon-toed foot.
+  toein = foot_toein_deg(env, asset_cfg=_feet_cfg(), torso_cfg=_torso_cfg())
+  assert torch.allclose(toein, torch.full((n,), 10.0), atol=0.5)

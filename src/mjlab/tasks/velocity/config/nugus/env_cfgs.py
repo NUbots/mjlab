@@ -1665,6 +1665,16 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "command_threshold": 0.05,
     },
   )
+  cfg.metrics["foot_toein_deg"] = MetricsTermCfg(
+    func=mdp.foot_toein_deg,
+    params={
+      "asset_cfg": SceneEntityCfg("robot", body_names=("left_foot", "right_foot")),
+      "torso_cfg": SceneEntityCfg("robot", body_names=("torso",)),
+      "foot_signs": (1.0, -1.0),
+      "command_name": "twist",
+      "command_threshold": 0.05,
+    },
+  )
   cfg.metrics["arm_joint_speed"] = MetricsTermCfg(
     func=mdp.joint_speed_abs,
     params={
