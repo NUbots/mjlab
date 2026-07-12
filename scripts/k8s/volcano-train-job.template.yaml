@@ -165,6 +165,8 @@ spec:
                   value: "${RMA_Z_DIM}"
                 - name: RMA_EST_COEF
                   value: "${RMA_EST_COEF}"
+                - name: RMA_E2E
+                  value: "${RMA_E2E}"
                 - name: RMA_ZHAT_MIX_START_ITER
                   value: "${RMA_ZHAT_MIX_START_ITER}"
                 - name: RMA_ZHAT_MIX_END_ITER

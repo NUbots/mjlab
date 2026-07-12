@@ -254,12 +254,13 @@ PHASE_CONTACT_W="${PHASE_CONTACT_W:-}"
 export HEAD_SCRIPTED JOULE_ELECTRICAL
 HEAD_SCRIPTED="${HEAD_SCRIPTED:-}"
 JOULE_ELECTRICAL="${JOULE_ELECTRICAL:-}"
-export RMA RMA_WINDOW RMA_Z_DIM RMA_EST_COEF
+export RMA RMA_WINDOW RMA_Z_DIM RMA_EST_COEF RMA_E2E
 export RMA_ZHAT_MIX_START_ITER RMA_ZHAT_MIX_END_ITER
 RMA="${RMA:-}"
 RMA_WINDOW="${RMA_WINDOW:-}"
 RMA_Z_DIM="${RMA_Z_DIM:-}"
 RMA_EST_COEF="${RMA_EST_COEF:-}"
+RMA_E2E="${RMA_E2E:-}"
 RMA_ZHAT_MIX_START_ITER="${RMA_ZHAT_MIX_START_ITER:-}"
 RMA_ZHAT_MIX_END_ITER="${RMA_ZHAT_MIX_END_ITER:-}"
 PHASE_TARGET_MODE="${PHASE_TARGET_MODE:-}"
@@ -1846,6 +1847,27 @@ gen_v54() {
   emit_manifest "mj-gs-v54-rma-anneal"
 }
 
+# BATCH=v55: the end-to-end ablation (Trent's question, 2026-07-12: "forget
+# the whole student/teacher thing... just let it learn" from history).
+# Same architecture and capacity as v53 — actor = MLP([obs, TCN(history)])
+# with the same 16-dim channel — but PPO backprops through the TCN
+# directly (RMA_E2E: z_hat undetached), no supervised regression
+# (RMA_EST_COEF=0), no privileged encoder in the loop. Isolates the value
+# of the supervised anchor: if v55 matches v53-student/v54 on eval, the
+# teacher was scaffolding PPO could do without; if it lags in capability
+# or transfer (sim2sim), the anchor earns its keep. Note the caveat baked
+# into rma.py: without e2e, est_coef=0 + mix=1 would freeze the TCN at
+# random init — that is a different (and wrong) experiment.
+gen_v55() {
+  gen_v53
+  export RMA_E2E="1"
+  export RMA_EST_COEF="0"
+  export MJLAB_LOG_STAMP="v55-rma-e2e-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v55-rma-e2e__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v55,bus-voltage,froude,clock-grounding,flail-cluster,scripted-head,electrical-joule,rma,adaptation,e2e-ablation,mirror-fix,batch-v55,gridsearch"
+  emit_manifest "mj-gs-v55-rma-e2e"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -2967,6 +2989,7 @@ case "$BATCH" in
   v52) gen_v52; expected=10 ;;
   v53) gen_v53; expected=11 ;;
   v54) gen_v54; expected=12 ;;
+  v55) gen_v55; expected=12 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

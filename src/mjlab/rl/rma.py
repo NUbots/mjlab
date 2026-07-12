@@ -134,6 +134,15 @@ class RmaActor(MLPModel):
     tcn_channels = tuple(cfg.pop("tcn_channels", (32, 32)))
     tcn_kernel = int(cfg.pop("tcn_kernel", 5))
     tcn_stride = int(cfg.pop("tcn_stride", 2))
+    # End-to-end ablation: the policy consumes the TCN output directly
+    # (UNdetached, so PPO gradients shape the history features; no
+    # privileged encoder in the loop, no supervised anchor expected).
+    # Answers "would PPO alone find the adaptation features?" — same
+    # channel and capacity, supervision removed. NOTE: with e2e the
+    # est_loss_coef should be 0; a naive est_coef=0 + zhat_mix=1 WITHOUT
+    # this flag would train the policy on frozen random TCN features
+    # (z_hat is detached on the standard path).
+    self._e2e = bool(cfg.pop("e2e", False))
     if cfg:
       raise ValueError(f"Unknown rma_cfg keys: {sorted(cfg)}")
 
@@ -212,6 +221,10 @@ class RmaActor(MLPModel):
       assert isinstance(value, torch.Tensor)
       parts.append(value)
     x = self.obs_normalizer(torch.cat(parts, dim=-1))
+    if self._e2e:
+      # End-to-end: PPO backprops through the TCN; encoder unused.
+      z = self.estimator(self.history_normalizer(obs[_HISTORY_GROUP]))
+      return torch.cat([x, z], dim=-1)
     z = self.encoder(self.dr_normalizer(obs[_DR_GROUP]))
     mix = float(self.zhat_mix)
     if mix > 0.0:
@@ -319,6 +332,10 @@ class RmaPPO(PPO):
     self.est_loss_coef = float(est_loss_coef)
 
   def update(self) -> dict[str, float]:
+    if self.est_loss_coef == 0.0:
+      # e2e ablation / supervision off: skip the regression pass entirely
+      # (running it would only decay Adam momentum and log a fake metric).
+      return super().update()
     mean_est_loss = 0.0
     num_batches = 0
     generator = self.storage.mini_batch_generator(self.num_mini_batches, 1)

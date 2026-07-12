@@ -21,9 +21,11 @@ Added
   current obs is the last frame). Knobs: ``RMA_WINDOW``, ``RMA_Z_DIM``,
   ``RMA_EST_COEF``, ``RMA_ZHAT_MIX_START_ITER``/``END_ITER`` (late-training
   anneal from z to z_hat), ``RMA_EVAL_PATH=teacher|student`` in
-  ``nugus_eval.py``. With ``RMA`` unset nothing changes. ``dr_extras`` also
-  joins the critic under the knob (those DR realizations were previously
-  invisible to it).
+  ``nugus_eval.py``, and ``RMA_E2E`` (end-to-end ablation: PPO backprops
+  through the TCN directly, no encoder or supervised anchor — same channel
+  and capacity, supervision removed). With ``RMA`` unset nothing changes.
+  ``dr_extras`` also joins the critic under the knob (those DR
+  realizations were previously invisible to it).
 
 - Off-policy scripted head (``ScriptedHeadAction``, ``HEAD_SCRIPTED`` knob
   on ``clock_owned``): drives ``neck_yaw``/``head_pitch`` saccadically

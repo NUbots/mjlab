@@ -74,6 +74,7 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
         "tcn_channels": (32, 32),
         "tcn_kernel": 5,
         "tcn_stride": 2,
+        "e2e": _env_bool("RMA_E2E", default=False),
       },
     )
     algorithm_cfg: RslRlPpoAlgorithmCfg = RmaPpoAlgorithmCfg(

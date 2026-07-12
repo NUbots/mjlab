@@ -134,6 +134,27 @@ def test_student_onnx_export(actor: RmaActor, tmp_path) -> None:
   assert path.exists() and path.stat().st_size > 0
 
 
+def test_e2e_mode_grads_flow_through_estimator() -> None:
+  """e2e ablation: PPO's path trains the TCN directly; encoder is dead."""
+  torch.manual_seed(2)
+  actor = RmaActor(
+    _fake_obs(),
+    _OBS_GROUPS,
+    "actor",
+    ACTIONS,
+    rma_cfg={"z_dim": Z_DIM, "e2e": True},
+    hidden_dims=(64, 32),
+    activation="elu",
+    obs_normalization=True,
+    distribution_cfg=dict(_DIST_CFG),
+  )
+  actor(_fake_obs()).sum().backward()
+  assert any(
+    p.grad is not None and p.grad.abs().sum() > 0 for p in actor.estimator.parameters()
+  )
+  assert all(p.grad is None for p in actor.encoder.parameters())
+
+
 def test_missing_groups_raise() -> None:
   obs = _fake_obs()
   with pytest.raises(ValueError, match="RMA=1"):
