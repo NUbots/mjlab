@@ -251,9 +251,28 @@ un-starred items overnight — they need design attention.
       ticks with an EMA hold — identify while walking, hold through
       standing. 17 floats of state; benign train/deploy gap (deployment
       holds a BETTER estimate than the training window could).
+    EXTENDED (Trent, 2026-07-12, after v55's early track=2.5): the module
+    becomes a THREE-HEAD TCN — ``z_hat`` (params, anchored to sg(z)),
+    ``v_hat`` (base-frame linear velocity, supervised on sg(base_lin_vel);
+    ground truth free in sim), ``g`` (gate). Motivation: the actor has no
+    velocity sensor (base_lin_vel is critic-only) yet is rewarded on
+    velocity tracking — 0.5 s of history is a leg odometer, and v55's
+    tracking jump suggests that is the window's most valuable content
+    (the v53/v54 anchor CONSTRAINED the channel to params-only and
+    discarded it; linear-probe of v55 vs v53 trunk features for
+    base_lin_vel is the confirmation test). ``v_hat`` also EXPORTS as a
+    second ONNX output ("velocity", body frame, policy rate):
+    walk-coupled learned odometry for the localization stack — sees
+    contact timing/slip/IMU/currents AND the commanded gait, so it learns
+    the gait's systematic biases (duck drift, slip) that kinematic
+    odometry cannot; trained across the DR envelope so it is robust to
+    realization; sim gives its RMSE spec for free (add to eval battery).
+    Optional later head: foot-contact probabilities. Fast path: if the
+    v55 probe confirms, train a post-hoc frozen-trunk readout on rollout
+    data and splice into the existing ONNX — odometry without retraining.
     Cost: moderate (model change + tests; no env change). When: after the
     v55 e2e verdict — v55 decides whether the anchor stays, 15d decides
-    how the prior and gate work; they compose.
+    how the prior/gate/heads work; they compose.
 
 ## Hygiene
 
