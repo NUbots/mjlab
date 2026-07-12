@@ -224,6 +224,37 @@ un-starred items overnight — they need design attention.
     deployment of an RMA student; strongest pre-hardware evidence
     available.
 
+15d. ⭐ **v56 design: gated latent with a LEARNED safe prior** (Trent,
+    2026-07-12, extending the quiescence diagnosis after v54's verdict).
+    v54 falsified the distribution-shift theory of student falls (training
+    on z_hat made falls WORSE, 0.028 -> 0.045/min): the fall mechanism is
+    the estimator's cold start itself, and the current "prior" is an
+    accident — TCN(backfilled window), an arbitrary pose-dependent point.
+    Design: ``z_eff = (1-g) * z0 + g * z_signal`` where
+    - ``z0`` is a learned 16-dim parameter, trained through the POLICY
+      path (PPO, undetached) in the low-evidence regime — so it converges
+      to the SAFE hedged operating point (fall-cost asymmetry priced by
+      reward), not the prior mean (which is what regression would give);
+    - ``g`` is a learned gate emitted by the TCN alongside z_hat
+      (Kalman-gain analogue, optionally per-dim), trained with the
+      regression loss against ``sg(z)``;
+    - ``z_signal`` = encoder-z in training, TCN z_hat at deployment: the
+      anneal lesson applied — train-on-prior exactly where deployment
+      runs on the prior (no information: identical by construction), and
+      train-on-truth where evidence exists. Keeps the supervised anchor
+      (v54 showed the self-referential regime without one degrades).
+    Staging, forced by PPO re-forwarding stored obs in minibatches (no
+    cross-step state on the policy path):
+    - Stage 1 (training): gate from the CURRENT window only — stateless,
+      minibatch-safe, kills the measured early-episode fall cluster.
+    - Stage 2 (deployment only): robot carries ``(z_state, G)`` across
+      ticks with an EMA hold — identify while walking, hold through
+      standing. 17 floats of state; benign train/deploy gap (deployment
+      holds a BETTER estimate than the training window could).
+    Cost: moderate (model change + tests; no env change). When: after the
+    v55 e2e verdict — v55 decides whether the anchor stays, 15d decides
+    how the prior and gate work; they compose.
+
 ## Hygiene
 
 15b. ⭐ **Randomize initial episode clocks.** All envs start at
