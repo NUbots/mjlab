@@ -1871,6 +1871,29 @@ gen_v55() {
   emit_manifest "mj-gs-v55-rma-e2e"
 }
 
+# BATCH=v56: the v55 champion recipe + the two hardware guards (Trent,
+# 2026-07-12/13). v55's verdict: best lin tracking (0.080) and falls
+# (0.0023/min) of the lineage, sim2sim clean — e2e history features beat
+# the anchored latent in-envelope (odometry probe: v55 trunk carries vx
+# at R^2 0.95 vs the anchor-suppressed 0.52). This run adds, knob-only:
+# FOOT_TOEIN_W (pigeon-toe guard — v55 showed toe-in for some command
+# regime; knees collide on hardware, free in sim since the leg collision
+# boxes don't collide) and JOULE_W x10 (the -3e-4 joule term is suspected
+# too small to bind; watch the joule reward share + arm_joint_speed).
+# Success = v55-class eval numbers with foot_toein_deg pinned near zero
+# and no capability cost from the stronger joule price. The aux-head
+# module (velocity odometry output + auxiliary z head to recover v53's
+# angular-tracking edge, backlog 15d) is v57, needs code.
+gen_v56() {
+  gen_v55
+  export FOOT_TOEIN_W="-2.0"
+  export JOULE_W="-3e-3"
+  export MJLAB_LOG_STAMP="v56-e2e-guards-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v56-e2e-guards__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v56,bus-voltage,froude,clock-grounding,flail-cluster,scripted-head,electrical-joule,rma,e2e,toein-guard,joule-10x,mirror-fix,batch-v56,gridsearch"
+  emit_manifest "mj-gs-v56-e2e-guards"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -2993,6 +3016,7 @@ case "$BATCH" in
   v53) gen_v53; expected=11 ;;
   v54) gen_v54; expected=12 ;;
   v55) gen_v55; expected=12 ;;
+  v56) gen_v56; expected=13 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
