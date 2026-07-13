@@ -73,7 +73,12 @@ _TRUNK_STAND_HEIGHT = 0.5435  # Bent-knee keyframe trunk height.
 # so the Nugus peaks would crush the gait here; these start ~1-2 orders softer
 # and are env-tunable.
 _DEFAULT_JOULE_W = -1e-5
-_DEFAULT_JOINT_ACC_W = -1e-4
+# Measured on run 2 (k1-velocity/dijcpkvw, iter 1000): the walking K1's raw
+# sum(qdd^2) over the 20 policy joints is ~1e5 rad^2/s^4, so -5e-6 prices the
+# full-ramp cost at ~-0.5/step against tracking's ~+1.5 (the Nugus equilibrium
+# ratio). The initial -1e-4 guess read -2.55/step at stage 1 (25%) and
+# collapsed the return.
+_DEFAULT_JOINT_ACC_W = -5e-6
 _DEFAULT_TORQUE_RATE_W = -1e-4
 _DEFAULT_SOFT_LANDING_W = -0.01
 _BASE_HEIGHT_W = 0.3
