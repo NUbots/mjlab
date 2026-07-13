@@ -153,6 +153,8 @@ spec:
                   value: "${PHASE_RAW_MAX}"
                 - name: PHASE_CONTACT_W
                   value: "${PHASE_CONTACT_W}"
+                - name: PHASE_CONTACT_FLIGHT_EXEMPT
+                  value: "${PHASE_CONTACT_FLIGHT_EXEMPT}"
                 - name: HEAD_SCRIPTED
                   value: "${HEAD_SCRIPTED}"
                 - name: JOULE_ELECTRICAL

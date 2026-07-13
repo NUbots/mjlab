@@ -1405,6 +1405,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
           "command_threshold": 0.05,
           "phase_source": "policy",
           "action_term_name": "phase_delta",
+          # Flight exemption (Trent, 2026-07-13): during running's flight
+          # phases no foot CAN be planted; waive only the stance-window-
+          # airborne charge when all feet are airborne so flight is free
+          # while the grounding contract binds whenever contact exists.
+          "flight_exempt": _env_bool("PHASE_CONTACT_FLIGHT_EXEMPT", default=False),
         },
       )
 

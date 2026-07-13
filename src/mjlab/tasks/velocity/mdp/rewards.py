@@ -629,6 +629,7 @@ def gait_clock_contact_mismatch_cost(
   command_threshold: float = 0.05,
   phase_source: Literal["time", "policy"] = "time",
   action_term_name: str = "phase_delta",
+  flight_exempt: bool = False,
 ) -> torch.Tensor:
   """Penalize foot contact states that contradict the gait clock's windows.
 
@@ -660,7 +661,20 @@ def gait_clock_contact_mismatch_cost(
   foot_phase = torch.remainder(base_phase[:, None] + offsets[None, :], 1.0)
   in_swing = foot_phase < swing_ratio  # [B, F]
 
-  mismatch = (in_swing == in_contact).float()  # [B, F]
+  mismatch = in_swing == in_contact  # [B, F]
+  if flight_exempt:
+    # Running has flight phases where NO foot can be planted, so charging
+    # the stance-window foot for being airborne taxes every flight frame
+    # (with half-cycle offsets some foot is ALWAYS in its stance window)
+    # and garbles clock semantics in the run regime. Waive exactly the
+    # stance-window-but-airborne charge when ALL feet are airborne: with
+    # any contact present the grounding contract binds unchanged, and a
+    # pronking exploit still pays on the other side (landing during a
+    # swing window is charged regardless).
+    flight = (~in_contact).all(dim=1, keepdim=True)  # [B, 1]
+    stance_airborne = ~in_swing & ~in_contact
+    mismatch = mismatch & ~(stance_airborne & flight)
+  mismatch = mismatch.float()
   cost = torch.sum(mismatch, dim=1)
 
   if command_name is not None:

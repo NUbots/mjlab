@@ -84,6 +84,21 @@ Added
   clock at iteration 250 and simply walked unclocked. Exposed on
   ``clock_owned`` via the ``PHASE_CONTACT_W`` knob (off by default).
 
+- ``gait_clock_contact_mismatch_cost`` gained a ``flight_exempt`` option
+  (``PHASE_CONTACT_FLIGHT_EXEMPT`` knob, off by default): running has
+  flight phases where no foot can be planted, and with half-cycle foot
+  offsets some foot is always inside its stance window, so the clock
+  grounding charged every flight frame — a standing tax on the walk→run
+  transition. The exemption waives only the stance-window-airborne charge
+  when ALL feet are airborne; with any contact present the grounding
+  contract binds unchanged, and a pronking exploit still pays on the
+  landing-during-swing side. Also added ``flight_frac`` /
+  ``flight_frac_fast`` metrics and the push-clean, evidence-masked
+  ``frontier/flight_by_speed`` histogram (flight counted only when all
+  feet are airborne AND the torso is upright, with frames within 1 s of a
+  push excluded) so the walk→run boundary is measurable per commanded
+  speed without falls or pushes masquerading as airtime.
+
 - ``foot_toein_cost`` (``FOOT_TOEIN_W`` / ``FOOT_TOEIN_MARGIN`` knobs, off
   by default): one-sided cost on pigeon-toed (toe-IN) foot yaw relative to
   the torso. The v55 run discovered the inward duck variant — equivalent

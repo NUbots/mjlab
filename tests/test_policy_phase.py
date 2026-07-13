@@ -477,3 +477,37 @@ def test_nugus_empty_env_vars_use_defaults(monkeypatch):
   cfg = nubots_nugus_rough_env_cfg()
   assert cfg.rewards["phase_delta_nominal"].weight == -5.0
   assert cfg.rewards["upright"].weight == 1.0
+
+
+def test_gait_clock_contact_flight_exemption():
+  """Flight frames (all feet airborne) waive only the stance-window-airborne
+  charge; a foot LANDING during its swing window is still charged, so a
+  pronking exploit pays on the contact side."""
+  from mjlab.tasks.velocity.mdp.rewards import gait_clock_contact_mismatch_cost
+
+  env = _make_phase_env(num_envs=3, command=torch.tensor([[0.5, 0.0, 0.0]] * 3))
+  action = _make_phase_action(env, period=0.7)
+  # Phase 0.2: foot0 in swing window, foot1 in stance window.
+  action._policy_phase = torch.full((3,), 0.2)
+
+  contact_sensor = MagicMock()
+  # env0: FLIGHT (both airborne) - stance foot1 airborne would be charged
+  #   without the exemption; with it, free.
+  # env1: single support matching windows - free either way.
+  # env2: foot0 (swing window) in contact + foot1 airborne - the contact
+  #   side of the contract, still charged 2 (both feet mismatched).
+  contact_sensor.data.found = torch.tensor([[0, 0], [0, 1], [1, 0]])
+  env.scene.__getitem__ = MagicMock(return_value=contact_sensor)
+
+  kwargs = dict(
+    sensor_name="feet_ground_contact",
+    period=0.7,
+    swing_ratio=0.45,
+    command_name="twist",
+    phase_source="policy",
+  )
+  taxed = gait_clock_contact_mismatch_cost(env, **kwargs)
+  exempt = gait_clock_contact_mismatch_cost(env, flight_exempt=True, **kwargs)
+  assert taxed[0].item() == 1.0 and exempt[0].item() == 0.0  # flight freed
+  assert taxed[1].item() == 0.0 and exempt[1].item() == 0.0
+  assert taxed[2].item() == 2.0 and exempt[2].item() == 2.0  # landing still pays
