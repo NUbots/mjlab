@@ -274,3 +274,30 @@ def test_toein_metric_sees_inward_through_outward_mean():
   # ...but the inward metric still reports the 10-deg pigeon-toed foot.
   toein = foot_toein_deg(env, asset_cfg=_feet_cfg(), torso_cfg=_torso_cfg())
   assert torch.allclose(toein, torch.full((n,), 10.0), atol=0.5)
+
+
+def test_flight_fraction_excludes_falls():
+  """Flight = all feet airborne AND upright; tilted (falling) frames and
+  grounded frames count zero; the fast gate excludes slow commands."""
+  from mjlab.tasks.velocity.mdp.metrics import flight_fraction
+
+  n = 4
+  torso = torch.tensor([[1.0, 0, 0, 0]]).expand(n, 4)
+  env, robot = _make_env(
+    foot_quats=torch.zeros(n, 2, 4),
+    torso_quat=torso,
+    found=torch.tensor([[0.0, 0.0], [0.0, 0.0], [1.0, 0.0], [0.0, 0.0]]),
+    command=torch.tensor(
+      [[2.0, 0.0, 0.0], [2.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.3, 0.0, 0.0]]
+    ),
+  )
+  # env0: airborne+upright (flight). env1: airborne but TILTED (falling —
+  # not flight). env2: one foot down (not flight). env3: airborne+upright
+  # but slow command (flight for base metric, gated out of _fast).
+  robot.data.projected_gravity_b = torch.tensor(
+    [[0.0, 0.0, -1.0], [0.9, 0.0, -0.4], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]
+  )
+  base = flight_fraction(env, "feet_ground_contact")
+  assert torch.allclose(base, torch.tensor([1.0, 0.0, 0.0, 1.0]))
+  fast = flight_fraction(env, "feet_ground_contact", min_command_speed=1.5)
+  assert torch.allclose(fast, torch.tensor([1.0, 0.0, 0.0, 0.0]))

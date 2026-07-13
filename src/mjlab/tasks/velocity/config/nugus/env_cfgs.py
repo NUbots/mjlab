@@ -1665,6 +1665,29 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "command_threshold": 0.05,
     },
   )
+  # Walk->run boundary tracking (Trent, 2026-07-13: "I swear some of these
+  # higher performing models are getting airtime"). True flight only: all
+  # feet airborne while upright, so falls and tumbles don't count as air
+  # time. The _fast variant gates at 1.5 m/s commands — just under the
+  # NUgus walk->run Froude boundary v* = 1.56 m/s — so the crossing is
+  # visible undiluted by the slow half of the command envelope.
+  cfg.metrics["flight_frac"] = MetricsTermCfg(
+    func=mdp.flight_fraction,
+    params={
+      "sensor_name": "feet_ground_contact",
+      "command_name": "twist",
+      "command_threshold": 0.05,
+    },
+  )
+  cfg.metrics["flight_frac_fast"] = MetricsTermCfg(
+    func=mdp.flight_fraction,
+    params={
+      "sensor_name": "feet_ground_contact",
+      "command_name": "twist",
+      "command_threshold": 0.05,
+      "min_command_speed": 1.5,
+    },
+  )
   cfg.metrics["foot_toein_deg"] = MetricsTermCfg(
     func=mdp.foot_toein_deg,
     params={

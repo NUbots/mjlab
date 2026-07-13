@@ -24,6 +24,7 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 __all__ = [
+  "flight_fraction",
   "foot_heel_toe_pitch_deg",
   "foot_lateral_roll_deg",
   "foot_toein_deg",
@@ -190,6 +191,48 @@ def foot_toein_deg(
       active = ((linear_norm + angular_norm) > command_threshold).float()
       toein = toein * active
   return toein
+
+
+def flight_fraction(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  asset_cfg: SceneEntityCfg = _ROBOT,
+  command_name: str | None = "twist",
+  command_threshold: float = 0.05,
+  min_command_speed: float = 0.0,
+  max_tilt_cos: float = 0.8,
+) -> torch.Tensor:
+  """Fraction of steps in TRUE flight: all feet airborne while upright.
+
+  Running is defined by a flight phase; this tracks the walk->run
+  boundary crossing without letting falls masquerade as airtime: frames
+  only count when every foot is off the ground AND the torso is upright
+  (``-projected_gravity_b.z >= max_tilt_cos``, i.e. tilt under ~37 deg
+  at the 0.8 default — a falling robot is tilted, a fallen one
+  terminates). Walking-gated; ``min_command_speed`` optionally restricts
+  to fast commands (e.g. 1.5 m/s, just under the NUgus walk->run Froude
+  boundary v* = 1.56 m/s) so the boundary is visible undiluted by the
+  slow half of the command envelope. Episode mean = flight fraction.
+  """
+  contact: ContactSensor = env.scene[sensor_name]
+  assert contact.data.found is not None
+  airborne = (contact.data.found == 0).all(dim=1)  # [B]
+
+  asset: Entity = env.scene[asset_cfg.name]
+  upright = -asset.data.projected_gravity_b[:, 2] >= max_tilt_cos  # [B]
+
+  flight = (airborne & upright).float()
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      active = (linear_norm + angular_norm) > command_threshold
+      if min_command_speed > 0.0:
+        active = active & (linear_norm >= min_command_speed)
+      flight = flight * active.float()
+  return flight
 
 
 def joint_speed_abs(
