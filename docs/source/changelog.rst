@@ -8,6 +8,23 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Booster K1 velocity task (``Mjlab-Velocity-{Flat,Rough}-Booster-K1``)
+  with the competence machinery on by default: competence tracker,
+  adaptive command/push levels (``ADAPTIVE_COMMANDS``/``ADAPTIVE_PUSHES``,
+  default on), competence-gated movement penalties
+  (``PENALTY_GATE=competence``), track-reward watchdog, push-cohort
+  diagnostics, and the optional AIMD difficulty controller
+  (``CURRICULUM_STYLE=aimd``). The head is not policy-controlled (vision
+  owns it on hardware), so the actor observes 71 dims: ang vel, gravity,
+  command, 20 joint pos/vel/actions, and a fixed gait clock (Booster's own
+  K1/T1 recipe). The critic additionally sees base lin vel, foot
+  height/air-time/contact/forces, and privileged DR ratios. Robot assets
+  (``asset_zoo/robots/booster_k1``) are imported from the
+  ``nugus_path_tracking`` branch. The Nugus-specific sim-to-real extras
+  (RMA/history groups, actuator-current and bus-voltage observations,
+  backlash, scripted head, gait-clock variants, mirror augmentation) are
+  deliberately not ported.
+
 - RMA-style adaptation module (``RMA`` knob, NUgus velocity task): a
   concurrent teacher-student latent swap to recover the capability lost to
   wide domain randomization. A param encoder maps the true per-env DR
