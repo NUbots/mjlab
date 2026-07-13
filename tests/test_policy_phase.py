@@ -499,15 +499,19 @@ def test_gait_clock_contact_flight_exemption():
   contact_sensor.data.found = torch.tensor([[0, 0], [0, 1], [1, 0]])
   env.scene.__getitem__ = MagicMock(return_value=contact_sensor)
 
-  kwargs = dict(
-    sensor_name="feet_ground_contact",
-    period=0.7,
-    swing_ratio=0.45,
-    command_name="twist",
-    phase_source="policy",
-  )
-  taxed = gait_clock_contact_mismatch_cost(env, **kwargs)
-  exempt = gait_clock_contact_mismatch_cost(env, flight_exempt=True, **kwargs)
+  def _cost(flight_exempt: bool) -> torch.Tensor:
+    return gait_clock_contact_mismatch_cost(
+      env,
+      sensor_name="feet_ground_contact",
+      period=0.7,
+      swing_ratio=0.45,
+      command_name="twist",
+      phase_source="policy",
+      flight_exempt=flight_exempt,
+    )
+
+  taxed = _cost(False)
+  exempt = _cost(True)
   assert taxed[0].item() == 1.0 and exempt[0].item() == 0.0  # flight freed
   assert taxed[1].item() == 0.0 and exempt[1].item() == 0.0
   assert taxed[2].item() == 2.0 and exempt[2].item() == 2.0  # landing still pays
