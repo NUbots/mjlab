@@ -312,6 +312,17 @@ class CompetenceTracker:
     # exists (a near-zero fall rate made frontier_speed read 3.2 = the
     # full R31 range, which is not a capability claim).
     self.bucket_exposure = torch.zeros(self.n_cmd_buckets, device=self.device)
+    # Flight-by-speed (walk->run boundary, Trent 2026-07-13): per-bin
+    # counts of TRUE-flight steps (all feet airborne AND upright) over
+    # eligible exposure, so the boundary crossing reads as a fraction-of
+    # -steps-in-flight curve against commanded speed. Two contamination
+    # gates: frames within 1 s of a push are excluded entirely (a shove
+    # can toss the robot airborne with no gait flight due), and the
+    # upright gate (same 25-deg tilt bound as the wobble metric) keeps
+    # falls/tumbles from counting as air time. Cumulative counts;
+    # evidence-masked at histogram-log time.
+    self.flight_steps_by_speed = torch.zeros(self.n_cmd_buckets, device=self.device)
+    self.flight_exposure_by_speed = torch.zeros(self.n_cmd_buckets, device=self.device)
     # Attainment conditional on commanded speed (R20): the capability
     # curve. Windowed sums -> EMA'd per-bin curve at the hazard cadence;
     # the interpolated bar-crossing of this curve (attained_frontier) is
@@ -509,6 +520,31 @@ class CompetenceTracker:
       self._bucket_steps.scatter_add_(
         0, bucket[expose], torch.ones(int(expose.sum()), device=self.device)
       )
+
+    # Flight accounting (see buffer docstring): eligible = walking and
+    # outside the 1 s post-push window; flight = eligible + all feet
+    # airborne + upright.
+    try:
+      contact = env.scene["feet_ground_contact"]
+      found = contact.data.found
+    except KeyError:
+      found = None
+    if isinstance(found, torch.Tensor):
+      airborne = (found == 0).all(dim=1)
+      upright = torch.norm(grav_xy, dim=-1) <= 0.4226  # sin(25 deg)
+      no_recent_push = (
+        float(env.common_step_counter) - self.last_push_step
+      ) > 1.0 / self._step_dt
+      eligible = walking & no_recent_push
+      if eligible.any():
+        self.flight_exposure_by_speed.scatter_add_(
+          0, bucket[eligible], torch.ones(int(eligible.sum()), device=self.device)
+        )
+        fly = eligible & airborne & upright
+        if fly.any():
+          self.flight_steps_by_speed.scatter_add_(
+            0, bucket[fly], torch.ones(int(fly.sum()), device=self.device)
+          )
     settled = self._bin_dwell >= self.attain_settle_s / self._step_dt
     m_attain = meaningful & ~self.push_cohort & settled
     if m_attain.any():
@@ -1237,6 +1273,11 @@ class competence_diagnostics:
       )
       hazard_rho = _evidence_masked(t.rho_hazard, t.rho_exposure + t._rho_steps)
       attain_speed = _evidence_masked(t.attain_by_speed, t.attain_by_speed_weight)
+      flight_speed = _evidence_masked(
+        t.flight_steps_by_speed / t.flight_exposure_by_speed.clamp(min=1.0),
+        t.flight_exposure_by_speed,
+        floor=200.0,  # fractions from <200 frames are noise, render 0
+      )
       push_surv = _evidence_masked(t.push_survival, t.push_survival_weight)
       wandb.log(
         {
@@ -1249,6 +1290,12 @@ class competence_diagnostics:
           "frontier/attain_by_speed": wandb.Histogram(
             np_histogram=(
               attain_speed.cpu().numpy(),
+              np.linspace(0.0, t.speed_bin_width * n, n + 1),
+            )
+          ),
+          "frontier/flight_by_speed": wandb.Histogram(
+            np_histogram=(
+              flight_speed.cpu().numpy(),
               np.linspace(0.0, t.speed_bin_width * n, n + 1),
             )
           ),

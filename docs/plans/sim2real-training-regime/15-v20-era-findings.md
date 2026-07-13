@@ -802,6 +802,18 @@ ycburzcy). Split verdict:
 - v55 RETAINS the hardware crown. v56b (launched) bisects the dose:
   guard kept, JOULE_W=-1e-3 (~3x). Target: falls < 0.005 with the term
   still visibly binding.
+- Field observation (Trent, from v56 rollout video): the 10x joule
+  visibly fixed arm QUALITY, not just speed — much less wild movement,
+  and the arms settle into a relaxed at-the-sides posture instead of
+  the outstretched-forward hold every prior run converged to. Mechanism:
+  arms held out front carry a constant gravity moment = constant servo
+  current = constant I^2 R bleed; at 1x that static cost was priced at
+  noise level, so the policy never cared. This is the strongest argument
+  that the right joule dose is BINDING-but-gentler, not a revert — the
+  bisect is looking for the weight that keeps the relaxed arms without
+  v56's 6x fall tax. (Also relevant for transfer: outstretched arms are
+  a collision/handling liability on a real pitch, and MX-64s held at
+  stall torque cook.)
 
 ## Corrections to earlier docs
 
