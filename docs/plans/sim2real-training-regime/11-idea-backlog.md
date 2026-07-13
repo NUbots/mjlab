@@ -202,7 +202,16 @@ un-starred items overnight — they need design attention.
     excursion outside a tucked box — fast small motion inside the
     envelope keeps momentum authority, reach is what gets charged.
     Zero-code first cut: knob to tighten the arm stds in the existing
-    pose reward. When: after v56c settles the guard question.
+    pose reward. PRICING (Trent, 2026-07-14): must be CHEAP enough to
+    pay for cause — a falling robot should flail out of the envelope
+    freely. Quadratic-outside-margin at modest weight does the gating
+    automatically via expected value: a 0.5 s full-reach recovery burst
+    costs ~1-2 total vs -10 termination + lost tracking (always worth
+    paying), while a held arms-out posture pays the fee 50x/s forever
+    (never worth it). Opposite calibration from the toe-in guard, which
+    has no legitimate use and can be steep: hard constraints priced
+    high, emergency maneuvers priced as insurance premiums. When: after
+    v56c settles the guard question.
 
 ## Domain randomization
 
