@@ -612,6 +612,30 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     "command_threshold": 0.05,
   }
 
+  # Ground the clock to the feet: charge each foot whose contact state
+  # contradicts its clock window. The height-tracking term alone cannot
+  # force stepping (a planted foot still collects ~75% of it, and the
+  # velocity-gated foot_clearance penalty is silent for feet that never
+  # swing), so the first K1 run settled into a stable statue at ~5 mm foot
+  # lift with attainment decaying. Booster's own K1/T1 recipe uses exactly
+  # this contact-windowed swing signal (booster_gym feet_swing). ON by
+  # default; must share ``swing_ratio`` with foot_swing_height or the two
+  # clock consumers would demand contradictory contact states.
+  phase_contact_w = -abs(_env_float("PHASE_CONTACT_W", 1.0))
+  if phase_contact_w != 0.0:
+    cfg.rewards["gait_clock_contact"] = RewardTermCfg(
+      func=mdp.gait_clock_contact_mismatch_cost,
+      weight=phase_contact_w,
+      params={
+        "sensor_name": "feet_ground_contact",
+        "period": gait_period,
+        "swing_ratio": 0.45,
+        "command_name": "twist",
+        "command_threshold": 0.05,
+        "flight_exempt": _env_bool("PHASE_CONTACT_FLIGHT_EXEMPT", default=False),
+      },
+    )
+
   # Flat-foot shaping: the K1 foot sole is the bottom face of the foot box,
   # so the sole normal is the foot body's local Z axis.
   cfg.rewards["foot_flat"].params["asset_cfg"].body_names = (
