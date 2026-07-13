@@ -1912,6 +1912,23 @@ gen_v56b() {
   emit_manifest "mj-gs-v56b-joule-bisect"
 }
 
+# BATCH=v56c: guard-only ablation. v56 (10x joule) and v56b (3x) both
+# eval at falls 0.0141/min despite v56b's v55-class TRAINING falls —
+# the dose changed, the eval falls did not, so suspicion moves to the
+# shared delta: the toe-in guard, plausibly taxing crossover recovery
+# footwork (transient inward yaw, 3-deg margin). v56c = v55 recipe +
+# FOOT_TOEIN_W only, joule back to nominal. Falls ~0.014 -> guard is
+# the culprit (widen margin / recovery-gate it); falls ~0.002 -> any
+# binding joule dose costs falls and the guard is innocent.
+gen_v56c() {
+  gen_v55
+  export FOOT_TOEIN_W="-2.0"
+  export MJLAB_LOG_STAMP="v56c-guard-only-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v56c-guard-only__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v56c,rma,e2e,toein-guard,guard-ablation,mirror-fix,batch-v56c,gridsearch"
+  emit_manifest "mj-gs-v56c-guard-only"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -3036,6 +3053,7 @@ case "$BATCH" in
   v55) gen_v55; expected=12 ;;
   v56) gen_v56; expected=13 ;;
   v56b) gen_v56b; expected=14 ;;
+  v56c) gen_v56c; expected=13 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
