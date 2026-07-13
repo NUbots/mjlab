@@ -784,6 +784,25 @@ learn" question, answered:
   out of it, along with the discovery that the leg collision boxes are
   contype/conaffinity-0 ghosts: knees cannot collide in sim).
 
+## R41 (2026-07-13): v56 verdict — the toe-in guard is free; 10x joule overshot (6x fall tax for the heat price)
+
+v56 = v55 champion recipe + FOOT_TOEIN_W=-2.0 + JOULE_W=-3e-3 (10x; run
+ycburzcy). Split verdict:
+- Toe-in guard: SUCCESS and effectively free. foot_toein_deg pinned at
+  1.3-1.7 deg from early training (82 deg at boot) while the outward
+  duck ran untouched at ~40 deg — the one-sided design worked exactly as
+  intended, and the residual charge decayed to -0.016. Keep permanently.
+- 10x joule: BINDS (reward share -0.63 -> -0.48, arm speed driven
+  2.3 -> 1.55 through the ramp) and produced the best cross-engine
+  tracking yet (sim2sim lin 0.097, 0 falls) — the economical gait
+  transfers well. But in-envelope it cost 6x the falls (eval 0.0141/min
+  vs v55's 0.0023; clean_fell 0.0078 vs 0.0034; contact_match slid to
+  0.889, first sub-0.93 of the lineage) at slightly worse lin tracking
+  (0.089 vs 0.080). Too much stability traded for heat.
+- v55 RETAINS the hardware crown. v56b (launched) bisects the dose:
+  guard kept, JOULE_W=-1e-3 (~3x). Target: falls < 0.005 with the term
+  still visibly binding.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not

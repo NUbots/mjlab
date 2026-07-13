@@ -1894,6 +1894,23 @@ gen_v56() {
   emit_manifest "mj-gs-v56-e2e-guards"
 }
 
+# BATCH=v56b: the joule dose bisect. v56's verdict (R41): the toe-in
+# guard is free (toein pinned 1.3-1.7 deg all run, residual cost -0.016)
+# but 10x joule overshot — best-ever cross-engine tracking (sim2sim lin
+# 0.097) yet a 6x in-env fall tax (0.0141/min vs v55's 0.0023) and
+# contact_match slid to 0.889. Keep the guard, bisect the heat price to
+# ~3x nominal (JOULE_W=-1e-3). Success = v55-class falls (<0.005) with
+# the joule term still visibly binding (arm speed < v55's ~1.5 and a
+# nonzero reward share).
+gen_v56b() {
+  gen_v56
+  export JOULE_W="-1e-3"
+  export MJLAB_LOG_STAMP="v56b-joule-bisect-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v56b-joule-bisect__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v56b,bus-voltage,froude,clock-grounding,flail-cluster,scripted-head,electrical-joule,rma,e2e,toein-guard,joule-3x,mirror-fix,batch-v56b,gridsearch"
+  emit_manifest "mj-gs-v56b-joule-bisect"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -3017,6 +3034,7 @@ case "$BATCH" in
   v54) gen_v54; expected=12 ;;
   v55) gen_v55; expected=12 ;;
   v56) gen_v56; expected=13 ;;
+  v56b) gen_v56b; expected=14 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
