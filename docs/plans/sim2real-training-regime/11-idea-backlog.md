@@ -191,6 +191,19 @@ un-starred items overnight — they need design attention.
     anyway). When: bundle with the next from-scratch reward-shaping
     batch (candidates: with 11b arm work).
 
+11e. **Arm envelope vs arm energy** (Trent, 2026-07-14, from v56/v56b
+    video): 3x joule keeps arms DOWN but they flail more than 10x; the
+    flail is functional (v56b training falls 0.0032 vs quiet-armed
+    v56's 0.0078 — reaction-wheel work), yet in a real game outstretched
+    flailing arms hit other robots. Joule prices ENERGY (quiets motion
+    and posture together, costing balance authority); game legality is
+    GEOMETRY (reach). Compose instead of overdose: keep ~3x joule for
+    heat/posture + a soft one-sided cost on shoulder pitch/roll
+    excursion outside a tucked box — fast small motion inside the
+    envelope keeps momentum authority, reach is what gets charged.
+    Zero-code first cut: knob to tighten the arm stds in the existing
+    pose reward. When: after v56c settles the guard question.
+
 ## Domain randomization
 
 12. ⭐ **IMU mounting-orientation DR.** Small fixed per-episode rotation
