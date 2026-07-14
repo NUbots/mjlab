@@ -74,6 +74,13 @@ def get_base_metadata(
     metadata["history_window"] = window
     metadata["history_obs_dim"] = frame_dim
     metadata["history_layout"] = "time_major_oldest_first"
+  # Odometry head (backlog 15d): a second graph output "velocity" =
+  # estimated base linear velocity, body frame, m/s, policy rate. The
+  # "odom_target" group only exists when the head was trained.
+  if "odom_target" in obs_mgr.active_terms:
+    metadata["velocity_output"] = 1
+    metadata["velocity_frame"] = "body"
+    metadata["velocity_units"] = "m/s"
   return metadata
 
 

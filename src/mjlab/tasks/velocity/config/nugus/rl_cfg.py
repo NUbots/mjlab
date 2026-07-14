@@ -62,6 +62,7 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     # RMA adaptation module (rl/rma.py): custom actor with the DR-param
     # encoder + history estimator, custom PPO with the concurrent
     # regression loss, and the extra obs groups routed to the actor set.
+    vhat = _env_bool("RMA_VHAT", default=False)
     actor_cfg: RslRlModelCfg = RmaModelCfg(
       hidden_dims=(512, 256, 128),
       activation="elu",
@@ -75,14 +76,23 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
         "tcn_kernel": 5,
         "tcn_stride": 2,
         "e2e": _env_bool("RMA_E2E", default=False),
+        # Odometry head (backlog 15d): v_hat readout from the estimator's
+        # z, exported as a second ONNX output. Detached by default so the
+        # head is a pure probe and cannot perturb the walk.
+        "vhat": vhat,
+        "vhat_detach": _env_bool("RMA_VHAT_DETACH", default=True),
       },
     )
     algorithm_cfg: RslRlPpoAlgorithmCfg = RmaPpoAlgorithmCfg(
       class_name="mjlab.rl.rma:RmaPPO",
       est_loss_coef=_env_float("RMA_EST_COEF", 1.0),
+      vel_loss_coef=_env_float("RMA_VHAT_COEF", 1.0),
     )
+    actor_groups = ["actor", "dr", "history"]
+    if vhat:
+      actor_groups.append("odom_target")
     obs_groups = {
-      "actor": ("actor", "dr", "history"),
+      "actor": tuple(actor_groups),
       "critic": ("critic",),
     }
   else:

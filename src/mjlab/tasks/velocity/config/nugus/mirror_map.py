@@ -373,6 +373,12 @@ class NugusMirrorMap:
         raise ValueError(f"No dr mirror rule for observation term {name!r}")
     return out
 
+  def mirror_odom_obs(self, obs: torch.Tensor) -> torch.Tensor:
+    """Mirror the odometry supervision target (body-frame lin vel)."""
+    out = obs.clone()
+    out[..., 1] *= -1.0
+    return out
+
   def mirror_critic_obs(self, obs: torch.Tensor) -> torch.Tensor:
     out = obs.clone()
     for name, sl in self.critic_slices.items():
@@ -530,6 +536,7 @@ def nugus_symmetry_augmentation(
       "critic": mirror_map.mirror_critic_obs,
       "dr": mirror_map.mirror_dr_obs,
       "history": mirror_map.mirror_history_obs,
+      "odom_target": mirror_map.mirror_odom_obs,
     }
     fields: dict[str, torch.Tensor] = {}
     for key in obs.keys():

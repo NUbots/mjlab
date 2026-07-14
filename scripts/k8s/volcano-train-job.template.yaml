@@ -169,10 +169,20 @@ spec:
                   value: "${RMA_EST_COEF}"
                 - name: RMA_E2E
                   value: "${RMA_E2E}"
+                - name: RMA_VHAT
+                  value: "${RMA_VHAT}"
+                - name: RMA_VHAT_DETACH
+                  value: "${RMA_VHAT_DETACH}"
+                - name: RMA_VHAT_COEF
+                  value: "${RMA_VHAT_COEF}"
                 - name: FOOT_TOEIN_W
                   value: "${FOOT_TOEIN_W}"
                 - name: FOOT_TOEIN_MARGIN
                   value: "${FOOT_TOEIN_MARGIN}"
+                - name: ARM_ENVELOPE_W
+                  value: "${ARM_ENVELOPE_W}"
+                - name: ARM_ENVELOPE_MARGIN
+                  value: "${ARM_ENVELOPE_MARGIN}"
                 - name: RMA_ZHAT_MIX_START_ITER
                   value: "${RMA_ZHAT_MIX_START_ITER}"
                 - name: RMA_ZHAT_MIX_END_ITER

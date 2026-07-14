@@ -346,6 +346,32 @@ def test_augmentation_covers_rma_groups(rma_mirror_env) -> None:
     assert obs_aug[key].shape[0] == obs[key].shape[0] * 2
 
 
+def test_odom_mirror_involution_and_sign(mirror_map) -> None:
+  v = torch.randn(5, 3)
+  m = mirror_map.mirror_odom_obs(v)
+  torch.testing.assert_close(mirror_map.mirror_odom_obs(m), v)
+  torch.testing.assert_close(m[:, 0], v[:, 0])
+  torch.testing.assert_close(m[:, 1], -v[:, 1])
+  torch.testing.assert_close(m[:, 2], v[:, 2])
+
+
+def test_augmentation_handles_odom_target(mirror_env) -> None:
+  from tensordict import TensorDict
+
+  wrapped = RslRlVecEnvWrapper(mirror_env)
+  obs = wrapped.get_observations()
+  batch = obs.batch_size[0]
+  target = torch.randn(batch, 3, device=obs["actor"].device)
+  td = TensorDict(
+    {"actor": obs["actor"], "odom_target": target}, batch_size=obs.batch_size
+  )
+  obs_aug, _ = nugus_symmetry_augmentation(wrapped, td, None)
+  assert obs_aug is not None
+  aug = obs_aug["odom_target"]
+  assert aug.shape[0] == batch * 2
+  torch.testing.assert_close(aug[batch:, 1], -target[:, 1])
+
+
 def test_augmentation_raises_on_unknown_group(mirror_env) -> None:
   from tensordict import TensorDict
 

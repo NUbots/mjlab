@@ -46,6 +46,7 @@ from mjlab.rl.config import RslRlModelCfg, RslRlPpoAlgorithmCfg
 
 _DR_GROUP = "dr"
 _HISTORY_GROUP = "history"
+_ODOM_GROUP = "odom_target"
 
 
 @dataclass
@@ -54,7 +55,8 @@ class RmaModelCfg(RslRlModelCfg):
 
   rma_cfg: dict[str, Any] = field(default_factory=dict)
   """Passed to :class:`RmaActor`. Keys: z_dim, encoder_hidden_dims,
-  tcn_channels, tcn_kernel, tcn_stride."""
+  tcn_channels, tcn_kernel, tcn_stride, e2e, vhat, vhat_detach,
+  vhat_hidden_dims."""
 
 
 @dataclass
@@ -63,6 +65,10 @@ class RmaPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
 
   est_loss_coef: float = 1.0
   """Coefficient on the ||z_hat - sg(z)||^2 estimator regression loss."""
+
+  vel_loss_coef: float = 1.0
+  """Coefficient on the ||v_hat - sg(base_lin_vel)||^2 odometry-head loss
+  (only active when the actor was built with rma_cfg["vhat"])."""
 
 
 class RmaTcnEstimator(nn.Module):
@@ -143,6 +149,17 @@ class RmaActor(MLPModel):
     # this flag would train the policy on frozen random TCN features
     # (z_hat is detached on the standard path).
     self._e2e = bool(cfg.pop("e2e", False))
+    # Walk-coupled odometry head (backlog 15d): a small readout from the
+    # estimator's z to body-frame base linear velocity, supervised on the
+    # ground-truth "odom_target" group and exported as a second ONNX
+    # output. With vhat_detach (default) the head trains on sg(z): a pure
+    # probe that cannot perturb the walk — the R40 linear probe already
+    # showed the e2e trunk carries vx at R^2 0.95, this just makes the
+    # readout a deployable artifact. Undetached is the knob for letting
+    # odometry supervision shape the trunk (a separate experiment).
+    self._vhat = bool(cfg.pop("vhat", False))
+    self._vhat_detach = bool(cfg.pop("vhat_detach", True))
+    vhat_hidden_dims = tuple(cfg.pop("vhat_hidden_dims", (32,)))
     if cfg:
       raise ValueError(f"Unknown rma_cfg keys: {sorted(cfg)}")
 
@@ -161,6 +178,12 @@ class RmaActor(MLPModel):
       stride=tcn_stride,
       activation=activation,
     )
+    if self._vhat:
+      self.vel_head: nn.Module | None = MLP(
+        self._z_dim, self._odom_dim, vhat_hidden_dims, activation
+      )
+    else:
+      self.vel_head = None
     if self.obs_normalization:
       self.dr_normalizer: nn.Module = EmpiricalNormalization(self._dr_dim)
       self.history_normalizer: nn.Module = EmpiricalNormalization(self._hist_dim)
@@ -181,7 +204,17 @@ class RmaActor(MLPModel):
         f"RmaActor needs '{_DR_GROUP}' and '{_HISTORY_GROUP}' in "
         f"obs_groups[{obs_set!r}], got {groups} (is RMA=1 set for the env?)"
       )
-    proprio = [g for g in groups if g not in (_DR_GROUP, _HISTORY_GROUP)]
+    # odom_target is supervision only: it must never feed the policy (the
+    # deployed robot has no velocity sensor), so it is excluded from the
+    # proprio set alongside the encoder/estimator inputs.
+    proprio = [g for g in groups if g not in (_DR_GROUP, _HISTORY_GROUP, _ODOM_GROUP)]
+    if self._vhat:
+      if _ODOM_GROUP not in groups:
+        raise ValueError(
+          f"vhat=True needs '{_ODOM_GROUP}' in obs_groups[{obs_set!r}], "
+          f"got {groups} (is RMA_VHAT=1 set for the env?)"
+        )
+      self._odom_dim = int(obs[_ODOM_GROUP].shape[-1])
     dr = obs[_DR_GROUP]
     history = obs[_HISTORY_GROUP]
     if dr.dim() != 2:
@@ -241,6 +274,21 @@ class RmaActor(MLPModel):
     zhat = self.estimator(self.history_normalizer(obs[_HISTORY_GROUP]))
     return F.mse_loss(zhat, z_target)
 
+  def velocity_loss(self, obs: TensorDict) -> torch.Tensor:
+    """||v_hat - sg(base_lin_vel)||^2 on the estimator's z.
+
+    The target group is raw (no normalizer) so v_hat is in m/s, body
+    frame — the units the exported "velocity" output promises. With
+    vhat_detach the gradient stops at z and only the head trains.
+    """
+    assert self.vel_head is not None
+    zhat = self.estimator(self.history_normalizer(obs[_HISTORY_GROUP]))
+    if self._vhat_detach:
+      zhat = zhat.detach()
+    target = obs[_ODOM_GROUP]
+    assert isinstance(target, torch.Tensor)
+    return F.mse_loss(self.vel_head(zhat), target)
+
   def update_normalization(self, obs: TensorDict) -> None:
     super().update_normalization(obs)  # Proprio groups.
     if self.obs_normalization:
@@ -268,6 +316,13 @@ class OnnxRmaStudentModel(nn.Module):
   slices the current obs out of the last frame. Seed the buffer by
   repeating the first frame (matches the training-side CircularBuffer
   backfill on reset).
+
+  When the actor carries a velocity head, the graph has a second output
+  ``velocity``: estimated base linear velocity, BODY frame, m/s, at the
+  policy rate — walk-coupled learned odometry for the localization stack.
+  Caveats for consumers: ~1-3 tick causal latency on impulses, ballistic
+  coasting during flight, and it is a velocity (integrating it drifts;
+  fuse with vision).
   """
 
   is_recurrent: bool = False
@@ -283,6 +338,9 @@ class OnnxRmaStudentModel(nn.Module):
     self.obs_normalizer = _copy.deepcopy(model.obs_normalizer)
     self.history_normalizer = _copy.deepcopy(model.history_normalizer)
     self.estimator = _copy.deepcopy(model.estimator)
+    self.vel_head = (
+      _copy.deepcopy(model.vel_head) if model.vel_head is not None else None
+    )
     self.mlp = _copy.deepcopy(model.mlp)
     if model.distribution is not None:
       self.deterministic_output = model.distribution.as_deterministic_output_module()
@@ -295,12 +353,17 @@ class OnnxRmaStudentModel(nn.Module):
         "the history group must clone the actor terms."
       )
 
-  def forward(self, x: torch.Tensor) -> torch.Tensor:
+  def forward(
+    self, x: torch.Tensor
+  ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     history = x.view(-1, self.window, self.hist_dim)
     zhat = self.estimator(self.history_normalizer(history))
     current = self.obs_normalizer(history[:, -1, :])
     out = self.mlp(torch.cat([current, zhat], dim=-1))
-    return self.deterministic_output(out)
+    actions = self.deterministic_output(out)
+    if self.vel_head is None:
+      return actions
+    return actions, self.vel_head(zhat)
 
   def get_dummy_inputs(self) -> tuple[torch.Tensor]:
     return (torch.zeros(1, self.input_size),)
@@ -311,7 +374,9 @@ class OnnxRmaStudentModel(nn.Module):
 
   @property
   def output_names(self) -> list[str]:
-    return ["actions"]
+    if self.vel_head is None:
+      return ["actions"]
+    return ["actions", "velocity"]
 
 
 class RmaPPO(PPO):
@@ -327,16 +392,30 @@ class RmaPPO(PPO):
   learning rates.
   """
 
-  def __init__(self, *args: Any, est_loss_coef: float = 1.0, **kwargs: Any) -> None:
+  def __init__(
+    self,
+    *args: Any,
+    est_loss_coef: float = 1.0,
+    vel_loss_coef: float = 1.0,
+    **kwargs: Any,
+  ) -> None:
     super().__init__(*args, **kwargs)
     self.est_loss_coef = float(est_loss_coef)
+    self.vel_loss_coef = float(vel_loss_coef)
 
   def update(self) -> dict[str, float]:
-    if self.est_loss_coef == 0.0:
-      # e2e ablation / supervision off: skip the regression pass entirely
-      # (running it would only decay Adam momentum and log a fake metric).
+    # self.actor aliases _raw_actor while torch.compile is disabled
+    # (mjlab never sets torch_compile_mode); route via the raw handle so
+    # this keeps working if compilation is ever enabled.
+    actor = cast(RmaActor, self._raw_actor)
+    run_est = self.est_loss_coef != 0.0
+    run_vel = self.vel_loss_coef != 0.0 and actor.vel_head is not None
+    if not (run_est or run_vel):
+      # e2e ablation / supervision off: skip the aux pass entirely
+      # (running it would only decay Adam momentum and log fake metrics).
       return super().update()
     mean_est_loss = 0.0
+    mean_vel_loss = 0.0
     num_batches = 0
     generator = self.storage.mini_batch_generator(self.num_mini_batches, 1)
     for batch in generator:
@@ -344,27 +423,35 @@ class RmaPPO(PPO):
       assert batch_obs is not None
       original_batch_size = batch_obs.batch_size[0]
       if self.symmetry:
-        # Mirrored (dr, history) pairs are valid extra supervision and
-        # teach the estimator the same equivariance the encoder sees.
+        # Mirrored (dr, history, odom_target) tuples are valid extra
+        # supervision and teach the aux heads the same equivariance the
+        # policy sees.
         self.symmetry.augment_batch(batch, original_batch_size)
         batch_obs = batch.observations
         assert batch_obs is not None
-      # self.actor aliases _raw_actor while torch.compile is disabled
-      # (mjlab never sets torch_compile_mode); route via the raw handle so
-      # this keeps working if compilation is ever enabled.
-      actor = cast(RmaActor, self._raw_actor)
-      est_loss = self.est_loss_coef * actor.estimation_loss(batch_obs)
+      aux_loss = torch.zeros((), device=self.device)
+      if run_est:
+        est_loss = self.est_loss_coef * actor.estimation_loss(batch_obs)
+        aux_loss = aux_loss + est_loss
+        mean_est_loss += est_loss.item()
+      if run_vel:
+        vel_loss = self.vel_loss_coef * actor.velocity_loss(batch_obs)
+        aux_loss = aux_loss + vel_loss
+        mean_vel_loss += vel_loss.item()
       self.optimizer.zero_grad()
-      est_loss.backward()
+      aux_loss.backward()
       if self.is_multi_gpu:
-        # Only estimator params carry grads here; the reduction is
-        # consistent across ranks because the grad-bearing set is.
+        # Only aux-head (and, sans stop-grads, trunk) params carry grads
+        # here; the reduction is consistent across ranks because the
+        # grad-bearing set is.
         self.reduce_parameters()
       nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
       self.optimizer.step()
-      mean_est_loss += est_loss.item()
       num_batches += 1
 
     loss_dict = super().update()
-    loss_dict["estimation"] = mean_est_loss / max(num_batches, 1)
+    if run_est:
+      loss_dict["estimation"] = mean_est_loss / max(num_batches, 1)
+    if run_vel:
+      loss_dict["velocity"] = mean_vel_loss / max(num_batches, 1)
     return loss_dict

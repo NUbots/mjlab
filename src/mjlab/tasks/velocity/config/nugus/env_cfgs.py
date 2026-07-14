@@ -801,6 +801,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   bus_voltage = _env_bool("BUS_VOLTAGE", False)
   rma = _env_bool("RMA", False)
   rma_window = _env_int("RMA_WINDOW", 25)
+  rma_vhat = _env_bool("RMA_VHAT", False)
   max_iterations = _env_int("MAX_ITERATIONS", _DEFAULT_MAX_ITERATIONS)
   # Phase curriculum boundaries are derived from PHASE_ITERATIONS, which is
   # decoupled from MAX_ITERATIONS (the latter only drives the
@@ -827,6 +828,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   foot_toein_w = _env_float("FOOT_TOEIN_W", 0.0)
   if foot_toein_w > 0:
     foot_toein_w = -foot_toein_w
+  arm_envelope_w = _env_float("ARM_ENVELOPE_W", 0.0)
+  if arm_envelope_w > 0:
+    arm_envelope_w = -arm_envelope_w
   clearance_per_corner = _env_bool("CLEARANCE_PER_CORNER", default=False)
   swing_height_source = _env_str("SWING_HEIGHT_SOURCE", "min_corner")
   if swing_height_source not in ("min_corner", "center"):
@@ -1474,6 +1478,30 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       },
     )
 
+  # Arm envelope (doc 11 idea 11e): one-sided quadratic on shoulder
+  # pitch/roll excursion outside a tucked box around the default pose.
+  # Prices REACH (game geometry: outstretched arms hit other robots)
+  # instead of energy, so fast small balance motions stay free and a
+  # falling robot can still flail out of the box for cause — insurance
+  # premium, not prohibition. Off by default; enable v58+.
+  if arm_envelope_w != 0.0:
+    cfg.rewards["arm_envelope"] = RewardTermCfg(
+      func=mdp.arm_envelope_cost,
+      weight=arm_envelope_w,
+      params={
+        "asset_cfg": SceneEntityCfg(
+          "robot",
+          joint_names=(
+            "left_shoulder_pitch",
+            "left_shoulder_roll",
+            "right_shoulder_pitch",
+            "right_shoulder_roll",
+          ),
+        ),
+        "margin": _env_float("ARM_ENVELOPE_MARGIN", 0.5),
+      },
+    )
+
   cfg.rewards["feet_distance"].params["asset_cfg"].site_names = site_names
   cfg.rewards["feet_distance"].params["nominal_distance"] = (
     0.2536  # keyframe lateral separation
@@ -1778,6 +1806,19 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       concatenate_terms=True,
       enable_corruption=False,
     )
+    # Supervision target for the odometry head (backlog 15d): ground-truth
+    # body-frame base linear velocity, noise-free and raw (the head's
+    # output must be in m/s). Routed to the actor set for storage but
+    # excluded from the policy input inside RmaActor — the deployed robot
+    # has no velocity sensor; that is the whole point of the head.
+    if rma_vhat:
+      cfg.observations["odom_target"] = ObservationGroupCfg(
+        terms={
+          "base_lin_vel": ObservationTermCfg(func=envs_mdp.base_lin_vel),
+        },
+        concatenate_terms=True,
+        enable_corruption=False,
+      )
 
   # Apply play mode overrides.
   if play:

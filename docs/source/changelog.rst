@@ -27,6 +27,22 @@ Added
   ``dr_extras`` also joins the critic under the knob (those DR
   realizations were previously invisible to it).
 
+- Walk-coupled odometry head (``RMA_VHAT`` knob, NUgus velocity task): a
+  small readout from the RMA estimator's latent to body-frame base linear
+  velocity, supervised on ground-truth ``base_lin_vel`` (new noise-free
+  ``"odom_target"`` observation group, never fed to the policy) and
+  exported as a second ONNX output ``velocity`` (m/s, policy rate) for the
+  localization stack. Detached from the trunk by default
+  (``RMA_VHAT_DETACH=1``) so the head is a pure probe that cannot perturb
+  the walk; ``RMA_VHAT_COEF`` scales the loss.
+
+- Arm envelope cost (``ARM_ENVELOPE_W`` / ``ARM_ENVELOPE_MARGIN`` knobs,
+  NUgus velocity task): one-sided quadratic on shoulder pitch/roll
+  excursion outside a tucked box around the default pose. Prices reach
+  (game-legal geometry) instead of energy, calibrated as an insurance
+  premium: brief recovery flails are cheap, a held arms-out posture is
+  not. Off by default.
+
 - Off-policy scripted head (``ScriptedHeadAction``, ``HEAD_SCRIPTED`` knob
   on ``clock_owned``): drives ``neck_yaw``/``head_pitch`` saccadically
   off-policy (dwell at a fixation, then step to a new random target so the

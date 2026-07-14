@@ -283,6 +283,22 @@ def test_rma_groups_absent_by_default(nugus_flat_cfg) -> None:
   assert "history" not in nugus_flat_cfg.observations
   assert "dr" not in nugus_flat_cfg.observations
   assert "dr_extras" not in nugus_flat_cfg.observations["critic"].terms
+  assert "odom_target" not in nugus_flat_cfg.observations
+
+
+def test_odom_target_group_cfg(monkeypatch) -> None:
+  """RMA_VHAT adds the noise-free odometry supervision group."""
+  monkeypatch.setenv("RMA", "1")
+  monkeypatch.setenv("RMA_VHAT", "1")
+  cfg = nubots_nugus_flat_env_cfg()
+  group = cfg.observations["odom_target"]
+  assert list(group.terms.keys()) == ["base_lin_vel"]
+  assert group.enable_corruption is False
+
+  # RMA without the head must not add the group.
+  monkeypatch.delenv("RMA_VHAT")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "odom_target" not in cfg.observations
 
 
 def test_rma_groups_cfg(monkeypatch) -> None:

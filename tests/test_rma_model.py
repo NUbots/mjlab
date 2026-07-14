@@ -165,3 +165,91 @@ def test_missing_groups_raise() -> None:
       ACTIONS,
       distribution_cfg=dict(_DIST_CFG),
     )
+
+
+_VHAT_OBS_GROUPS = {"actor": ["actor", "dr", "history", "odom_target"]}
+
+
+def _fake_vhat_obs(batch: int = 4) -> TensorDict:
+  obs = _fake_obs(batch)
+  obs["odom_target"] = torch.randn(batch, 3)
+  return obs
+
+
+def _make_vhat_actor(**extra_rma_cfg) -> RmaActor:
+  torch.manual_seed(3)
+  return RmaActor(
+    _fake_vhat_obs(),
+    _VHAT_OBS_GROUPS,
+    "actor",
+    ACTIONS,
+    rma_cfg={"z_dim": Z_DIM, "e2e": True, "vhat": True, **extra_rma_cfg},
+    hidden_dims=(64, 32),
+    activation="elu",
+    obs_normalization=True,
+    distribution_cfg=dict(_DIST_CFG),
+  )
+
+
+def test_vhat_target_excluded_from_policy_input() -> None:
+  """odom_target is supervision only: the latent must not grow with it."""
+  actor = _make_vhat_actor()
+  latent = actor.get_latent(_fake_vhat_obs(6))
+  assert latent.shape == (6, ACTOR_DIM + Z_DIM)
+
+
+def test_vhat_detached_loss_grads_only_head() -> None:
+  """Default (detached): the odometry loss is a pure probe on sg(z)."""
+  actor = _make_vhat_actor()
+  actor.velocity_loss(_fake_vhat_obs()).backward()
+  assert actor.vel_head is not None
+  assert all(p.grad is not None for p in actor.vel_head.parameters())
+  assert all(p.grad is None for p in actor.estimator.parameters())
+  assert all(p.grad is None for p in actor.mlp.parameters())
+
+
+def test_vhat_undetached_loss_reaches_estimator() -> None:
+  actor = _make_vhat_actor(vhat_detach=False)
+  actor.velocity_loss(_fake_vhat_obs()).backward()
+  assert any(
+    p.grad is not None and p.grad.abs().sum() > 0 for p in actor.estimator.parameters()
+  )
+
+
+def test_vhat_student_two_outputs(tmp_path) -> None:
+  actor = _make_vhat_actor()
+  student = OnnxRmaStudentModel(actor, verbose=False)
+  assert student.output_names == ["actions", "velocity"]
+  history = torch.randn(2, WINDOW, ACTOR_DIM)
+  out = student(history.reshape(2, -1))
+  assert isinstance(out, tuple)
+  actions, velocity = out
+  assert actions.shape == (2, ACTIONS)
+  assert velocity.shape == (2, 3)
+  zhat = actor.estimator(actor.history_normalizer(history))
+  assert actor.vel_head is not None
+  torch.testing.assert_close(velocity, actor.vel_head(zhat))
+
+  path = tmp_path / "student_vhat.onnx"
+  torch.onnx.export(
+    student,
+    student.get_dummy_inputs(),
+    str(path),
+    input_names=student.input_names,
+    output_names=student.output_names,
+    opset_version=18,
+    dynamo=False,
+  )
+  assert path.exists() and path.stat().st_size > 0
+
+
+def test_vhat_without_odom_group_raises() -> None:
+  with pytest.raises(ValueError, match="RMA_VHAT=1"):
+    RmaActor(
+      _fake_obs(),
+      _OBS_GROUPS,
+      "actor",
+      ACTIONS,
+      rma_cfg={"z_dim": Z_DIM, "e2e": True, "vhat": True},
+      distribution_cfg=dict(_DIST_CFG),
+    )

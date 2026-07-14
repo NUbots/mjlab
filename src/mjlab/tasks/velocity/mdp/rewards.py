@@ -730,6 +730,45 @@ def foot_toein_cost(
   return cost
 
 
+class arm_envelope_cost:  # noqa: N801
+  """One-sided cost on arm excursion outside a tucked box (doc 11 idea 11e).
+
+  Game legality is GEOMETRY (reach hits other robots), not energy: joule
+  heating quiets arms only by also taxing the fast small motions that do
+  the balance work (R42: binding joule costs eval-push falls at any dose).
+  This charges only |q - q_default| beyond ``margin`` (radians) on the
+  selected arm joints, quadratically, with no command gate.
+
+  Priced as an insurance premium, not a prohibition: at the default weight
+  a 0.5 s full-reach recovery burst costs ~1-2 total (always worth paying
+  vs -10 termination plus lost tracking), while a HELD arms-out posture
+  pays the same fee 50x/s forever (never worth it). The expected-value
+  asymmetry does the gating — no explicit falling detector needed. This is
+  the opposite calibration from the toe-in guard, which has no legitimate
+  use and can be steep.
+  """
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    asset: Entity = env.scene[cfg.params["asset_cfg"].name]
+    joint_ids, _ = asset.find_joints(cfg.params["asset_cfg"].joint_names)
+    self._joint_ids = torch.tensor(joint_ids, device=env.device, dtype=torch.long)
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    margin: float = 0.5,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    default_joint_pos = asset.data.default_joint_pos
+    assert default_joint_pos is not None
+    excursion = torch.abs(
+      asset.data.joint_pos[:, self._joint_ids] - default_joint_pos[:, self._joint_ids]
+    )
+    violation = torch.clamp(excursion - margin, min=0.0)
+    return torch.sum(torch.square(violation), dim=1)
+
+
 def feet_slip(
   env: ManagerBasedRlEnv,
   sensor_name: str,
