@@ -830,6 +830,44 @@ floor — with the settle-gate fix, flight under the grounding tax is
 true zero; v57 (flight exemption, single variable) measures whether the
 tax was the walk->run barrier.
 
+## R43 (2026-07-15): v57 verdict — the flight exemption is free and strictly dominant; running needs DEMAND, not permission. CERTIFIED CHAMPION.
+
+v57 = v56c recipe + PHASE_CONTACT_FLIGHT_EXEMPT=1 (Trent's state-gated
+design: the stance-window-airborne charge is waived only when ALL feet
+are airborne, so single-foot skipping still pays and pronking pays on
+landing; batch-v57). Full 10k clean.
+
+| candidate | lin RMSE | ang RMSE | falls/min | sim2sim         |
+|-----------|----------|----------|-----------|-----------------|
+| v56c      | 0.0795   | 0.313    | 0.0000    | 0 falls, 0.1035 |
+| v57       | 0.0761   | 0.276    | 0.0000    | 0 falls, 0.0923 |
+
+- v57 strictly dominates v56c on every eval axis (lin, ang, slip 0.028,
+  swing_height_err 0.065) at identical zero falls, and improves
+  cross-engine tracking too. The exemption is not merely free — removing
+  a mispriced charge (taxing correct flight as a contact error) bought
+  tracking. NEW CHAMPION, and CERTIFIED: sim2sim gate passed with 0
+  falls, full 30 s episodes, lin 0.0923. Deploy artifact: the v57 ONNX
+  (batch-v57 run, model_9999).
+- The flight question is ANSWERED: with the tax removed and the
+  spawn-settle gate correcting the metric, flight_frac reads 0.0011 and
+  flight_frac_fast 0.0000 — the policy does not fly even when flight is
+  legal. The grounding tax was never the walk->run barrier; the command
+  envelope is. Running needs DEMAND (commands past the ~1.56 m/s Froude
+  boundary with the cadence tether opened), not permission. Filed as
+  its own future experiment; do not spend more reward-shaping effort on
+  flight.
+- Attribution note: single-variable vs v56c, so the whole delta is the
+  exemption's. Mechanism is likely second-order — the charge fired
+  rarely (true flight was already ~0), but its GRADIENT pressed on every
+  near-flight stance transition; removing it un-pinched the fast-gait
+  optimum.
+- Era status: v57 closes the clock_owned/RMA/e2e line opened at R31.
+  Next line (v58): aux heads on the e2e trunk (15d — v_hat walk-coupled
+  odometry as a second ONNX output; the side z-head angular-recovery
+  question) + the 11e arm envelope (geometry priced as insurance, so
+  v56c's functional flail stays legal but held reach does not).
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not
