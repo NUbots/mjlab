@@ -321,6 +321,29 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
     zhat_mix.fill_(1.0 if eval_path == "student" else 0.0)
     print(f"[INFO] RMA eval path: {eval_path} (zhat_mix={float(zhat_mix):.1f})")
 
+  # Odometry head (backlog 15d acceptance spec): v_hat RMSE conditioned on
+  # post-push windows separately from steady gait — the push case is the
+  # one that costs the localization stack most. Push firings are detected
+  # from the event manager's per-env interval timer resetting upward.
+  vel_head = getattr(actor, "vel_head", None)
+  vhat_push_window_s = 1.0
+  vhat_sq = {"push": 0.0, "steady": 0.0}
+  vhat_n = {"push": 0, "steady": 0}
+  push_time_left: torch.Tensor | None = None
+  last_push_s: torch.Tensor | None = None
+  vhat_estimator = None
+  vhat_normalizer = None
+  if vel_head is not None:
+    assert actor is not None
+    vhat_estimator = actor.estimator
+    vhat_normalizer = actor.history_normalizer
+    interval_names = unwrapped.event_manager.active_terms.get("interval", [])
+    if "push_robot" in interval_names:
+      push_idx = interval_names.index("push_robot")
+      push_time_left = unwrapped.event_manager._interval_term_time_left[push_idx]
+    last_push_s = torch.full((num_envs,), -1e9, device=device)
+    print("[INFO] Odometry head found: reporting push-conditioned v_hat RMSE.")
+
   twist = cast(UniformVelocityCommand, unwrapped.command_manager.get_term("twist"))
   robot = unwrapped.scene["robot"]
   contact_sensor = cast(ContactSensor, unwrapped.scene["feet_ground_contact"])
@@ -359,6 +382,26 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
       ang_vel = robot.data.root_link_ang_vel_b[active_idx, 2]
       lin_err = torch.norm(cmd[:, :2] - lin_vel, dim=-1)
       ang_err = torch.abs(cmd[:, 2] - ang_vel)
+
+      if (
+        vel_head is not None
+        and last_push_s is not None
+        and vhat_estimator is not None
+        and vhat_normalizer is not None
+      ):
+        # v_hat sees the corrupted history stream; the target is ground
+        # truth — exactly the deployment error the spec cares about.
+        with torch.no_grad():
+          zhat = vhat_estimator(vhat_normalizer(obs["history"][active_idx]))
+          v_hat = vel_head(zhat)
+        v_true = robot.data.root_link_lin_vel_b[active_idx]
+        sq_err = torch.sum(torch.square(v_hat - v_true), dim=-1)
+        now_s = step * unwrapped.step_dt
+        recent_push = (now_s - last_push_s[active_idx]) <= vhat_push_window_s
+        vhat_sq["push"] += sq_err[recent_push].sum().item()
+        vhat_n["push"] += int(recent_push.sum().item())
+        vhat_sq["steady"] += sq_err[~recent_push].sum().item()
+        vhat_n["steady"] += int((~recent_push).sum().item())
 
       in_air = contact_sensor.data.found[active_idx] == 0
       foot_heights = height_sensor.data.heights[active_idx]
@@ -399,9 +442,19 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
       )
 
     ep_len_before_step = unwrapped.episode_length_buf.clone()
+    push_tl_before = push_time_left.clone() if push_time_left is not None else None
     with torch.no_grad():
       actions = policy(obs)
     obs, _, dones, _ = env.step(actions)
+    if (
+      push_time_left is not None
+      and push_tl_before is not None
+      and last_push_s is not None
+    ):
+      # The interval timer resetting UPWARD means the push fired this
+      # step (episode resets also resample it — exclude done envs).
+      fired = (push_time_left > push_tl_before) & ~dones.bool()
+      last_push_s[fired] = (step + 1) * unwrapped.step_dt
     apply_fixed_commands(twist, envs_per_command=cfg.envs_per_command)
     first_contact_all = contact_sensor.compute_first_contact(dt=unwrapped.step_dt)
 
@@ -431,6 +484,17 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
   results = metrics.to_dict()
   overall = results["overall"]
   assert isinstance(overall, dict)
+
+  if vel_head is not None:
+
+    def _rmse(sq_sum: float, count: int) -> float:
+      return (sq_sum / count) ** 0.5 if count else 0.0
+
+    overall["eval/vhat_rmse"] = _rmse(
+      vhat_sq["push"] + vhat_sq["steady"], vhat_n["push"] + vhat_n["steady"]
+    )
+    overall["eval/vhat_rmse_push"] = _rmse(vhat_sq["push"], vhat_n["push"])
+    overall["eval/vhat_rmse_steady"] = _rmse(vhat_sq["steady"], vhat_n["steady"])
 
   print("\n" + "=" * 50)
   print("NUgus Eval Results")
