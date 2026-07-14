@@ -815,6 +815,21 @@ ycburzcy). Split verdict:
   a collision/handling liability on a real pitch, and MX-64s held at
   stall torque cook.)
 
+## R42 (2026-07-14): v56c verdict — the guard is free (better than free); the fall tax was the joule at ANY binding dose. NEW CHAMPION.
+
+v56c (guard-only, joule 1x): eval lin 0.0795 (best ever), ang 0.313,
+falls 0.0000 across 1280 episodes. Attribution closed: v56 (10x) and
+v56b (3x) both eval at 0.0141 falls despite v56b's v55-class training
+falls — binding joule trades eval-push stability at any dose tried; the
+toe-in guard costs nothing (possibly prunes unstable footwork). Trade
+menu now explicit: v56c (max stability, functional flail) vs v56b
+(quiet arms, ang 0.236, 0.014 falls); backlog 11e (arm envelope,
+insurance-premium pricing) is the instrument for quiet arms without the
+energy tax. Also: spawn drop-in identified (Trent) as the flight-metric
+floor — with the settle-gate fix, flight under the grounding tax is
+true zero; v57 (flight exemption, single variable) measures whether the
+tax was the walk->run barrier.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not

@@ -1929,6 +1929,24 @@ gen_v56c() {
   emit_manifest "mj-gs-v56c-guard-only"
 }
 
+# BATCH=v57: the flight-exemption run on the new v56c champion (R42:
+# guard-only = lin 0.0795 best-ever, ZERO eval falls in 1280 episodes;
+# the v56/v56b fall tax was the binding joule at any dose, not the
+# guard). Single variable: PHASE_CONTACT_FLIGHT_EXEMPT=1 lifts the
+# grounding tax on flight frames (Trent's state-gated design). With the
+# spawn-corrected flight metrics reading true-zero under the tax, any
+# nonzero flight_by_speed here is unambiguous evidence the tax was the
+# walk->run barrier. Aux heads (v_hat odometry export + side z-head,
+# backlog 15d) and the arm envelope (11e) are the next build (v58).
+gen_v57() {
+  gen_v56c
+  export PHASE_CONTACT_FLIGHT_EXEMPT="1"
+  export MJLAB_LOG_STAMP="v57-flight-exempt-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v57-flight-exempt__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v57,rma,e2e,toein-guard,flight-exempt,mirror-fix,batch-v57,gridsearch"
+  emit_manifest "mj-gs-v57-flight-exempt"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -3054,6 +3072,7 @@ case "$BATCH" in
   v56) gen_v56; expected=13 ;;
   v56b) gen_v56b; expected=14 ;;
   v56c) gen_v56c; expected=13 ;;
+  v57) gen_v57; expected=14 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
