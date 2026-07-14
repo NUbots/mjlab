@@ -201,6 +201,7 @@ def flight_fraction(
   command_threshold: float = 0.05,
   min_command_speed: float = 0.0,
   max_tilt_cos: float = 0.8,
+  min_episode_steps: int = 25,
 ) -> torch.Tensor:
   """Fraction of steps in TRUE flight: all feet airborne while upright.
 
@@ -221,7 +222,11 @@ def flight_fraction(
   asset: Entity = env.scene[asset_cfg.name]
   upright = -asset.data.projected_gravity_b[:, 2] >= max_tilt_cos  # [B]
 
-  flight = (airborne & upright).float()
+  # Spawn exclusion (Trent 2026-07-14): envs are dropped in at reset, so
+  # every episode's first frames are airborne "flight" - a constant
+  # artifact floor (~drop_frames/episode_len). Skip the settle window.
+  settled = env.episode_length_buf > min_episode_steps
+  flight = (airborne & upright & settled).float()
 
   if command_name is not None:
     command = env.command_manager.get_command(command_name)

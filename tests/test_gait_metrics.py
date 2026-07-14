@@ -297,7 +297,10 @@ def test_flight_fraction_excludes_falls():
   robot.data.projected_gravity_b = torch.tensor(
     [[0.0, 0.0, -1.0], [0.9, 0.0, -0.4], [0.0, 0.0, -1.0], [0.0, 0.0, -1.0]]
   )
+  env.episode_length_buf = torch.full((n,), 100)
   base = flight_fraction(env, "feet_ground_contact")
   assert torch.allclose(base, torch.tensor([1.0, 0.0, 0.0, 1.0]))
   fast = flight_fraction(env, "feet_ground_contact", min_command_speed=1.5)
+  env.episode_length_buf = torch.full((n,), 5)  # inside spawn window
+  assert torch.allclose(flight_fraction(env, "feet_ground_contact"), torch.zeros(n))
   assert torch.allclose(fast, torch.tensor([1.0, 0.0, 0.0, 0.0]))

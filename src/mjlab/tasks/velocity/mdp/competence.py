@@ -535,7 +535,8 @@ class CompetenceTracker:
       no_recent_push = (
         float(env.common_step_counter) - self.last_push_step
       ) > 1.0 / self._step_dt
-      eligible = walking & no_recent_push
+      settled = env.episode_length_buf > 25  # spawn drop-in exclusion
+      eligible = walking & no_recent_push & settled
       if eligible.any():
         self.flight_exposure_by_speed.scatter_add_(
           0, bucket[eligible], torch.ones(int(eligible.sum()), device=self.device)
