@@ -175,6 +175,14 @@ spec:
                   value: "${RMA_VHAT_DETACH}"
                 - name: RMA_VHAT_COEF
                   value: "${RMA_VHAT_COEF}"
+                - name: RMA_GATED
+                  value: "${RMA_GATED}"
+                - name: RMA_ZFAST_DIM
+                  value: "${RMA_ZFAST_DIM}"
+                - name: RMA_HOLD_DECAY
+                  value: "${RMA_HOLD_DECAY}"
+                - name: RMA_GATE_COEF
+                  value: "${RMA_GATE_COEF}"
                 - name: FOOT_TOEIN_W
                   value: "${FOOT_TOEIN_W}"
                 - name: FOOT_TOEIN_MARGIN

@@ -6,7 +6,12 @@ import pytest
 import torch
 from tensordict import TensorDict
 
-from mjlab.rl.rma import OnnxRmaStudentModel, RmaActor, RmaTcnEstimator
+from mjlab.rl.rma import (
+  OnnxRmaGatedStudentModel,
+  OnnxRmaStudentModel,
+  RmaActor,
+  RmaTcnEstimator,
+)
 
 ACTOR_DIM = 72
 DR_DIM = 169
@@ -226,9 +231,14 @@ def test_vhat_student_two_outputs(tmp_path) -> None:
   actions, velocity = out
   assert actions.shape == (2, ACTIONS)
   assert velocity.shape == (2, 3)
+  # Trunk tap: velocity reads the policy MLP's penultimate features.
   zhat = actor.estimator(actor.history_normalizer(history))
+  current = actor.obs_normalizer(history[:, -1, :])
+  h = torch.cat([current, zhat], dim=-1)
+  for layer in list(actor.mlp)[:-1]:
+    h = layer(h)
   assert actor.vel_head is not None
-  torch.testing.assert_close(velocity, actor.vel_head(zhat))
+  torch.testing.assert_close(velocity, actor.vel_head(h))
 
   path = tmp_path / "student_vhat.onnx"
   torch.onnx.export(
@@ -253,3 +263,140 @@ def test_vhat_without_odom_group_raises() -> None:
       rma_cfg={"z_dim": Z_DIM, "e2e": True, "vhat": True},
       distribution_cfg=dict(_DIST_CFG),
     )
+
+
+# --- Gated dual-channel mode (backlog 15d full design) ---
+
+Z_FAST_DIM = 8
+
+
+def _make_gated_actor(**extra_rma_cfg) -> RmaActor:
+  torch.manual_seed(4)
+  return RmaActor(
+    _fake_vhat_obs(),
+    _VHAT_OBS_GROUPS,
+    "actor",
+    ACTIONS,
+    rma_cfg={
+      "z_dim": Z_DIM,
+      "gated": True,
+      "z_fast_dim": Z_FAST_DIM,
+      "vhat": True,
+      **extra_rma_cfg,
+    },
+    hidden_dims=(64, 32),
+    activation="elu",
+    obs_normalization=True,
+    distribution_cfg=dict(_DIST_CFG),
+  )
+
+
+def test_gated_latent_shapes() -> None:
+  actor = _make_gated_actor()
+  latent = actor.get_latent(_fake_vhat_obs(6))
+  assert latent.shape == (6, ACTOR_DIM + Z_FAST_DIM + Z_DIM)
+  assert actor(_fake_vhat_obs(6)).shape == (6, ACTIONS)
+
+
+def test_gated_and_e2e_mutually_exclusive() -> None:
+  with pytest.raises(ValueError, match="mutually exclusive"):
+    _make_gated_actor(e2e=True)
+
+
+def test_gated_policy_path_gradients() -> None:
+  """PPO trains fast head, gate, encoder, and z0 — never the student head."""
+  actor = _make_gated_actor()
+  actor(_fake_vhat_obs()).sum().backward()
+  assert actor.fast_head is not None and actor.gate_head is not None
+  assert any(p.grad is not None for p in actor.fast_head.parameters())
+  assert any(p.grad is not None for p in actor.gate_head.parameters())
+  assert any(p.grad is not None for p in actor.encoder.parameters())
+  assert actor.z0 is not None and actor.z0.grad is not None
+  assert all(p.grad is None for p in actor.estimator.head.parameters())
+
+
+def test_gated_gate_loss_trains_only_gate() -> None:
+  """The Kalman-gate regression owns g: prior, student, encoder stay put."""
+  actor = _make_gated_actor()
+  actor.gate_loss(_fake_vhat_obs()).backward()
+  assert actor.gate_head is not None and actor.fast_head is not None
+  assert all(p.grad is not None for p in actor.gate_head.parameters())
+  assert all(p.grad is None for p in actor.estimator.head.parameters())
+  assert all(p.grad is None for p in actor.encoder.parameters())
+  assert all(p.grad is None for p in actor.fast_head.parameters())
+  assert actor.z0 is not None and actor.z0.grad is None
+
+
+def test_gated_estimation_loss_isolated() -> None:
+  actor = _make_gated_actor()
+  actor.estimation_loss(_fake_vhat_obs()).backward()
+  assert all(p.grad is not None for p in actor.estimator.head.parameters())
+  assert all(p.grad is None for p in actor.encoder.parameters())
+  assert actor.z0 is not None and actor.z0.grad is None
+
+
+def test_gated_student_boot_matches_training_form(tmp_path) -> None:
+  """At zero evidence the deployment recursion must equal Stage-1 training."""
+  actor = _make_gated_actor()
+  student = OnnxRmaGatedStudentModel(actor, verbose=False)
+  assert student.input_names == ["obs", "z_state", "evidence"]
+  assert student.output_names == [
+    "actions",
+    "velocity",
+    "z_state_out",
+    "evidence_out",
+  ]
+  history = torch.randn(2, WINDOW, ACTOR_DIM)
+  flat = history.reshape(2, -1)
+  actions, velocity, z_state, evidence = student(
+    flat, torch.zeros(2, Z_DIM), torch.zeros(2, 1)
+  )
+  assert actions.shape == (2, ACTIONS)
+  assert velocity.shape == (2, 3)
+  assert z_state.shape == (2, Z_DIM)
+  assert evidence.shape == (2, 1)
+  # Manual Stage-1 composition with the student head as z_signal.
+  feats = actor.estimator.features(actor.history_normalizer(history))
+  z_raw = actor.estimator.head(feats)
+  assert actor.gate_head is not None and actor.fast_head is not None
+  assert actor.z0 is not None
+  g = torch.sigmoid(actor.gate_head(feats))
+  z_slow = (1.0 - g) * actor.z0 + g * z_raw
+  current = actor.obs_normalizer(history[:, -1, :])
+  h = torch.cat([current, actor.fast_head(feats), z_slow], dim=-1)
+  for layer in list(actor.mlp)[:-1]:
+    h = layer(h)
+  assert actor.distribution is not None
+  expected = actor.distribution.as_deterministic_output_module()(actor.mlp[-1](h))
+  # The recursion divides by (ev + 1e-6), so boot equality is approximate.
+  torch.testing.assert_close(actions, expected, atol=1e-3, rtol=1e-3)
+
+  path = tmp_path / "student_gated.onnx"
+  torch.onnx.export(
+    student,
+    student.get_dummy_inputs(),
+    str(path),
+    input_names=student.input_names,
+    output_names=student.output_names,
+    opset_version=18,
+    dynamo=False,
+  )
+  assert path.exists() and path.stat().st_size > 0
+
+
+def test_gated_state_holds_through_standing() -> None:
+  """With the gate closed, z_state must hold and evidence decay at rho."""
+  actor = _make_gated_actor()
+  student = OnnxRmaGatedStudentModel(actor, verbose=False)
+  # Force the gate shut: large negative bias swamps any feature input.
+  gate_linear = student.gate_head
+  assert isinstance(gate_linear, torch.nn.Linear)
+  with torch.no_grad():
+    gate_linear.bias.fill_(-50.0)
+  z_in = torch.randn(1, Z_DIM)
+  ev_in = torch.ones(1, 1)
+  flat = torch.randn(1, WINDOW * ACTOR_DIM)
+  _, _, z_out, ev_out = student(flat, z_in, ev_in)
+  torch.testing.assert_close(z_out, z_in, atol=1e-4, rtol=1e-4)
+  rho = float(student.hold_decay)
+  torch.testing.assert_close(ev_out, torch.full((1, 1), rho), atol=1e-4, rtol=1e-4)

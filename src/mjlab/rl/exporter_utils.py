@@ -1,5 +1,7 @@
 """Shared utilities for ONNX policy export across RL tasks."""
 
+import os
+
 import onnx
 import torch
 
@@ -81,6 +83,15 @@ def get_base_metadata(
     metadata["velocity_output"] = 1
     metadata["velocity_frame"] = "body"
     metadata["velocity_units"] = "m/s"
+  # Gated dual-channel student (backlog 15d Stage 2): the graph carries a
+  # 17-float cross-tick memory. Extra inputs z_state [1, z] and evidence
+  # [1, 1] (boot both with zeros), extra outputs z_state_out/evidence_out
+  # to feed back next tick. The model config is not visible here, so key
+  # off the same env knob rl_cfg.py builds the actor from.
+  if os.environ.get("RMA_GATED", "").strip().lower() in ("1", "true", "yes", "on"):
+    metadata["rma_gated"] = 1
+    metadata["state_inputs"] = ["z_state", "evidence"]
+    metadata["state_boot"] = "zeros"
   return metadata
 
 

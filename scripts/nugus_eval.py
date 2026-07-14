@@ -331,12 +331,8 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
   vhat_n = {"push": 0, "steady": 0}
   push_time_left: torch.Tensor | None = None
   last_push_s: torch.Tensor | None = None
-  vhat_estimator = None
-  vhat_normalizer = None
   if vel_head is not None:
     assert actor is not None
-    vhat_estimator = actor.estimator
-    vhat_normalizer = actor.history_normalizer
     interval_names = unwrapped.event_manager.active_terms.get("interval", [])
     if "push_robot" in interval_names:
       push_idx = interval_names.index("push_robot")
@@ -383,17 +379,12 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
       lin_err = torch.norm(cmd[:, :2] - lin_vel, dim=-1)
       ang_err = torch.abs(cmd[:, 2] - ang_vel)
 
-      if (
-        vel_head is not None
-        and last_push_s is not None
-        and vhat_estimator is not None
-        and vhat_normalizer is not None
-      ):
-        # v_hat sees the corrupted history stream; the target is ground
-        # truth — exactly the deployment error the spec cares about.
+      if vel_head is not None and last_push_s is not None and actor is not None:
+        # v_hat sees the corrupted obs stream (through the eval path
+        # selected above); the target is ground truth — exactly the
+        # deployment error the spec cares about.
         with torch.no_grad():
-          zhat = vhat_estimator(vhat_normalizer(obs["history"][active_idx]))
-          v_hat = vel_head(zhat)
+          v_hat = actor.estimate_velocity(obs[active_idx])
         v_true = robot.data.root_link_lin_vel_b[active_idx]
         sq_err = torch.sum(torch.square(v_hat - v_true), dim=-1)
         now_s = step * unwrapped.step_dt

@@ -28,13 +28,27 @@ Added
   realizations were previously invisible to it).
 
 - Walk-coupled odometry head (``RMA_VHAT`` knob, NUgus velocity task): a
-  small readout from the RMA estimator's latent to body-frame base linear
-  velocity, supervised on ground-truth ``base_lin_vel`` (new noise-free
-  ``"odom_target"`` observation group, never fed to the policy) and
-  exported as a second ONNX output ``velocity`` (m/s, policy rate) for the
-  localization stack. Detached from the trunk by default
-  (``RMA_VHAT_DETACH=1``) so the head is a pure probe that cannot perturb
-  the walk; ``RMA_VHAT_COEF`` scales the loss.
+  readout from the policy trunk's penultimate features — the
+  representation making each tick's walk decision — to body-frame base
+  linear velocity, supervised on ground-truth ``base_lin_vel`` (new
+  noise-free ``"odom_target"`` observation group, never fed to the
+  policy) and exported as an ONNX output ``velocity`` (m/s, policy rate)
+  for the localization stack. Detached by default (``RMA_VHAT_DETACH=1``)
+  so the head is a pure probe that cannot perturb the walk;
+  ``RMA_VHAT_COEF`` scales the loss.
+
+- Gated dual-channel RMA mode (``RMA_GATED`` knob, NUgus velocity task):
+  the policy consumes a PPO-trained fast latent plus a slow sysid channel
+  ``(1-g)*z0 + g*z_signal`` — encoder truth during training, the anchored
+  student estimate at deployment — where ``g`` is a Kalman-gain-style
+  gate regressed from the observation window and ``z0`` is a learned safe
+  prior trained only through the policy path. The exported student
+  carries a 17-float cross-tick memory (``z_state``/``evidence`` graph
+  inputs and outputs, boot with zeros): identify while walking, hold
+  through standing, with the hold decaying toward the safe prior
+  (``RMA_HOLD_DECAY`` per tick). At zero evidence the deployment
+  recursion equals the training form exactly. Knobs: ``RMA_ZFAST_DIM``,
+  ``RMA_GATE_COEF``.
 
 - Arm envelope cost (``ARM_ENVELOPE_W`` / ``ARM_ENVELOPE_MARGIN`` knobs,
   NUgus velocity task): one-sided quadratic on shoulder pitch/roll

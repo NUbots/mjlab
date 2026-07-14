@@ -261,6 +261,7 @@ FOOT_TOEIN_MARGIN="${FOOT_TOEIN_MARGIN:-}"
 export RMA RMA_WINDOW RMA_Z_DIM RMA_EST_COEF RMA_E2E
 export RMA_ZHAT_MIX_START_ITER RMA_ZHAT_MIX_END_ITER
 export RMA_VHAT RMA_VHAT_DETACH RMA_VHAT_COEF
+export RMA_GATED RMA_ZFAST_DIM RMA_HOLD_DECAY RMA_GATE_COEF
 export ARM_ENVELOPE_W ARM_ENVELOPE_MARGIN
 RMA="${RMA:-}"
 RMA_WINDOW="${RMA_WINDOW:-}"
@@ -272,6 +273,10 @@ RMA_ZHAT_MIX_END_ITER="${RMA_ZHAT_MIX_END_ITER:-}"
 RMA_VHAT="${RMA_VHAT:-}"
 RMA_VHAT_DETACH="${RMA_VHAT_DETACH:-}"
 RMA_VHAT_COEF="${RMA_VHAT_COEF:-}"
+RMA_GATED="${RMA_GATED:-}"
+RMA_ZFAST_DIM="${RMA_ZFAST_DIM:-}"
+RMA_HOLD_DECAY="${RMA_HOLD_DECAY:-}"
+RMA_GATE_COEF="${RMA_GATE_COEF:-}"
 ARM_ENVELOPE_W="${ARM_ENVELOPE_W:-}"
 ARM_ENVELOPE_MARGIN="${ARM_ENVELOPE_MARGIN:-}"
 PHASE_TARGET_MODE="${PHASE_TARGET_MODE:-}"
@@ -1954,33 +1959,43 @@ gen_v57() {
   emit_manifest "mj-gs-v57-flight-exempt"
 }
 
-# BATCH=v58: aux odometry head + arm envelope on the certified v57
-# champion (R43: flight exemption free and strictly dominant; eval
-# 0.0761/0.276/0.0000, sim2sim 0 falls). Two additions:
-# - RMA_VHAT=1 (backlog 15d): v_hat readout from the e2e trunk's z to
-#   body-frame base lin vel, supervised on ground truth, exported as a
-#   second ONNX output "velocity" (walk-coupled odometry for the
-#   localization stack). DETACHED (default): a pure probe that cannot
-#   perturb the walk, so any gait delta vs v57 attributes to the arm
-#   envelope. Watch Loss/velocity for the sim RMSE spec.
-# - ARM_ENVELOPE_W=-2.5 (backlog 11e): one-sided quadratic on shoulder
-#   pitch/roll excursion past 0.5 rad from default. Prices REACH
-#   (geometry) not energy — R42 showed binding joule buys quiet arms at
-#   a fall tax; the envelope aims for game-legal arms with the balance
-#   flail still affordable for cause (a 0.5 s full-reach burst costs
-#   ~1-2 total vs -10 termination; a held arms-out posture never pays).
-# Success: v57-class tracking/falls + arms inside the box in video +
-# Loss/velocity converging (odometry usable). Failure split: if falls
-# rise, the envelope is taxing recovery (widen margin/halve weight);
-# v_hat quality is free either way.
+# BATCH=v58: the FULL backlog-15d design + arm envelope, on the
+# certified v57 champion (R43: eval 0.0761/0.276/0.0000, sim2sim 0
+# falls). Trent's scope call 2026-07-15: gated dual-channel model, not
+# just aux heads.
+# - RMA_GATED=1: policy consumes z_fast (PPO-trained e2e channel — the
+#   v55/v57 odometry cargo, train == deploy) + z_slow_eff =
+#   (1-g)*z0 + g*z_signal (encoder truth in training, anchored student
+#   head at deployment; g = Kalman-style gate from the window; z0 =
+#   learned safe prior trained through the POLICY path only). RMA_E2E
+#   off and RMA_EST_COEF back to 1 (the slow channel needs its anchor);
+#   RMA_GATE_COEF=1. Deployment ONNX carries (z_state, evidence) — 17
+#   floats — across ticks: identify while walking, hold through
+#   standing (hold decay 0.9995/tick ~= 40 s). At zero evidence the
+#   recursion equals the training form exactly (no cold-start gap by
+#   construction — the v53 fall mechanism, fixed the 15d way).
+# - RMA_VHAT=1: v_hat odometry from the POLICY trunk's penultimate
+#   features (walk decisions feed the estimate — Trent's walk-coupled
+#   odometry), detached, exported as ONNX output "velocity" (body m/s).
+# - ARM_ENVELOPE_W=-2.5 (11e): one-sided quadratic past 0.5 rad on
+#   shoulder pitch/roll. Reach priced as insurance (burst ~1-2 total,
+#   held posture never pays), not energy (R42: joule costs falls).
+# Success: v57-class falls + v53-class angular (the params channel
+# restored) + tucked arms + Loss/velocity converging. Watch Loss/gate
+# and the g distribution: gate stuck ~0 = window never identifies
+# (prior does everything); stuck ~1 = prior dead (v53 risk returns).
 gen_v58() {
   gen_v57
+  export RMA_E2E=""
+  export RMA_EST_COEF="1.0"
+  export RMA_GATED="1"
+  export RMA_GATE_COEF="1.0"
   export RMA_VHAT="1"
   export ARM_ENVELOPE_W="-2.5"
-  export MJLAB_LOG_STAMP="v58-vhat-armbox-$(date +%Y%m%d-%H%M%S)"
-  export RUN_NAME="clock_owned__v58-vhat-armbox__8gpu-6144__s2__${BATCH}"
-  export WANDB_TAGS="clock_owned,v58,rma,e2e,toein-guard,flight-exempt,vhat-odometry,arm-envelope,mirror-fix,batch-v58,gridsearch"
-  emit_manifest "mj-gs-v58-vhat-armbox"
+  export MJLAB_LOG_STAMP="v58-gated-15d-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v58-gated-15d__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v58,rma,gated,dual-channel,safe-prior,vhat-odometry,arm-envelope,toein-guard,flight-exempt,mirror-fix,batch-v58,gridsearch"
+  emit_manifest "mj-gs-v58-gated-15d"
 }
 
 

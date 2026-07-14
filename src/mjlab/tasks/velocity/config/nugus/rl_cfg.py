@@ -76,9 +76,16 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
         "tcn_kernel": 5,
         "tcn_stride": 2,
         "e2e": _env_bool("RMA_E2E", default=False),
-        # Odometry head (backlog 15d): v_hat readout from the estimator's
-        # z, exported as a second ONNX output. Detached by default so the
-        # head is a pure probe and cannot perturb the walk.
+        # Gated dual-channel mode (backlog 15d full design): PPO-trained
+        # z_fast + gated slow sysid channel with a learned safe prior and
+        # a 17-float deployment hold (identify walking, hold standing).
+        "gated": _env_bool("RMA_GATED", default=False),
+        "z_fast_dim": _env_int("RMA_ZFAST_DIM", 16),
+        "hold_decay": _env_float("RMA_HOLD_DECAY", 0.9995),
+        # Odometry head (backlog 15d): v_hat readout from the policy
+        # trunk's penultimate features, exported as an ONNX output
+        # "velocity". Detached by default so the head is a pure probe and
+        # cannot perturb the walk.
         "vhat": vhat,
         "vhat_detach": _env_bool("RMA_VHAT_DETACH", default=True),
       },
@@ -87,6 +94,7 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       class_name="mjlab.rl.rma:RmaPPO",
       est_loss_coef=_env_float("RMA_EST_COEF", 1.0),
       vel_loss_coef=_env_float("RMA_VHAT_COEF", 1.0),
+      gate_loss_coef=_env_float("RMA_GATE_COEF", 1.0),
     )
     actor_groups = ["actor", "dr", "history"]
     if vhat:

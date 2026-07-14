@@ -55,8 +55,8 @@ class RmaModelCfg(RslRlModelCfg):
 
   rma_cfg: dict[str, Any] = field(default_factory=dict)
   """Passed to :class:`RmaActor`. Keys: z_dim, encoder_hidden_dims,
-  tcn_channels, tcn_kernel, tcn_stride, e2e, vhat, vhat_detach,
-  vhat_hidden_dims."""
+  tcn_channels, tcn_kernel, tcn_stride, e2e, gated, z_fast_dim,
+  hold_decay, vhat, vhat_detach, vhat_hidden_dims."""
 
 
 @dataclass
@@ -69,6 +69,10 @@ class RmaPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
   vel_loss_coef: float = 1.0
   """Coefficient on the ||v_hat - sg(base_lin_vel)||^2 odometry-head loss
   (only active when the actor was built with rma_cfg["vhat"])."""
+
+  gate_loss_coef: float = 1.0
+  """Coefficient on the Kalman-gate regression loss (only active when the
+  actor was built with rma_cfg["gated"])."""
 
 
 class RmaTcnEstimator(nn.Module):
@@ -105,12 +109,16 @@ class RmaTcnEstimator(nn.Module):
         f"TCN window {window} too short for kernel={kernel}, stride={stride}, "
         f"{len(channels)} layers"
       ) from exc
+    self.feature_dim = flat
     self.head = nn.Linear(flat, z_dim)
 
-  def forward(self, history: torch.Tensor) -> torch.Tensor:
+  def features(self, history: torch.Tensor) -> torch.Tensor:
+    """Shared conv-trunk features [B, flat] (multi-head modes tap these)."""
     # [B, T, D] -> [B, D, T] for Conv1d (channels = obs features).
-    h = self.convs(history.transpose(1, 2))
-    return self.head(h.flatten(1))
+    return self.convs(history.transpose(1, 2)).flatten(1)
+
+  def forward(self, history: torch.Tensor) -> torch.Tensor:
+    return self.head(self.features(history))
 
 
 class RmaActor(MLPModel):
@@ -149,14 +157,35 @@ class RmaActor(MLPModel):
     # this flag would train the policy on frozen random TCN features
     # (z_hat is detached on the standard path).
     self._e2e = bool(cfg.pop("e2e", False))
-    # Walk-coupled odometry head (backlog 15d): a small readout from the
-    # estimator's z to body-frame base linear velocity, supervised on the
-    # ground-truth "odom_target" group and exported as a second ONNX
-    # output. With vhat_detach (default) the head trains on sg(z): a pure
-    # probe that cannot perturb the walk — the R40 linear probe already
-    # showed the e2e trunk carries vx at R^2 0.95, this just makes the
-    # readout a deployable artifact. Undetached is the knob for letting
-    # odometry supervision shape the trunk (a separate experiment).
+    # Gated dual-channel mode (backlog 15d, full design): the policy
+    # consumes TWO latents from a shared TCN trunk.
+    # - z_fast: PPO-trained end-to-end (the v55/v57 e2e channel — carries
+    #   the fast state/odometry cargo the anchor used to suppress).
+    # - z_slow_eff = (1-g)*z0 + g*z_signal: the slow sysid channel.
+    #   z_signal is encoder(dr) during training (truth where evidence
+    #   exists) and the anchored student head at deployment; g is a
+    #   Kalman-gain-style gate from the window (how much the current 0.5 s
+    #   actually identifies); z0 is a learned safe prior trained through
+    #   the POLICY path only, so it converges to the safe hedged operating
+    #   point (fall-cost asymmetry priced by reward), not the prior mean
+    #   regression would give. Deployment carries (z_state, evidence) — 17
+    #   floats — across ticks with a gated hold: identify while walking,
+    #   hold through standing (see OnnxRmaGatedStudentModel).
+    self._gated = bool(cfg.pop("gated", False))
+    self._z_fast_dim = int(cfg.pop("z_fast_dim", 16))
+    self._hold_decay = float(cfg.pop("hold_decay", 0.9995))
+    if self._gated and self._e2e:
+      raise ValueError(
+        "rma_cfg: 'gated' and 'e2e' are mutually exclusive "
+        "(gated subsumes e2e via the z_fast channel)"
+      )
+    # Walk-coupled odometry head (backlog 15d): reads the POLICY trunk's
+    # penultimate features — the representation making this tick's walk
+    # decision — out to body-frame base linear velocity, supervised on the
+    # ground-truth "odom_target" group and exported as an ONNX output
+    # "velocity". With vhat_detach (default) the head trains on detached
+    # features: a pure probe that cannot perturb the walk. Undetached is
+    # the knob for letting odometry supervision shape the policy trunk.
     self._vhat = bool(cfg.pop("vhat", False))
     self._vhat_detach = bool(cfg.pop("vhat_detach", True))
     vhat_hidden_dims = tuple(cfg.pop("vhat_hidden_dims", (32,)))
@@ -178,9 +207,20 @@ class RmaActor(MLPModel):
       stride=tcn_stride,
       activation=activation,
     )
+    if self._gated:
+      feat_dim = self.estimator.feature_dim
+      self.fast_head: nn.Module | None = nn.Linear(feat_dim, self._z_fast_dim)
+      self.gate_head: nn.Module | None = nn.Linear(feat_dim, 1)
+      self.z0: nn.Parameter | None = nn.Parameter(torch.zeros(self._z_dim))
+    else:
+      self.fast_head = None
+      self.gate_head = None
+      self.z0 = None
     if self._vhat:
+      # Penultimate policy-trunk width (input to the mlp's final Linear).
+      vhat_in = cast(nn.Linear, self.mlp[-1]).in_features
       self.vel_head: nn.Module | None = MLP(
-        self._z_dim, self._odom_dim, vhat_hidden_dims, activation
+        vhat_in, self._odom_dim, vhat_hidden_dims, activation
       )
     else:
       self.vel_head = None
@@ -239,6 +279,8 @@ class RmaActor(MLPModel):
     return proprio, obs_dim
 
   def _get_latent_dim(self) -> int:
+    if self._gated:
+      return self.obs_dim + self._z_fast_dim + self._z_dim
     return self.obs_dim + self._z_dim
 
   def get_latent(
@@ -254,6 +296,24 @@ class RmaActor(MLPModel):
       assert isinstance(value, torch.Tensor)
       parts.append(value)
     x = self.obs_normalizer(torch.cat(parts, dim=-1))
+    if self._gated:
+      assert self.fast_head is not None
+      assert self.gate_head is not None
+      assert self.z0 is not None
+      feats = self.estimator.features(self.history_normalizer(obs[_HISTORY_GROUP]))
+      # Fast channel: pure e2e (PPO trains trunk + head; train == deploy).
+      z_fast = self.fast_head(feats)
+      # Slow channel: gated blend of the learned safe prior and the
+      # signal. z_signal is encoder truth in training; zhat_mix swaps in
+      # the detached student estimate for deployment-path rollouts/eval.
+      g = torch.sigmoid(self.gate_head(feats))
+      z_signal = self.encoder(self.dr_normalizer(obs[_DR_GROUP]))
+      mix = float(self.zhat_mix)
+      if mix > 0.0:
+        zhat = self.estimator.head(feats).detach()
+        z_signal = (1.0 - mix) * z_signal + mix * zhat
+      z_slow = (1.0 - g) * self.z0 + g * z_signal
+      return torch.cat([x, z_fast, z_slow], dim=-1)
     if self._e2e:
       # End-to-end: PPO backprops through the TCN; encoder unused.
       z = self.estimator(self.history_normalizer(obs[_HISTORY_GROUP]))
@@ -274,20 +334,53 @@ class RmaActor(MLPModel):
     zhat = self.estimator(self.history_normalizer(obs[_HISTORY_GROUP]))
     return F.mse_loss(zhat, z_target)
 
-  def velocity_loss(self, obs: TensorDict) -> torch.Tensor:
-    """||v_hat - sg(base_lin_vel)||^2 on the estimator's z.
+  def gate_loss(self, obs: TensorDict) -> torch.Tensor:
+    """Kalman-gain-style gate regression (gated mode only).
 
-    The target group is raw (no normalizer) so v_hat is in m/s, body
-    frame — the units the exported "velocity" output promises. With
-    vhat_detach the gradient stops at z and only the head trains.
+    Trains the gate (and, through it, the shared trunk) to blend the
+    prior and the student estimate into the best approximation of the
+    encoder truth: where the window identifies well, g -> 1; where it
+    carries nothing (standing), g -> 0. Both blend endpoints are
+    stop-gradded — this loss owns ONLY the gate: the student head is
+    trained by estimation_loss, and z0 must stay a policy-path citizen
+    (regression would drag it to the prior mean, not the safe point).
+    """
+    assert self._gated and self.gate_head is not None and self.z0 is not None
+    with torch.no_grad():
+      z_target = self.encoder(self.dr_normalizer(obs[_DR_GROUP]))
+    feats = self.estimator.features(self.history_normalizer(obs[_HISTORY_GROUP]))
+    g = torch.sigmoid(self.gate_head(feats))
+    blended = (1.0 - g) * self.z0.detach() + g * self.estimator.head(feats).detach()
+    return F.mse_loss(blended, z_target)
+
+  def _policy_features(self, latent: torch.Tensor) -> torch.Tensor:
+    """Policy-trunk penultimate features (input to the final action layer)."""
+    h = latent
+    for layer in list(self.mlp)[:-1]:
+      h = layer(h)
+    return h
+
+  def estimate_velocity(self, obs: TensorDict) -> torch.Tensor:
+    """v_hat readout: body-frame base linear velocity in m/s."""
+    assert self.vel_head is not None
+    return self.vel_head(self._policy_features(self.get_latent(obs)))
+
+  def velocity_loss(self, obs: TensorDict) -> torch.Tensor:
+    """||v_hat - sg(base_lin_vel)||^2 on the policy trunk's features.
+
+    The head taps the representation making this tick's walk decision
+    ("odometry tied into the walk engine"). The target group is raw (no
+    normalizer) so v_hat is in m/s, body frame — the units the exported
+    "velocity" output promises. With vhat_detach the gradient stops at
+    the features and only the head trains.
     """
     assert self.vel_head is not None
-    zhat = self.estimator(self.history_normalizer(obs[_HISTORY_GROUP]))
+    feats = self._policy_features(self.get_latent(obs))
     if self._vhat_detach:
-      zhat = zhat.detach()
+      feats = feats.detach()
     target = obs[_ODOM_GROUP]
     assert isinstance(target, torch.Tensor)
-    return F.mse_loss(self.vel_head(zhat), target)
+    return F.mse_loss(self.vel_head(feats), target)
 
   def update_normalization(self, obs: TensorDict) -> None:
     super().update_normalization(obs)  # Proprio groups.
@@ -299,10 +392,12 @@ class RmaActor(MLPModel):
       )
 
   def as_onnx(self, verbose: bool) -> nn.Module:
+    if self._gated:
+      return OnnxRmaGatedStudentModel(self, verbose)
     return OnnxRmaStudentModel(self, verbose)
 
   def as_jit(self) -> nn.Module:
-    return OnnxRmaStudentModel(self, verbose=False)
+    return self.as_onnx(verbose=False)
 
 
 class OnnxRmaStudentModel(nn.Module):
@@ -359,11 +454,13 @@ class OnnxRmaStudentModel(nn.Module):
     history = x.view(-1, self.window, self.hist_dim)
     zhat = self.estimator(self.history_normalizer(history))
     current = self.obs_normalizer(history[:, -1, :])
-    out = self.mlp(torch.cat([current, zhat], dim=-1))
-    actions = self.deterministic_output(out)
+    h = torch.cat([current, zhat], dim=-1)
+    for layer in list(self.mlp)[:-1]:
+      h = layer(h)
+    actions = self.deterministic_output(self.mlp[-1](h))
     if self.vel_head is None:
       return actions
-    return actions, self.vel_head(zhat)
+    return actions, self.vel_head(h)
 
   def get_dummy_inputs(self) -> tuple[torch.Tensor]:
     return (torch.zeros(1, self.input_size),)
@@ -377,6 +474,113 @@ class OnnxRmaStudentModel(nn.Module):
     if self.vel_head is None:
       return ["actions"]
     return ["actions", "velocity"]
+
+
+class OnnxRmaGatedStudentModel(nn.Module):
+  """Deployable gated student with a 17-float cross-tick memory.
+
+  The semi-recurrent sysid hold (backlog 15d Stage 2): the robot carries
+  ``(z_state, evidence)`` between ticks and feeds them back each call —
+  identify while walking, hold through standing.
+
+  Inputs:
+    - ``obs`` [B, T*D]: flat history ring buffer (same contract as the
+      plain student — time-major, oldest first, actor layout per frame).
+    - ``z_state`` [B, z]: previous slow-latent estimate. Boot with zeros.
+    - ``evidence`` [B, 1]: accumulated identification confidence in
+      [0, 1]. Boot with zeros.
+
+  Recursion (per tick, ``g`` = this window's gate, ``rho`` = hold decay):
+    ``ev_out   = g + (1-g) * rho * evidence``           (never > 1)
+    ``z_state' = (g * z_raw + (1-g) * rho * evidence * z_state) / ev_out``
+    ``z_slow   = (1 - ev_out) * z0 + ev_out * z_state'``
+  At boot (evidence=0) this reduces EXACTLY to the training-time form
+  ``(1-g) * z0 + g * z_signal`` — zero train/deploy gap in the
+  zero-evidence regime, which is precisely where v53's student fell.
+  While standing (g ~ 0) the state holds and evidence decays at ``rho``
+  per tick (~40 s time constant at 50 Hz with the default 0.9995),
+  slowly re-blending toward the learned safe prior.
+
+  Outputs: ``actions``, [``velocity`` (body frame, m/s) if trained,]
+  ``z_state_out``, ``evidence_out`` — feed the last two back next tick.
+  """
+
+  is_recurrent: bool = False
+  z0: torch.Tensor
+  hold_decay: torch.Tensor
+
+  def __init__(self, model: RmaActor, verbose: bool) -> None:
+    super().__init__()
+    import copy as _copy
+
+    assert model._gated
+    assert model.fast_head is not None
+    assert model.gate_head is not None
+    assert model.z0 is not None
+    self.verbose = verbose
+    self.window = model._window
+    self.hist_dim = model._hist_dim
+    self.z_dim = model._z_dim
+    self.input_size = self.window * self.hist_dim
+    self.obs_normalizer = _copy.deepcopy(model.obs_normalizer)
+    self.history_normalizer = _copy.deepcopy(model.history_normalizer)
+    self.estimator = _copy.deepcopy(model.estimator)
+    self.fast_head = _copy.deepcopy(model.fast_head)
+    self.gate_head = _copy.deepcopy(model.gate_head)
+    self.vel_head = (
+      _copy.deepcopy(model.vel_head) if model.vel_head is not None else None
+    )
+    self.mlp = _copy.deepcopy(model.mlp)
+    self.register_buffer("z0", model.z0.detach().clone())
+    self.register_buffer("hold_decay", torch.tensor(model._hold_decay))
+    if model.distribution is not None:
+      self.deterministic_output = model.distribution.as_deterministic_output_module()
+    else:
+      self.deterministic_output = nn.Identity()
+    if model.obs_dim != self.hist_dim:
+      raise ValueError(
+        "Student export requires the actor obs to equal one history frame "
+        f"(actor dim {model.obs_dim} != history frame dim {self.hist_dim}); "
+        "the history group must clone the actor terms."
+      )
+
+  def forward(
+    self, x: torch.Tensor, z_state: torch.Tensor, evidence: torch.Tensor
+  ) -> tuple[torch.Tensor, ...]:
+    history = x.view(-1, self.window, self.hist_dim)
+    feats = self.estimator.features(self.history_normalizer(history))
+    z_raw = self.estimator.head(feats)
+    g = torch.sigmoid(self.gate_head(feats))
+    held = (1.0 - g) * self.hold_decay * evidence
+    ev_out = g + held
+    z_state_out = (g * z_raw + held * z_state) / (ev_out + 1e-6)
+    z_slow = (1.0 - ev_out) * self.z0 + ev_out * z_state_out
+    z_fast = self.fast_head(feats)
+    current = self.obs_normalizer(history[:, -1, :])
+    h = torch.cat([current, z_fast, z_slow], dim=-1)
+    for layer in list(self.mlp)[:-1]:
+      h = layer(h)
+    actions = self.deterministic_output(self.mlp[-1](h))
+    if self.vel_head is None:
+      return actions, z_state_out, ev_out
+    return actions, self.vel_head(h), z_state_out, ev_out
+
+  def get_dummy_inputs(self) -> tuple[torch.Tensor, ...]:
+    return (
+      torch.zeros(1, self.input_size),
+      torch.zeros(1, self.z_dim),
+      torch.zeros(1, 1),
+    )
+
+  @property
+  def input_names(self) -> list[str]:
+    return ["obs", "z_state", "evidence"]
+
+  @property
+  def output_names(self) -> list[str]:
+    if self.vel_head is None:
+      return ["actions", "z_state_out", "evidence_out"]
+    return ["actions", "velocity", "z_state_out", "evidence_out"]
 
 
 class RmaPPO(PPO):
@@ -397,11 +601,13 @@ class RmaPPO(PPO):
     *args: Any,
     est_loss_coef: float = 1.0,
     vel_loss_coef: float = 1.0,
+    gate_loss_coef: float = 1.0,
     **kwargs: Any,
   ) -> None:
     super().__init__(*args, **kwargs)
     self.est_loss_coef = float(est_loss_coef)
     self.vel_loss_coef = float(vel_loss_coef)
+    self.gate_loss_coef = float(gate_loss_coef)
 
   def update(self) -> dict[str, float]:
     # self.actor aliases _raw_actor while torch.compile is disabled
@@ -410,12 +616,14 @@ class RmaPPO(PPO):
     actor = cast(RmaActor, self._raw_actor)
     run_est = self.est_loss_coef != 0.0
     run_vel = self.vel_loss_coef != 0.0 and actor.vel_head is not None
-    if not (run_est or run_vel):
+    run_gate = self.gate_loss_coef != 0.0 and actor.gate_head is not None
+    if not (run_est or run_vel or run_gate):
       # e2e ablation / supervision off: skip the aux pass entirely
       # (running it would only decay Adam momentum and log fake metrics).
       return super().update()
     mean_est_loss = 0.0
     mean_vel_loss = 0.0
+    mean_gate_loss = 0.0
     num_batches = 0
     generator = self.storage.mini_batch_generator(self.num_mini_batches, 1)
     for batch in generator:
@@ -438,6 +646,10 @@ class RmaPPO(PPO):
         vel_loss = self.vel_loss_coef * actor.velocity_loss(batch_obs)
         aux_loss = aux_loss + vel_loss
         mean_vel_loss += vel_loss.item()
+      if run_gate:
+        gate_loss = self.gate_loss_coef * actor.gate_loss(batch_obs)
+        aux_loss = aux_loss + gate_loss
+        mean_gate_loss += gate_loss.item()
       self.optimizer.zero_grad()
       aux_loss.backward()
       if self.is_multi_gpu:
@@ -454,4 +666,6 @@ class RmaPPO(PPO):
       loss_dict["estimation"] = mean_est_loss / max(num_batches, 1)
     if run_vel:
       loss_dict["velocity"] = mean_vel_loss / max(num_batches, 1)
+    if run_gate:
+      loss_dict["gate"] = mean_gate_loss / max(num_batches, 1)
     return loss_dict
