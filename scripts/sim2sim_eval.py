@@ -123,6 +123,23 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
   # ONNX metadata written at export.
   onnx_meta = _read_onnx_metadata(onnx_path)
   rma_window = int(onnx_meta["history_window"]) if "rma" in onnx_meta else 0
+  # Gated students (backlog 15d Stage 2) carry a cross-tick memory: extra
+  # graph inputs z_state/evidence, matching outputs to feed back. Detect
+  # from the graph itself so the contract can't silently drift.
+  graph_inputs = [inp.name for inp in session.get_inputs()]
+  gated = "z_state" in graph_inputs and "evidence" in graph_inputs
+  gated_z_dim = 0
+  gated_out_idx: dict[str, int] = {}
+  if gated:
+    z_inp = session.get_inputs()[graph_inputs.index("z_state")]
+    gated_z_dim = int(z_inp.shape[1])
+    out_names = [out.name for out in session.get_outputs()]
+    gated_out_idx = {name: i for i, name in enumerate(out_names)}
+    if "z_state_out" not in gated_out_idx or "evidence_out" not in gated_out_idx:
+      raise ValueError(
+        f"Gated policy missing state outputs; graph outputs: {out_names}"
+      )
+    print(f"[INFO] Gated student: carrying (z_state[{gated_z_dim}], evidence).")
 
   env_cfg = load_env_cfg(TASK_ID, play=False)
   env_cfg.scene.num_envs = 1
@@ -178,6 +195,9 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
     fell = False
     ep_len_s = 0.0
     frames: deque[np.ndarray] = deque(maxlen=rma_window or 1)
+    # Gated memory boots at zeros (the training-form zero-evidence state).
+    z_state = np.zeros((1, gated_z_dim), dtype=np.float32)
+    evidence = np.zeros((1, 1), dtype=np.float32)
 
     for _ in range(steps):
       obs = build_actor_obs(
@@ -200,7 +220,15 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
         net_input = np.concatenate(list(frames), axis=0)[None, :]
       else:
         net_input = obs[None, :]
-      action = session.run(None, {input_name: net_input})[0][0]
+      feeds: dict[str, np.ndarray] = {input_name: net_input}
+      if gated:
+        feeds["z_state"] = z_state
+        feeds["evidence"] = evidence
+      outputs = session.run(None, feeds)
+      action = np.asarray(outputs[0])[0]
+      if gated:
+        z_state = np.asarray(outputs[gated_out_idx["z_state_out"]], dtype=np.float32)
+        evidence = np.asarray(outputs[gated_out_idx["evidence_out"]], dtype=np.float32)
       last_action = action.astype(np.float32)
       if phase_cfg is not None and action_dim > n_joints:
         policy_phase = advance_policy_phase(
