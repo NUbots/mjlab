@@ -372,6 +372,78 @@ def test_augmentation_handles_odom_target(mirror_env) -> None:
   torch.testing.assert_close(aug[batch:, 1], -target[:, 1])
 
 
+def test_recurrent_symmetry_augments_full_batch(mirror_env) -> None:
+  """RecurrentSymmetry doubles padded trajectories, hidden states, masks."""
+  from tensordict import TensorDict
+
+  from mjlab.rl.memory import RecurrentSymmetry, mirror_hidden_state
+  from mjlab.tasks.velocity.config.nugus.mirror_map import (
+    nugus_symmetry_augmentation as aug_fn,
+  )
+
+  wrapped = RslRlVecEnvWrapper(mirror_env)
+  flat_obs = wrapped.get_observations()
+  actor_dim = flat_obs["actor"].shape[-1]
+  device = flat_obs["actor"].device
+
+  t_rollout, n_envs, n_traj, t_pad, hidden_dim, act_dim = 4, 2, 3, 4, 16, 21
+  obs = TensorDict(
+    {
+      "actor": torch.randn(t_pad, n_traj, actor_dim, device=device),
+      "odom_target": torch.randn(t_pad, n_traj, 3, device=device),
+    },
+    batch_size=[t_pad, n_traj],
+  )
+  masks = torch.zeros(t_pad, n_traj, dtype=torch.bool, device=device)
+  masks[:4, 0] = True
+  masks[:3, 1] = True
+  masks[:1, 2] = True
+  actions = torch.randn(t_rollout, n_envs, act_dim, device=device)
+  mean = torch.randn(t_rollout, n_envs, act_dim, device=device)
+  std = torch.rand(t_rollout, n_envs, act_dim, device=device) + 0.1
+  hidden = torch.randn(1, n_traj, hidden_dim, device=device)
+
+  from rsl_rl.storage import RolloutStorage
+
+  batch = RolloutStorage.Batch(
+    observations=obs,
+    actions=actions,
+    values=torch.randn(t_rollout, n_envs, 1, device=device),
+    advantages=torch.randn(t_rollout, n_envs, 1, device=device),
+    returns=torch.randn(t_rollout, n_envs, 1, device=device),
+    old_actions_log_prob=torch.randn(t_rollout, n_envs, 1, device=device),
+    old_distribution_params=(mean, std),
+    hidden_states=(hidden, None),
+    masks=masks,
+  )
+  sym = RecurrentSymmetry(
+    env=wrapped, use_data_augmentation=True, data_augmentation_func=aug_fn
+  )
+  sym.augment_batch(batch, original_batch_size=t_pad)
+
+  assert batch.observations is not None
+  assert batch.actions is not None
+  assert batch.old_distribution_params is not None
+  assert batch.values is not None
+  assert batch.observations.batch_size == torch.Size([t_pad, n_traj * 2])
+  assert batch.actions.shape == (t_rollout, n_envs * 2, act_dim)
+  assert batch.masks is not None and batch.masks.shape == (t_pad, n_traj * 2)
+  torch.testing.assert_close(batch.masks[:, n_traj:], masks)
+  # Hidden: second half is the defined latent mirror of the first.
+  h_aug = batch.hidden_states[0]
+  assert isinstance(h_aug, torch.Tensor)
+  assert h_aug.shape == (1, n_traj * 2, hidden_dim)
+  torch.testing.assert_close(h_aug[:, n_traj:], mirror_hidden_state(hidden))
+  # Distribution params: mirrored mean, positive permuted std.
+  mean_aug, std_aug = batch.old_distribution_params
+  assert mean_aug.shape == (t_rollout, n_envs * 2, act_dim)
+  assert std_aug.shape == (t_rollout, n_envs * 2, act_dim)
+  assert (std_aug > 0).all()
+  torch.testing.assert_close(std_aug[:, :n_envs], std)
+  # Dense per-step tensors repeated.
+  assert batch.values.shape == (t_rollout, n_envs * 2, 1)
+
+
 def test_augmentation_raises_on_unknown_group(mirror_env) -> None:
   from tensordict import TensorDict
 

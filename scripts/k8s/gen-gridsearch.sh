@@ -262,6 +262,7 @@ export RMA RMA_WINDOW RMA_Z_DIM RMA_EST_COEF RMA_E2E
 export RMA_ZHAT_MIX_START_ITER RMA_ZHAT_MIX_END_ITER
 export RMA_VHAT RMA_VHAT_DETACH RMA_VHAT_COEF
 export RMA_GATED RMA_ZFAST_DIM RMA_HOLD_DECAY RMA_GATE_COEF
+export RNN_MEMORY RNN_HIDDEN RNN_LAYERS
 export ARM_ENVELOPE_W ARM_ENVELOPE_MARGIN
 RMA="${RMA:-}"
 RMA_WINDOW="${RMA_WINDOW:-}"
@@ -277,6 +278,9 @@ RMA_GATED="${RMA_GATED:-}"
 RMA_ZFAST_DIM="${RMA_ZFAST_DIM:-}"
 RMA_HOLD_DECAY="${RMA_HOLD_DECAY:-}"
 RMA_GATE_COEF="${RMA_GATE_COEF:-}"
+RNN_MEMORY="${RNN_MEMORY:-}"
+RNN_HIDDEN="${RNN_HIDDEN:-}"
+RNN_LAYERS="${RNN_LAYERS:-}"
 ARM_ENVELOPE_W="${ARM_ENVELOPE_W:-}"
 ARM_ENVELOPE_MARGIN="${ARM_ENVELOPE_MARGIN:-}"
 PHASE_TARGET_MODE="${PHASE_TARGET_MODE:-}"
@@ -1998,6 +2002,39 @@ gen_v58() {
   emit_manifest "mj-gs-v58-gated-15d"
 }
 
+# BATCH=v59: reward-driven recurrent memory (Trent's design call,
+# 2026-07-16, after the v58 verdict). R44 evidence: the 0.5 s window is
+# the binding constraint on sysid — the teacher's angular edge does not
+# survive deployment (student ang 0.286 vs teacher-path 0.199) because
+# the window does not CONTAIN the information; and the hand-designed
+# hold is never trained. v59 replaces window/TCN/teacher/gate/prior
+# with a GRU: hidden state = memory, truncated BPTT trains what to
+# remember and how long to hold it, purely from reward (no params
+# side-loss — the cleanest test of the learned-memory thesis). Safe
+# boot is the learned image of the zero state (h0 = zeros by design;
+# a learnable h0 would get no TBPTT gradient). Mirror augmentation is
+# KEPT via the defined latent mirror (swap hidden halves — Trent's
+# insight: a learned latent has no canonical mirror, so impose one and
+# training conforms). v_hat head + arm envelope carried over from v58.
+# Deployment: obs + h in, actions + velocity + h_out back; no ring
+# buffer. Watch: per-side gait asymmetry (the defined mirror is a soft
+# constraint), Loss/velocity, and angular RMSE (the memory thesis
+# predicts recovery toward v53's 0.199 as identification accumulates).
+gen_v59() {
+  gen_v58
+  export RMA=""
+  export RMA_GATED=""
+  export RMA_GATE_COEF=""
+  export RMA_E2E=""
+  export RMA_EST_COEF=""
+  export RNN_MEMORY="1"
+  export RNN_HIDDEN="256"
+  export MJLAB_LOG_STAMP="v59-gru-memory-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v59-gru-memory__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v59,rnn-memory,gru,latent-mirror,vhat-odometry,arm-envelope,toein-guard,flight-exempt,batch-v59,gridsearch"
+  emit_manifest "mj-gs-v59-gru-memory"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -3125,6 +3162,7 @@ case "$BATCH" in
   v56c) gen_v56c; expected=13 ;;
   v57) gen_v57; expected=14 ;;
   v58) gen_v58; expected=15 ;;
+  v59) gen_v59; expected=16 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

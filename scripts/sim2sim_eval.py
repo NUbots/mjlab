@@ -130,6 +130,19 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
   gated = "z_state" in graph_inputs and "evidence" in graph_inputs
   gated_z_dim = 0
   gated_out_idx: dict[str, int] = {}
+  # Recurrent memory students (v59 line) carry the GRU hidden state:
+  # input "h" [1, L*H], output "h_out" fed back each tick, boot zeros.
+  recurrent = "h" in graph_inputs
+  rnn_h_dim = 0
+  rnn_out_idx: dict[str, int] = {}
+  if recurrent:
+    h_inp = session.get_inputs()[graph_inputs.index("h")]
+    rnn_h_dim = int(h_inp.shape[1])
+    rnn_names = [out.name for out in session.get_outputs()]
+    rnn_out_idx = {name: i for i, name in enumerate(rnn_names)}
+    if "h_out" not in rnn_out_idx:
+      raise ValueError(f"Recurrent policy missing h_out; outputs: {rnn_names}")
+    print(f"[INFO] Recurrent student: carrying hidden state h[{rnn_h_dim}].")
   if gated:
     z_inp = session.get_inputs()[graph_inputs.index("z_state")]
     gated_z_dim = int(z_inp.shape[1])
@@ -198,6 +211,8 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
     # Gated memory boots at zeros (the training-form zero-evidence state).
     z_state = np.zeros((1, gated_z_dim), dtype=np.float32)
     evidence = np.zeros((1, 1), dtype=np.float32)
+    # GRU memory boots at zeros (the trained per-reset hidden state).
+    h_state = np.zeros((1, rnn_h_dim), dtype=np.float32)
 
     for _ in range(steps):
       obs = build_actor_obs(
@@ -224,11 +239,15 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
       if gated:
         feeds["z_state"] = z_state
         feeds["evidence"] = evidence
+      if recurrent:
+        feeds["h"] = h_state
       outputs = session.run(None, feeds)
       action = np.asarray(outputs[0])[0]
       if gated:
         z_state = np.asarray(outputs[gated_out_idx["z_state_out"]], dtype=np.float32)
         evidence = np.asarray(outputs[gated_out_idx["evidence_out"]], dtype=np.float32)
+      if recurrent:
+        h_state = np.asarray(outputs[rnn_out_idx["h_out"]], dtype=np.float32)
       last_action = action.astype(np.float32)
       if phase_cfg is not None and action_dim > n_joints:
         policy_phase = advance_policy_phase(

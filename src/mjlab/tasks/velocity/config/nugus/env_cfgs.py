@@ -802,6 +802,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   rma = _env_bool("RMA", False)
   rma_window = _env_int("RMA_WINDOW", 25)
   rma_vhat = _env_bool("RMA_VHAT", False)
+  rnn_memory = _env_bool("RNN_MEMORY", False)
   max_iterations = _env_int("MAX_ITERATIONS", _DEFAULT_MAX_ITERATIONS)
   # Phase curriculum boundaries are derived from PHASE_ITERATIONS, which is
   # decoupled from MAX_ITERATIONS (the latter only drives the
@@ -1773,11 +1774,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # current-sensor DR, so the critic never saw those realizations). Gated
   # under RMA so RMA=0 stays byte-identical to pre-RMA configs.
   # This block must stay AFTER every actor-term mutation above.
-  if rma:
+  # RNN_MEMORY (v59 line) keeps the critic's extended privileged vector
+  # for parity with the RMA lineage but needs neither the history window
+  # (the GRU's hidden state replaces it) nor the "dr" encoder group.
+  if rma or rnn_memory:
     cfg.observations["critic"].terms["dr_extras"] = ObservationTermCfg(
       func=dr_extras,
       params={"motor_asset_cfg": motor_cfg()},
     )
+  if rma:
     cfg.observations["history"] = ObservationGroupCfg(
       terms={
         name: copy.deepcopy(term)
@@ -1806,19 +1811,19 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       concatenate_terms=True,
       enable_corruption=False,
     )
-    # Supervision target for the odometry head (backlog 15d): ground-truth
-    # body-frame base linear velocity, noise-free and raw (the head's
-    # output must be in m/s). Routed to the actor set for storage but
-    # excluded from the policy input inside RmaActor — the deployed robot
-    # has no velocity sensor; that is the whole point of the head.
-    if rma_vhat:
-      cfg.observations["odom_target"] = ObservationGroupCfg(
-        terms={
-          "base_lin_vel": ObservationTermCfg(func=envs_mdp.base_lin_vel),
-        },
-        concatenate_terms=True,
-        enable_corruption=False,
-      )
+  # Supervision target for the odometry head (backlog 15d): ground-truth
+  # body-frame base linear velocity, noise-free and raw (the head's
+  # output must be in m/s). Routed to the actor set for storage but
+  # excluded from the policy input inside the actor model — the deployed
+  # robot has no velocity sensor; that is the whole point of the head.
+  if (rma or rnn_memory) and rma_vhat:
+    cfg.observations["odom_target"] = ObservationGroupCfg(
+      terms={
+        "base_lin_vel": ObservationTermCfg(func=envs_mdp.base_lin_vel),
+      },
+      concatenate_terms=True,
+      enable_corruption=False,
+    )
 
   # Apply play mode overrides.
   if play:

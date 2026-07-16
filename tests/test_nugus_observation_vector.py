@@ -286,6 +286,17 @@ def test_rma_groups_absent_by_default(nugus_flat_cfg) -> None:
   assert "odom_target" not in nugus_flat_cfg.observations
 
 
+def test_rnn_memory_groups_cfg(monkeypatch) -> None:
+  """RNN_MEMORY: odom + critic dr_extras, but no window or dr groups."""
+  monkeypatch.setenv("RNN_MEMORY", "1")
+  monkeypatch.setenv("RMA_VHAT", "1")
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "odom_target" in cfg.observations
+  assert "dr_extras" in cfg.observations["critic"].terms
+  assert "history" not in cfg.observations
+  assert "dr" not in cfg.observations
+
+
 def test_odom_target_group_cfg(monkeypatch) -> None:
   """RMA_VHAT adds the noise-free odometry supervision group."""
   monkeypatch.setenv("RMA", "1")

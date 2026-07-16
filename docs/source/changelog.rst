@@ -57,6 +57,20 @@ Added
   premium: brief recovery flails are cheap, a held arms-out posture is
   not. Off by default.
 
+- Reward-driven recurrent memory actor (``RNN_MEMORY`` knob, NUgus
+  velocity task): a GRU whose hidden state replaces the RMA history
+  window — what to remember and how long to hold it are learned from
+  reward via truncated BPTT (no encoder, teacher, gate, or hand-tuned
+  hold). Mirror augmentation is retained for the recurrent policy by
+  DEFINING the latent mirror (swap the hidden halves): the augmented
+  batch asserts the equivariance and training conforms.
+  ``RecurrentSymmetry`` augments full recurrent batches (padded
+  trajectories, hidden states, masks, distribution params), bypassing
+  rsl_rl's symmetry-vs-recurrence guard. Deployment ONNX carries the
+  hidden state explicitly (``h`` in, ``h_out`` back, boot zeros) — no
+  observation ring buffer. Knobs: ``RNN_HIDDEN``, ``RNN_LAYERS``; the
+  odometry head (``RMA_VHAT``) composes.
+
 - Off-policy scripted head (``ScriptedHeadAction``, ``HEAD_SCRIPTED`` knob
   on ``clock_owned``): drives ``neck_yaw``/``head_pitch`` saccadically
   off-policy (dwell at a fixation, then step to a new random target so the

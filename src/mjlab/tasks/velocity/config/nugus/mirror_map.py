@@ -527,7 +527,13 @@ def nugus_symmetry_augmentation(
 
   obs_aug: TensorDict | None
   if obs is not None:
-    batch_size = obs.batch_size[0]
+    # Batch layout: flat rollouts have batch_size [B]; recurrent updates
+    # pass PADDED trajectories with batch_size [T_pad, n_traj] and the
+    # augmentation must double the trajectory dim, not time. The mirror
+    # rules themselves act on the last dim, so they broadcast over
+    # either layout.
+    recurrent = len(obs.batch_size) == 2
+    cat_dim = 1 if recurrent else 0
     # Mirror EVERY group present. Unknown groups must raise: silently
     # passing one through un-mirrored (or dropping it, as this callback
     # once did) corrupts half of every augmented batch for that group.
@@ -545,14 +551,21 @@ def nugus_symmetry_augmentation(
         raise ValueError(f"No mirror rule for observation group {key!r}")
       group_obs = obs[key]
       assert isinstance(group_obs, torch.Tensor)
-      fields[str(key)] = torch.cat([group_obs, mirror_fn(group_obs)], dim=0)
-    obs_aug = TensorDict(fields, batch_size=[batch_size * 2])  # ty: ignore[invalid-argument-type]
+      fields[str(key)] = torch.cat([group_obs, mirror_fn(group_obs)], dim=cat_dim)
+    if recurrent:
+      aug_batch = [obs.batch_size[0], obs.batch_size[1] * 2]
+    else:
+      aug_batch = [obs.batch_size[0] * 2]
+    obs_aug = TensorDict(fields, batch_size=aug_batch)  # ty: ignore[invalid-argument-type]
   else:
     obs_aug = None
 
   if actions is not None:
+    # Dense recurrent tensors are [T, n_envs, A]: double the env dim.
+    # Flat rollout actions are [B, A]: double the batch dim.
+    act_cat_dim = 1 if actions.dim() == 3 else 0
     mirrored = mirror_map.mirror_actions(actions)
-    actions_aug = torch.cat([actions, mirrored], dim=0)
+    actions_aug = torch.cat([actions, mirrored], dim=act_cat_dim)
   else:
     actions_aug = None
 

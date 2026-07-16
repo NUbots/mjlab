@@ -92,6 +92,13 @@ def get_base_metadata(
     metadata["rma_gated"] = 1
     metadata["state_inputs"] = ["z_state", "evidence"]
     metadata["state_boot"] = "zeros"
+  # Recurrent memory student (v59 line): the graph carries the GRU hidden
+  # state explicitly — input h [1, L*H] (boot zeros = the trained reset
+  # state), output h_out to feed back. No observation ring buffer.
+  if os.environ.get("RNN_MEMORY", "").strip().lower() in ("1", "true", "yes", "on"):
+    metadata["rnn_memory"] = 1
+    metadata["state_inputs"] = ["h"]
+    metadata["state_boot"] = "zeros"
   return metadata
 
 

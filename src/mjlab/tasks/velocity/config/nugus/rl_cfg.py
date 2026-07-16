@@ -7,6 +7,7 @@ from mjlab.rl import (
   RslRlOnPolicyRunnerCfg,
   RslRlPpoAlgorithmCfg,
 )
+from mjlab.rl.memory import MemoryModelCfg, MemoryPpoAlgorithmCfg
 from mjlab.rl.rma import RmaModelCfg, RmaPpoAlgorithmCfg
 
 
@@ -43,6 +44,9 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   """Create RL runner configuration for NUbots Nugus velocity task."""
   gamma = _env_float("GAMMA", 0.99)
   rma = _env_bool("RMA", default=False)
+  rnn_memory = _env_bool("RNN_MEMORY", default=False)
+  if rma and rnn_memory:
+    raise ValueError("RMA and RNN_MEMORY are mutually exclusive")
 
   distribution_cfg = {
     "class_name": "GaussianDistribution",
@@ -101,6 +105,39 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       actor_groups.append("odom_target")
     obs_groups = {
       "actor": tuple(actor_groups),
+      "critic": ("critic",),
+    }
+  elif rnn_memory:
+    # Reward-driven recurrent memory (rl/memory.py, v59 line): a GRU
+    # whose hidden state replaces the RMA history window — what to
+    # remember and how long to hold it are learned from reward via
+    # truncated BPTT. Mirror augmentation is retained through the
+    # DEFINED latent mirror (swap hidden halves); MemoryPPO bypasses
+    # rsl_rl's symmetry-vs-recurrence guard with RecurrentSymmetry.
+    vhat = _env_bool("RMA_VHAT", default=False)
+    actor_cfg = MemoryModelCfg(
+      hidden_dims=(512, 256, 128),
+      activation="elu",
+      obs_normalization=True,
+      distribution_cfg=distribution_cfg,
+      class_name="mjlab.rl.memory:GruMemoryActor",
+      rnn_type="gru",
+      rnn_hidden_dim=_env_int("RNN_HIDDEN", 256),
+      rnn_num_layers=_env_int("RNN_LAYERS", 1),
+      memory_cfg={
+        "vhat": vhat,
+        "vhat_detach": _env_bool("RMA_VHAT_DETACH", default=True),
+      },
+    )
+    algorithm_cfg = MemoryPpoAlgorithmCfg(
+      class_name="mjlab.rl.memory:MemoryPPO",
+      vel_loss_coef=_env_float("RMA_VHAT_COEF", 1.0),
+    )
+    memory_groups = ["actor"]
+    if vhat:
+      memory_groups.append("odom_target")
+    obs_groups = {
+      "actor": tuple(memory_groups),
       "critic": ("critic",),
     }
   else:

@@ -183,6 +183,12 @@ spec:
                   value: "${RMA_HOLD_DECAY}"
                 - name: RMA_GATE_COEF
                   value: "${RMA_GATE_COEF}"
+                - name: RNN_MEMORY
+                  value: "${RNN_MEMORY}"
+                - name: RNN_HIDDEN
+                  value: "${RNN_HIDDEN}"
+                - name: RNN_LAYERS
+                  value: "${RNN_LAYERS}"
                 - name: FOOT_TOEIN_W
                   value: "${FOOT_TOEIN_W}"
                 - name: FOOT_TOEIN_MARGIN
