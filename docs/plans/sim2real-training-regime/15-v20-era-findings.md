@@ -904,6 +904,61 @@ odometry from the policy trunk, arm envelope -2.5. Full 10k clean.
   teacher/student machinery is retired going forward (Trent's call):
   v59 tests reward-driven memory (GRU) as the clean successor.
 
+## R45 (2026-07-17): v59 verdict — reward-driven memory wins angular; the defined latent mirror works; two launch postmortems worth keeping
+
+v59 = Trent's design: GRU hidden state replaces the 0.5 s window, no
+teacher, no params side-loss — what to remember and how long to hold it
+learned purely from reward via truncated BPTT (run qplxfzo0, pin
+2e4427e, full 10k clean).
+
+| candidate | lin RMSE | ang RMSE | falls | sim2sim (lin, falls) |
+|-----------|----------|----------|-------|----------------------|
+| v57       | 0.0761   | 0.276    | 0.0000| 0.092, 0             |
+| v58 stud. | 0.0864   | 0.286    | 0.0000| 0.108, 0             |
+| v59 GRU   | 0.0835   | 0.2502   | 0.0000| 0.174, 0             |
+
+- MEMORY WINS ANGULAR: 0.250 is the best DEPLOYABLE angular ever
+  recorded (v53's 0.199 was the undeployable teacher; v56b's 0.236
+  cost 0.014 falls). -9.4% vs v57 at zero falls everywhere, confirming
+  R44's conclusion: observation time, not supervision, was the angular
+  lever. Odometry rides along (v_hat 0.065, push +14%). Deployment is
+  the simplest yet: obs + h in, actions + velocity + h_out back, no
+  ring buffer.
+- THE DEFINED LATENT MIRROR WORKS (Trent's insight: a learned latent
+  has no canonical mirror, so impose one — swap hidden halves — and
+  training conforms): as a supervised equivariance LOSS (coeff 0.5) it
+  converged to 0.0105 with no gait asymmetry (toe-in 0.83 deg). The
+  twin-RNN hard variant (backlog 15e) stays in reserve.
+- Two launch postmortems, both generalizable:
+  1. (launch 1) Recurrent updates peak far above feedforward at equal
+     envs: BPTT holds every timestep's activations, augmentation
+     doubles it, and a detached aux pass must run its trunk under
+     no_grad or it builds a throwaway BPTT graph. Warp shares the GPU:
+     watch the SIM's headroom.
+  2. (launch 2) Mirror DATA AUGMENTATION is quietly incompatible with
+     recurrent PPO: the KL check's batch-dim slice hits the time dim on
+     trajectory batches, so mirrored samples (off-policy until
+     equivariance is learned) enter the KL and pin the adaptive LR at
+     its floor — self-locking. Trent diagnosed it from the videos
+     ("at worst it should ignore the RNN"); the fix pair is the obs
+     skip connection (memory additive by construction) + mirror as a
+     loss. Batch-mode BPTT recomputation was verified bit-identical to
+     rollout replay before relaunch.
+- The cross-engine lin question, ANSWERED by the frozen-h ablation
+  (15c's design, run same-day): zeroing the hidden state every tick in
+  vanilla MuJoCo collapses the policy — 2.52 falls/min, 14 s mean
+  episodes, lin 0.213, ang 0.615 — versus ZERO falls, full episodes,
+  0.174/0.442 with the memory running. The memory is load-bearing
+  cross-engine: it identifies the foreign dynamics and compensates
+  (adaptation transferring, not engine overfit). The 0.174 lin is the
+  gait the memory chooses under a physics it was never trained on,
+  while keeping the robot up; the strongest adaptation-transfer
+  evidence in the program. Remaining hardware call is judgment: v57
+  transfers a better raw gait (0.092) with no adaptation machinery;
+  v59 transfers a live adapter with the angular record. Field both:
+  v57 as the safe baseline, v59 as the instrumented candidate (its
+  velocity output doubles as the odometry probe).
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not

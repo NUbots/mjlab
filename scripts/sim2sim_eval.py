@@ -51,6 +51,11 @@ class Sim2SimEvalConfig:
   seed: int = DEFAULT_SEED
   episode_length_s: float = DEFAULT_EPISODE_LENGTH_S
   output_file: str | None = None
+  freeze_memory: bool = False
+  """Ablation: zero the recurrent hidden state every tick (recurrent
+  policies only). Attributes cross-engine deltas to the memory: if the
+  frozen policy transfers better, the memory overfits the training
+  engine; if worse, the memory was compensating (adaptation working)."""
 
 
 def _load_onnx_session(cfg: Sim2SimEvalConfig) -> tuple[ort.InferenceSession, Path]:
@@ -247,7 +252,10 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
         z_state = np.asarray(outputs[gated_out_idx["z_state_out"]], dtype=np.float32)
         evidence = np.asarray(outputs[gated_out_idx["evidence_out"]], dtype=np.float32)
       if recurrent:
-        h_state = np.asarray(outputs[rnn_out_idx["h_out"]], dtype=np.float32)
+        if cfg.freeze_memory:
+          h_state = np.zeros_like(h_state)
+        else:
+          h_state = np.asarray(outputs[rnn_out_idx["h_out"]], dtype=np.float32)
       last_action = action.astype(np.float32)
       if phase_cfg is not None and action_dim > n_joints:
         policy_phase = advance_policy_phase(
