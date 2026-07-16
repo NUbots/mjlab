@@ -316,6 +316,24 @@ un-starred items overnight — they need design attention.
     small to influence the final walk; watch Episode_Reward/joule_heating
     share and arm_joint_speed for confirmation it now binds).
 
+15e. **Weight-tied twin RNNs: mirror equivariance by construction**
+    (Trent, 2026-07-16, fallback if v59's defined-latent-mirror soft
+    constraint misbehaves). Two copies of the SAME GRU (shared weights):
+    one consumes the left-side inputs, one the right-side inputs
+    expressed in left convention (permuted + antisymmetric signs
+    flipped — the mirror map already defines the partition); central
+    inputs (IMU, command, gait clock, bus) go to both, mirrored for the
+    right copy; the right copy's output is un-mirrored on the way out.
+    Exactly mirror-equivariant at init and forever — no mirror loss, no
+    KL interaction, cannot develop a limp. Relation to v59's soft
+    version: the swap-halves constraint at convergence makes the hidden
+    halves chirality twins; this makes it exact. Cost: no left-right
+    coupling INSIDE the recurrence (no accumulated joint statistic from
+    both feet's histories interacting) — but the shared central IMU
+    carries most cross-body state and the downstream MLP recombines
+    both hidden states statically each tick. When: if v59b shows
+    asymmetry drift or the mirror loss fights the reward.
+
 ## Hygiene
 
 15b. ⭐ **Randomize initial episode clocks.** All envs start at

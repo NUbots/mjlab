@@ -182,6 +182,20 @@ class GruMemoryActor(RNNModel):
       h = layer(h)
     return h
 
+  def estimate_velocity(self, obs: TensorDict) -> torch.Tensor:
+    """v_hat readout for the FULL env batch, side-effect free.
+
+    Peeks the current rollout hidden state and advances a copy one step
+    without writing back — the caller's subsequent policy step performs
+    the real advance. Evaluation-time helper; do not use in training.
+    """
+    assert self.vel_head is not None
+    obs_list = [obs[group] for group in self.obs_groups]
+    x = self.obs_normalizer(torch.cat(obs_list, dim=-1))  # type: ignore[arg-type]
+    out, _ = self.rnn.rnn(x.unsqueeze(0), self.rnn.hidden_state)
+    latent = torch.cat([x, out.squeeze(0)], dim=-1)
+    return self.vel_head(self._policy_features(latent))
+
   def velocity_loss(
     self,
     obs: TensorDict,

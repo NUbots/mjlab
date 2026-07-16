@@ -868,6 +868,42 @@ landing; batch-v57). Full 10k clean.
   question) + the 11e arm envelope (geometry priced as insurance, so
   v56c's functional flail stays legal but held reach does not).
 
+## R44 (2026-07-16): v58 verdict — the gate closes the cutover seam completely; the angular edge was never in the params; the odometry head ships
+
+v58 = full backlog-15d gated dual-channel design (run mxkpnmc7): e2e
+z_fast + gated slow channel (1-g)*z0 + g*z_signal, learned safe prior
+on the policy path, three aux losses, 17-float deployment hold, v_hat
+odometry from the policy trunk, arm envelope -2.5. Full 10k clean.
+
+| path         | lin RMSE | ang RMSE | falls/min | v_hat all/push/steady |
+|--------------|----------|----------|-----------|-----------------------|
+| v58 teacher  | 0.0785   | 0.282    | 0.0000    | 0.057 / 0.065 / 0.055 |
+| v58 student  | 0.0864   | 0.286    | 0.0000    | 0.062 / 0.069 / 0.061 |
+| (v57 champ)  | 0.0761   | 0.276    | 0.0000    | —                     |
+
+- CUTOVER SOLVED: zero falls on the student path across 2560 episodes
+  (v53: 0.028, v54: 0.045). The gate+prior design did exactly what 15d
+  intended — at zero evidence the deployment recursion equals the
+  training form, so there is no first-tick distribution the policy
+  never saw. Teacher-student gap: lin +10%, ang ~nil. Trent's cutover
+  objection is fully answered by the gate.
+- THE ANGULAR EDGE WAS NEVER IN THE PARAMS: even the TEACHER path (true
+  params flowing) reads ang 0.282 ~= v57's 0.276, nowhere near v53's
+  0.199 — and v53 paid lin 0.099 for it. Operating-point trade, not an
+  information deficit. Chasing angular via supervision anchors is a
+  dead end in this architecture; remaining lever = memory (v59).
+- ODOMETRY SHIPS: v_hat RMSE 0.062 m/s overall, pushes cost only +14%
+  (0.061 -> 0.069) — the 15d acceptance spec (push-conditioned windows)
+  passed. Walk-coupled learned odometry for the localization stack, as
+  a second ONNX output, at zero cost to the walk (detached probe).
+- Sim2sim: 0 falls, lin 0.108, full episodes, through the live
+  17-float (z_state, evidence) loop — the stateful contract works
+  cross-engine.
+- Verdict: v58 is a certified deployable with the best odometry
+  artifact and hand-designed memory; v57 keeps the tracking crown. The
+  teacher/student machinery is retired going forward (Trent's call):
+  v59 tests reward-driven memory (GRU) as the clean successor.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not

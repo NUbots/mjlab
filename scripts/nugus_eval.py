@@ -382,9 +382,11 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
       if vel_head is not None and last_push_s is not None and actor is not None:
         # v_hat sees the corrupted obs stream (through the eval path
         # selected above); the target is ground truth — exactly the
-        # deployment error the spec cares about.
+        # deployment error the spec cares about. Full-batch call:
+        # recurrent actors carry a full-batch hidden state, so slicing
+        # happens on the output.
         with torch.no_grad():
-          v_hat = actor.estimate_velocity(obs[active_idx])
+          v_hat = actor.estimate_velocity(obs)[active_idx]
         v_true = robot.data.root_link_lin_vel_b[active_idx]
         sq_err = torch.sum(torch.square(v_hat - v_true), dim=-1)
         now_s = step * unwrapped.step_dt
