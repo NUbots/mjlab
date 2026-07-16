@@ -262,7 +262,8 @@ export RMA RMA_WINDOW RMA_Z_DIM RMA_EST_COEF RMA_E2E
 export RMA_ZHAT_MIX_START_ITER RMA_ZHAT_MIX_END_ITER
 export RMA_VHAT RMA_VHAT_DETACH RMA_VHAT_COEF
 export RMA_GATED RMA_ZFAST_DIM RMA_HOLD_DECAY RMA_GATE_COEF
-export RNN_MEMORY RNN_HIDDEN RNN_LAYERS
+export RNN_MEMORY RNN_HIDDEN RNN_LAYERS RNN_MINI_BATCHES
+export PYTORCH_CUDA_ALLOC_CONF
 export ARM_ENVELOPE_W ARM_ENVELOPE_MARGIN
 RMA="${RMA:-}"
 RMA_WINDOW="${RMA_WINDOW:-}"
@@ -281,6 +282,8 @@ RMA_GATE_COEF="${RMA_GATE_COEF:-}"
 RNN_MEMORY="${RNN_MEMORY:-}"
 RNN_HIDDEN="${RNN_HIDDEN:-}"
 RNN_LAYERS="${RNN_LAYERS:-}"
+RNN_MINI_BATCHES="${RNN_MINI_BATCHES:-}"
+PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-}"
 ARM_ENVELOPE_W="${ARM_ENVELOPE_W:-}"
 ARM_ENVELOPE_MARGIN="${ARM_ENVELOPE_MARGIN:-}"
 PHASE_TARGET_MODE="${PHASE_TARGET_MODE:-}"
@@ -2029,6 +2032,13 @@ gen_v59() {
   export RMA_EST_COEF=""
   export RNN_MEMORY="1"
   export RNN_HIDDEN="256"
+  # Launch 1 postmortem: BPTT activations x mirror-doubled minibatches
+  # starved Warp's sim allocations (rank OOM at ~10 min -> NCCL
+  # watchdog). Smaller minibatches + expandable segments (reduces
+  # torch/Warp allocator fragmentation); the detached v_hat aux pass no
+  # longer builds a throwaway BPTT graph (rl/memory.py).
+  export RNN_MINI_BATCHES="8"
+  export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
   export MJLAB_LOG_STAMP="v59-gru-memory-$(date +%Y%m%d-%H%M%S)"
   export RUN_NAME="clock_owned__v59-gru-memory__8gpu-6144__s2__${BATCH}"
   export WANDB_TAGS="clock_owned,v59,rnn-memory,gru,latent-mirror,vhat-odometry,arm-envelope,toein-guard,flight-exempt,batch-v59,gridsearch"

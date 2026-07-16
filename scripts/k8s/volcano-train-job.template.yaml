@@ -185,6 +185,10 @@ spec:
                   value: "${RMA_GATE_COEF}"
                 - name: RNN_MEMORY
                   value: "${RNN_MEMORY}"
+                - name: RNN_MINI_BATCHES
+                  value: "${RNN_MINI_BATCHES}"
+                - name: PYTORCH_CUDA_ALLOC_CONF
+                  value: "${PYTORCH_CUDA_ALLOC_CONF}"
                 - name: RNN_HIDDEN
                   value: "${RNN_HIDDEN}"
                 - name: RNN_LAYERS

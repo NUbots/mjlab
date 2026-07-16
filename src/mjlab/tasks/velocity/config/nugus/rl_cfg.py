@@ -156,6 +156,12 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   algorithm_cfg.entropy_coef = 0.01
   algorithm_cfg.num_learning_epochs = 5
   algorithm_cfg.num_mini_batches = 4
+  if rnn_memory:
+    # BPTT holds every timestep's activations and mirror augmentation
+    # doubles the batch; at 4 minibatches the transient peak starved
+    # Warp's sim allocations (v59 launch 1: rank OOM -> NCCL watchdog).
+    # Smaller minibatches, same data.
+    algorithm_cfg.num_mini_batches = _env_int("RNN_MINI_BATCHES", 8)
   algorithm_cfg.learning_rate = 1.0e-3
   algorithm_cfg.schedule = "adaptive"
   algorithm_cfg.gamma = gamma

@@ -171,10 +171,18 @@ class GruMemoryActor(RNNModel):
     trains.
     """
     assert self.vel_head is not None
-    latent = self.get_latent(obs, masks, hidden_state)
-    feats = self._policy_features(latent)
     if self._vhat_detach:
+      # Pure probe: build no autograd graph through the GRU/MLP at all —
+      # a BPTT graph over the full trajectory batch is expensive VRAM
+      # (v59 launch 1 OOM'd Warp's sim allocations) and would be
+      # discarded before use anyway.
+      with torch.no_grad():
+        latent = self.get_latent(obs, masks, hidden_state)
+        feats = self._policy_features(latent)
       feats = feats.detach()
+    else:
+      latent = self.get_latent(obs, masks, hidden_state)
+      feats = self._policy_features(latent)
     target = obs[_ODOM_GROUP]
     assert isinstance(target, torch.Tensor)
     if masks is not None:
