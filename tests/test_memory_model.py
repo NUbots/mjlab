@@ -143,10 +143,11 @@ def test_onnx_model_matches_and_feeds_back(tmp_path) -> None:
   assert actions.shape == (2, ACTIONS)
   assert velocity.shape == (2, 3)
   assert h_out.shape == (2, HIDDEN)
-  # Manual composition through the actor's own modules.
+  # Manual composition through the actor's own modules (skip connection:
+  # the MLP consumes [normalized obs, GRU output]).
   x = actor.obs_normalizer(obs)
   out, h_new = actor.rnn.rnn(x.unsqueeze(0), h0.unsqueeze(0))
-  feats = out.squeeze(0)
+  feats = torch.cat([x, out.squeeze(0)], dim=-1)
   for layer in list(actor.mlp)[:-1]:
     feats = layer(feats)
   assert actor.distribution is not None
@@ -169,6 +170,73 @@ def test_onnx_model_matches_and_feeds_back(tmp_path) -> None:
     dynamo=False,
   )
   assert path.exists() and path.stat().st_size > 0
+
+
+def test_latent_has_skip_connection() -> None:
+  """The MLP consumes [obs, gru_out]: memory is additive, not a bottleneck."""
+  actor = _make_actor()
+  actor.reset()
+  obs = _fake_obs(5)
+  latent = actor.get_latent(obs)
+  assert latent.shape == (5, ACTOR_DIM + HIDDEN)
+  # The first block IS the normalized obs (the skip path).
+  expected = actor.obs_normalizer(obs["actor"])
+  torch.testing.assert_close(latent[:, :ACTOR_DIM], expected)
+
+
+def test_recurrent_mirror_loss_trains_equivariance() -> None:
+  """compute_loss: scalar, differentiable, zero for an equivariant map."""
+  from types import SimpleNamespace
+  from typing import Any, cast
+
+  from mjlab.rl.memory import RecurrentSymmetry
+
+  actor = _make_actor()
+
+  def fake_aug(env, obs, actions):
+    # Identity "mirror" for this unit test: mirrored == original, so a
+    # deterministic actor must produce zero loss when the hidden mirror
+    # is also identity-compatible (h swap on equal halves of zeros).
+    obs_aug = None
+    if obs is not None:
+      obs_aug = torch.cat([obs, obs.clone()], dim=1)
+    act_aug = None
+    if actions is not None:
+      act_aug = torch.cat([actions, actions.clone()], dim=1)
+    return obs_aug, act_aug
+
+  sym = RecurrentSymmetry(
+    env=cast(Any, SimpleNamespace()),
+    use_data_augmentation=False,
+    use_mirror_loss=True,
+    mirror_loss_coeff=1.0,
+    data_augmentation_func=fake_aug,
+  )
+  t_pad, n_traj = 4, 2
+  obs = TensorDict(
+    {
+      "actor": torch.randn(t_pad, n_traj, ACTOR_DIM),
+      "odom_target": torch.randn(t_pad, n_traj, 3),
+    },
+    batch_size=[t_pad, n_traj],
+  )
+  masks = torch.ones(t_pad, n_traj, dtype=torch.bool)
+  hidden = torch.zeros(1, n_traj, HIDDEN)  # Symmetric under the swap.
+
+  from rsl_rl.storage import RolloutStorage
+
+  batch = RolloutStorage.Batch(
+    observations=obs, hidden_states=(hidden, None), masks=masks
+  )
+  loss = sym.compute_loss(actor, batch, original_batch_size=t_pad)
+  assert loss.dim() == 0
+  # Identity mirror + swap-symmetric hidden: the two forwards see the
+  # same inputs, so the loss must be ~0.
+  assert float(loss) < 1e-10
+  # And augment_batch must be a no-op (data augmentation off).
+  sym.augment_batch(batch, original_batch_size=t_pad)
+  assert batch.observations is not None
+  assert batch.observations.batch_size == torch.Size([t_pad, n_traj])
 
 
 def test_vhat_without_odom_group_raises() -> None:

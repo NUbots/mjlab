@@ -150,6 +150,31 @@ class GruMemoryActor(RNNModel):
       obs_dim += int(obs[group].shape[-1])
     return net_groups, obs_dim
 
+  def _get_latent_dim(self) -> int:
+    # Skip connection: the MLP consumes [normalized obs, GRU output].
+    # Stock RNNModel routes obs ONLY through the RNN, which makes the
+    # policy hostage to the memory — a confused GRU scrambles its entire
+    # view of the world (v59 launch 2 postmortem). With the skip path
+    # the worst case is the desired floor: the MLP zeroes the GRU half
+    # and behaves as a memoryless policy; memory is purely additive.
+    return self.obs_dim + self.latent_dim
+
+  def get_latent(
+    self,
+    obs: TensorDict,
+    masks: torch.Tensor | None = None,
+    hidden_state: Any = None,
+  ) -> torch.Tensor:
+    # Normalized obs concat (MLPModel.get_latent, bypassing RNNModel's).
+    obs_list = [obs[group] for group in self.obs_groups]
+    x = self.obs_normalizer(torch.cat(obs_list, dim=-1))  # type: ignore[arg-type]
+    h = self.rnn(x, masks, hidden_state).squeeze(0)
+    if masks is not None:
+      # Batch mode: the RNN unpads its output; align the skip path.
+      x = unpad_trajectories(x, masks)
+      assert isinstance(x, torch.Tensor)
+    return torch.cat([x, h], dim=-1)
+
   def _policy_features(self, latent: torch.Tensor) -> torch.Tensor:
     """Policy-trunk penultimate features (input to the final action layer)."""
     h = latent
@@ -237,7 +262,7 @@ class OnnxGruMemoryModel(nn.Module):
     x = self.obs_normalizer(obs)
     h_in = h.view(-1, self.num_layers, self.hidden_dim).permute(1, 0, 2)
     out, h_new = self.gru(x.unsqueeze(0), h_in.contiguous())
-    latent = out.squeeze(0)
+    latent = torch.cat([x, out.squeeze(0)], dim=-1)
     feats = latent
     for layer in list(self.mlp)[:-1]:
       feats = layer(feats)
@@ -345,20 +370,49 @@ class RecurrentSymmetry(Symmetry):
   def compute_loss(
     self, actor: Any, batch: RolloutStorage.Batch, original_batch_size: int
   ) -> torch.Tensor:
+    """Recurrent mirror loss: supervised equivariance under the defined map.
+
+    ``mse(pi(mirror(obs), M(h)), sg(mirror(pi(obs, h))))`` over the
+    trajectory batch. This is the correct way to impose the latent
+    mirror on a recurrent policy: data augmentation injects mirrored
+    samples that are off-policy until equivariance is learned, and the
+    resulting KL against the stored stats pins the adaptive learning
+    rate to its floor (v59 launch 2: lr locked at 1e-5 for 2.7k
+    iterations). A loss term touches neither the surrogate ratios nor
+    the KL controller.
+    """
     if batch.masks is None:
       return super().compute_loss(actor, batch, original_batch_size)
-    # The stock diagnostic re-runs the actor WITHOUT masks/hidden, which
-    # feeds padded 3D trajectories into the RNN's inference path. The
-    # symmetry pressure comes from the data augmentation; skip the
-    # diagnostic for recurrent batches. (Mirror LOSS mode would need its
-    # own masked re-forward — implement if ever enabled.)
-    if self.use_mirror_loss:
-      raise NotImplementedError(
-        "use_mirror_loss is not supported for recurrent policies; "
-        "use data augmentation."
+    assert batch.observations is not None
+    hidden = batch.hidden_states[0]
+    assert hidden is not None and not isinstance(hidden, tuple)
+    n_traj = batch.observations.batch_size[1]
+
+    # Mirrored copy of the padded obs (the callback returns
+    # [originals | mirrored] along the trajectory dim; slice the copy).
+    obs_aug, _ = self.data_augmentation_func(
+      env=self.env, obs=batch.observations.detach().clone(), actions=None
+    )
+    assert obs_aug is not None
+    obs_m = obs_aug[:, n_traj:]
+
+    # Mean actions on mirrored obs from the mirrored hidden state.
+    mean_m = actor(obs_m, masks=batch.masks, hidden_state=mirror_hidden_state(hidden))
+    # Target: mirror of the mean actions on the originals (no gradient).
+    with torch.no_grad():
+      mean_o = actor(
+        batch.observations.detach().clone(),
+        masks=batch.masks,
+        hidden_state=hidden,
       )
-    device = batch.masks.device
-    return torch.zeros((), device=device)
+      _, mean_o_aug = self.data_augmentation_func(
+        env=self.env, obs=None, actions=mean_o
+      )
+      assert mean_o_aug is not None
+      target = mean_o_aug[:, mean_o.shape[1] :]
+
+    symmetry_loss = nn.functional.mse_loss(mean_m, target)
+    return symmetry_loss if self.use_mirror_loss else symmetry_loss.detach()
 
 
 class MemoryPPO(PPO):

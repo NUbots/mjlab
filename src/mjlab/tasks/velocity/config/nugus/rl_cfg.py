@@ -169,6 +169,19 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   algorithm_cfg.desired_kl = 0.01
   algorithm_cfg.max_grad_norm = 1.0
   algorithm_cfg.symmetry_cfg = _symmetry_cfg()
+  if rnn_memory and algorithm_cfg.symmetry_cfg is not None:
+    # Recurrent policies get the defined-latent-mirror as a supervised
+    # equivariance LOSS, not as data augmentation: mirrored samples are
+    # off-policy until equivariance is learned, and their KL against the
+    # stored stats pinned the adaptive learning rate to its floor for
+    # 2.7k iterations (v59 launch 2 postmortem).
+    algorithm_cfg.symmetry_cfg.update(
+      {
+        "use_data_augmentation": False,
+        "use_mirror_loss": True,
+        "mirror_loss_coeff": _env_float("MIRROR_LOSS_COEFF", 0.5),
+      }
+    )
 
   return RslRlOnPolicyRunnerCfg(
     actor=actor_cfg,
