@@ -959,6 +959,48 @@ learned purely from reward via truncated BPTT (run qplxfzo0, pin
   v57 as the safe baseline, v59 as the instrumented candidate (its
   velocity output doubles as the odometry probe).
 
+## R46 (2026-07-17): the chirality discovery — v59 was secretly one-sided; the mirror loss is not basin balancing; the boot phase was the seed
+
+Trent spotted a limp in v60's videos. The trail led somewhere bigger:
+
+- Built the discriminator (signed left-minus-right stance time per env;
+  ``eval/gait_asym_pop_bias`` vs ``gait_asym_magnitude``). v58 (window
+  lineage, data augmentation) measures bias -0.0016 — symmetric. v59
+  (GRU, mirror loss): **-0.261 with magnitude 0.264** — essentially
+  every episode favors the same foot, across all command cells,
+  including the mirrored +- pairs. The angular champion was chiral all
+  along, sub-visible at v59's narrow DR; v60's per-side draws (gains
+  +-30%, friction 0.35-1.3 per foot) amplified it into Trent's limp.
+- MECHANISM: a walking gait is a pair of mirror-twin limit cycles; the
+  first asymmetric input picks the basin. ``PhaseDeltaAction`` booted
+  every episode AND every stand->walk transition at phase 0 — which by
+  clock convention encodes which foot leads — so every rollout of every
+  run seeded the SAME basin. PPO only ever optimized one side.
+- WHY THE MIRROR LOSS CANNOT FIX IT: it enforces equivariance of the
+  MAP ("from mirrored states, act mirrored") — necessary, insufficient.
+  It never causes the mirror basin to be VISITED, so that basin stays
+  unoptimized while the visited one accumulates asymmetric habits.
+  Equivariant map, spontaneously broken trajectory distribution. v59's
+  converged symmetry loss (0.0105) was telling the truth about the map
+  and nothing about the rollouts.
+- WHY DATA AUGMENTATION ACCIDENTALLY FIXED IT for v48-v58: mirrored
+  rollouts entered the PPO batch itself, so both basins were optimized
+  every update. The augmentation was doing unrecognized basin-balancing
+  work, lost in the v59b loss-form redesign (which was itself forced by
+  the recurrent-KL floor-lock, R45).
+- FIX: ``PHASE_INIT_RANDOM`` — uniform boot phase at episode reset and
+  at every stand->walk transition (standing still presents the distinct
+  phase-0 signal). Both basins get visited 50/50 and optimized; the
+  mirror loss ties them; also honest DR (the real engine can engage
+  mid-cycle). v60 killed mid-run (chirality disqualifies deployment and
+  confounds the DR-escalation readout it existed to produce); v60b =
+  v60 recipe + the fix. If bias persists in v60b, the seed was not the
+  whole story -> 15e weight-tied twin RNNs (equivariance by
+  construction).
+- CAVEATS BANKED: v59's records (ang 0.2502, frozen-h ablation) stand
+  as measurements but the artifact is non-deployable; v57/v58 are the
+  only certified-symmetric deployables until v60b evals.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not

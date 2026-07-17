@@ -67,6 +67,19 @@ class PhaseDeltaActionCfg(ActionTermCfg):
   raw_max: float | None = None
   """Upper clamp on the raw phase-delta action (None = unbounded)."""
 
+  randomize_start_phase: bool = False
+  """Seed every walk start with a uniform random phase instead of 0.
+
+  Chirality fix (doc 15 R46): phase 0 encodes which foot leads, so a
+  constant start seeds the SAME mirror basin of the gait's twin limit
+  cycles at every episode boot and every stand-to-walk transition —
+  PPO then only ever optimizes one basin and the policy goes chiral
+  (v59 measured a 0.26 stance-time bias). With this flag, episode
+  resets draw a uniform phase and stand-to-walk transitions resume at
+  a fresh uniform draw (standing still presents the distinct phase-0
+  signal while stationary). Both basins get visited and optimized;
+  also honest DR — the real walk engine can engage mid-cycle."""
+
   def build(self, env: ManagerBasedRlEnv) -> PhaseDeltaAction:
     return PhaseDeltaAction(self, env)
 
@@ -87,6 +100,7 @@ class PhaseDeltaAction(ActionTerm):
     self._raw_actions = torch.zeros(self.num_envs, 1, device=self.device)
     self._policy_phase = torch.zeros(self.num_envs, device=self.device)
     self._last_delta = torch.zeros(self.num_envs, device=self.device)
+    self._was_walking = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
   @property
   def action_dim(self) -> int:
@@ -124,6 +138,18 @@ class PhaseDeltaAction(ActionTerm):
     if active is not None:
       delta = delta * active
       walking = active > 0
+      if self.cfg.randomize_start_phase:
+        # Stand-to-walk transitions resume from a fresh uniform phase
+        # (standing itself still presents phase 0). Without this every
+        # walk start re-seeds the same mirror basin — see cfg docstring.
+        starting = walking & ~self._was_walking
+        if starting.any():
+          self._policy_phase = torch.where(
+            starting,
+            torch.rand_like(self._policy_phase),
+            self._policy_phase,
+          )
+        self._was_walking = walking
       self._policy_phase = torch.where(
         walking,
         torch.remainder(self._policy_phase + delta, 1.0),
@@ -164,5 +190,13 @@ class PhaseDeltaAction(ActionTerm):
 
   def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
     self._raw_actions[env_ids] = 0.0
-    self._policy_phase[env_ids] = 0.0
+    if self.cfg.randomize_start_phase:
+      if env_ids is None or isinstance(env_ids, slice):
+        n = self._policy_phase[env_ids].shape[0]
+      else:
+        n = int(env_ids.numel())
+      self._policy_phase[env_ids] = torch.rand(n, device=self.device)
+      self._was_walking[env_ids] = False
+    else:
+      self._policy_phase[env_ids] = 0.0
     self._last_delta[env_ids] = 0.0

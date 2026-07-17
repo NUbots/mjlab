@@ -1057,6 +1057,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       command_threshold=0.05,
       raw_min=float(raw_min_s) if raw_min_s else None,
       raw_max=float(raw_max_s) if raw_max_s else None,
+      # Chirality fix (doc 15 R46): constant phase-0 walk starts seed the
+      # same mirror basin every time; uniform starts visit both.
+      randomize_start_phase=_env_bool("PHASE_INIT_RANDOM", False),
     )
 
   cfg.viewer.body_name = "torso"

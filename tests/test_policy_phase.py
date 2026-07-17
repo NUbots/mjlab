@@ -98,6 +98,41 @@ def test_phase_delta_standing_gate_zeros_phase():
   assert action.last_delta[1].item() == 0.0
 
 
+def test_phase_delta_randomized_start_phase():
+  """Chirality fix: episode resets and walk starts draw uniform phase."""
+  torch.manual_seed(0)
+  env = _make_phase_env(num_envs=64)
+  cfg = PhaseDeltaActionCfg(
+    entity_name="robot",
+    period=0.7,
+    command_name="twist",
+    command_threshold=0.05,
+    randomize_start_phase=True,
+  )
+  action = PhaseDeltaAction(cfg, env)
+  # Reset draws are uniform, not constant zero.
+  action.reset(env_ids=torch.arange(64))
+  phases = action.policy_phase
+  assert phases.min() >= 0.0 and phases.max() < 1.0
+  assert phases.std() > 0.1  # Not a constant seed.
+
+  # Stand-to-walk transition re-seeds a fresh uniform phase (not zero).
+  env2 = _make_phase_env(
+    num_envs=2, command=torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+  )
+  action2 = PhaseDeltaAction(cfg, env2)
+  action2.reset(env_ids=torch.arange(2))
+  action2.process_actions(torch.ones(2, 1))  # Standing: phase forced to 0.
+  assert action2.policy_phase.abs().max().item() == 0.0
+  env2.command_manager.get_command = MagicMock(
+    return_value=torch.tensor([[0.5, 0.0, 0.0], [0.5, 0.0, 0.0]])
+  )
+  torch.manual_seed(1)
+  action2.process_actions(torch.ones(2, 1))  # Walk start.
+  assert (action2.policy_phase > 0.0).all()
+  assert action2.policy_phase[0].item() != action2.policy_phase[1].item()
+
+
 def test_phase_delta_metrics_nominal_ratio():
   env = _make_phase_env(num_envs=1)
   action = _make_phase_action(env, period=0.7)

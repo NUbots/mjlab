@@ -265,6 +265,7 @@ export RMA_GATED RMA_ZFAST_DIM RMA_HOLD_DECAY RMA_GATE_COEF
 export RNN_MEMORY RNN_HIDDEN RNN_LAYERS RNN_MINI_BATCHES
 export MIRROR_LOSS_COEFF
 export GAIN_DR_LO GAIN_DR_HI FOOT_FRICTION_LO FOOT_FRICTION_HI
+export PHASE_INIT_RANDOM
 export PYTORCH_CUDA_ALLOC_CONF
 export ARM_ENVELOPE_W ARM_ENVELOPE_MARGIN
 RMA="${RMA:-}"
@@ -290,6 +291,7 @@ GAIN_DR_LO="${GAIN_DR_LO:-}"
 GAIN_DR_HI="${GAIN_DR_HI:-}"
 FOOT_FRICTION_LO="${FOOT_FRICTION_LO:-}"
 FOOT_FRICTION_HI="${FOOT_FRICTION_HI:-}"
+PHASE_INIT_RANDOM="${PHASE_INIT_RANDOM:-}"
 PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-}"
 ARM_ENVELOPE_W="${ARM_ENVELOPE_W:-}"
 ARM_ENVELOPE_MARGIN="${ARM_ENVELOPE_MARGIN:-}"
@@ -2084,6 +2086,31 @@ gen_v60() {
   emit_manifest "mj-gs-v60-dr-eleven"
 }
 
+# BATCH=v60b: v60 killed mid-run after the chirality discovery (doc 15
+# R46). The gait_asym discriminator measured v59 at pop_bias -0.261
+# (vs v58's -0.002): a FIXED chirality, not adaptive limping. Mechanism:
+# PhaseDeltaAction booted every episode and every stand->walk
+# transition at phase 0, which encodes which foot leads — every rollout
+# seeded the SAME mirror basin of the gait's twin limit cycles, so PPO
+# only ever optimized one. The mirror LOSS enforces the map's
+# equivariance but cannot make the unvisited basin get visited; the old
+# data AUGMENTATION balanced the basins by accident (mirrored rollouts
+# entered the PPO batch), which is why the window lineage stayed
+# symmetric. v60b = v60 recipe + PHASE_INIT_RANDOM=1 (uniform boot
+# phase at reset AND at stand->walk transitions; standing still
+# presents the phase-0 signal). Success: v60 goals + gait_asym_pop_bias
+# ~ 0 in eval with magnitude reflecting only per-episode adaptive
+# limping. If bias persists -> the seed wasn't the whole story ->
+# 15e twin RNNs.
+gen_v60b() {
+  gen_v60
+  export PHASE_INIT_RANDOM="1"
+  export MJLAB_LOG_STAMP="v60b-dr-phase-random-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v60b-dr-phase-random__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v60b,rnn-memory,gru,latent-mirror,dr-escalation,phase-random,chirality-fix,vhat-odometry,arm-envelope,batch-v60b,gridsearch"
+  emit_manifest "mj-gs-v60b-dr-phase-random"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -3213,6 +3240,7 @@ case "$BATCH" in
   v58) gen_v58; expected=15 ;;
   v59) gen_v59; expected=16 ;;
   v60) gen_v60; expected=17 ;;
+  v60b) gen_v60b; expected=18 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
