@@ -30,6 +30,7 @@ __all__ = [
   "foot_toein_deg",
   "foot_toeout_deg",
   "foot_torso_yaw_signed",
+  "gait_stance_asymmetry",
   "joint_speed_abs",
 ]
 
@@ -238,6 +239,40 @@ def flight_fraction(
         active = active & (linear_norm >= min_command_speed)
       flight = flight * active.float()
   return flight
+
+
+def gait_stance_asymmetry(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  signed: bool = True,
+  command_name: str | None = "twist",
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Left-minus-right stance-time asymmetry (chirality vs adaptation).
+
+  Per step: ``contact(left) - contact(right)`` (sensor body order is
+  (left, right)), walking-gated; the episode mean is the signed
+  stance-time split. Interpretation under per-side DR draws (v60+,
+  where per-foot friction and per-servo gains legitimately create
+  asymmetric robots): the SIGNED metric near zero with per-env spread =
+  the policy adapts its limp to each episode's draw (healthy); a biased
+  signed mean across the population = a fixed chirality leaking through
+  the mirror constraint (trigger for backlog 15e twin RNNs). Pair with
+  ``signed=False`` for the magnitude of per-episode limping.
+  """
+  contact: ContactSensor = env.scene[sensor_name]
+  assert contact.data.found is not None
+  in_contact = (contact.data.found > 0).float()  # [B, 2] = (left, right)
+  diff = in_contact[:, 0] - in_contact[:, 1]
+  asym = diff if signed else diff.abs()
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      active = (linear_norm + angular_norm) > command_threshold
+      asym = asym * active.float()
+  return asym
 
 
 def joint_speed_abs(

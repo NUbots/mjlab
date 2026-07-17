@@ -1748,6 +1748,17 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "command_threshold": 0.05,
     },
   )
+  # Chirality watch (v60+ per-side DR draws make per-episode limping
+  # legitimate): signed mean near zero with spread = adaptive limp;
+  # biased signed mean = fixed chirality (trigger for 15e twin RNNs).
+  cfg.metrics["gait_asym_signed"] = MetricsTermCfg(
+    func=mdp.gait_stance_asymmetry,
+    params={"sensor_name": "feet_ground_contact", "signed": True},
+  )
+  cfg.metrics["gait_asym_abs"] = MetricsTermCfg(
+    func=mdp.gait_stance_asymmetry,
+    params={"sensor_name": "feet_ground_contact", "signed": False},
+  )
   cfg.metrics["arm_joint_speed"] = MetricsTermCfg(
     func=mdp.joint_speed_abs,
     params={
