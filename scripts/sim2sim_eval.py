@@ -221,7 +221,9 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
     servo.saturation_effort = servo.saturation_effort * cfg.effort_scale
     servo.effort_limit = servo.effort_limit * cfg.effort_scale
   if cfg.torso_mass_scale != 1.0:
-    torso_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, "torso")
+    torso_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, "robot/torso")
+    if torso_id < 0:
+      torso_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, "torso")
     if torso_id < 0:
       raise ValueError("torso body not found for torso_mass_scale")
     mj_model.body_mass[torso_id] *= cfg.torso_mass_scale

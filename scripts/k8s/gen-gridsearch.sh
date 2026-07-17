@@ -264,6 +264,7 @@ export RMA_VHAT RMA_VHAT_DETACH RMA_VHAT_COEF
 export RMA_GATED RMA_ZFAST_DIM RMA_HOLD_DECAY RMA_GATE_COEF
 export RNN_MEMORY RNN_HIDDEN RNN_LAYERS RNN_MINI_BATCHES
 export MIRROR_LOSS_COEFF
+export GAIN_DR_LO GAIN_DR_HI FOOT_FRICTION_LO FOOT_FRICTION_HI
 export PYTORCH_CUDA_ALLOC_CONF
 export ARM_ENVELOPE_W ARM_ENVELOPE_MARGIN
 RMA="${RMA:-}"
@@ -285,6 +286,10 @@ RNN_HIDDEN="${RNN_HIDDEN:-}"
 RNN_LAYERS="${RNN_LAYERS:-}"
 RNN_MINI_BATCHES="${RNN_MINI_BATCHES:-}"
 MIRROR_LOSS_COEFF="${MIRROR_LOSS_COEFF:-}"
+GAIN_DR_LO="${GAIN_DR_LO:-}"
+GAIN_DR_HI="${GAIN_DR_HI:-}"
+FOOT_FRICTION_LO="${FOOT_FRICTION_LO:-}"
+FOOT_FRICTION_HI="${FOOT_FRICTION_HI:-}"
 PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-}"
 ARM_ENVELOPE_W="${ARM_ENVELOPE_W:-}"
 ARM_ENVELOPE_MARGIN="${ARM_ENVELOPE_MARGIN:-}"
@@ -2047,6 +2052,38 @@ gen_v59() {
   emit_manifest "mj-gs-v59-gru-memory"
 }
 
+# BATCH=v60: targeted DR escalation on the v59 GRU champion (Trent's
+# "turn DR up to 11 where it pays", backlog 15g). License: the frozen-h
+# ablation proved the memory is load-bearing cross-engine (frozen =
+# 2.5 falls/min, live = 0), and the per-axis sweep measured the
+# adapter's edge — ZERO falls at gain +-30%, friction 0.25 abs, torso
+# +30% in a foreign engine; the only edge found was effort 0.6 (0.22
+# falls/min). Widen each axis toward its measured edge:
+#   gains   +-10%  -> +-30%   (GAIN_DR_LO/HI, kp and kd)
+#   effort  0.7    -> 0.55 lo (train THROUGH the measured edge)
+#   frictn  0.7    -> 0.35 lo (abs ~0.3 at the foot)
+#   payload -0.3/+0.5 -> -0.5/+1.5 kg
+# Untouched axes (link mass, joint friction, encoder bias, bus) keep
+# their proven ranges — widening unidentifiable axes re-imposes the
+# hedging tax. Success: v59-class eval (ang <= 0.26, falls ~0) with the
+# harder envelope + improved cross-engine lin (the 0.174 -> closer to
+# v57's 0.092 as the wider training DR covers the engine gap). Watch:
+# frontier_speed vs v59 at matched iteration (AIMD absorbs difficulty),
+# Loss/symmetry, Loss/velocity.
+gen_v60() {
+  gen_v59
+  export GAIN_DR_LO="0.7"
+  export GAIN_DR_HI="1.3"
+  export EFFORT_LO="0.55"
+  export FOOT_FRICTION_LO="0.35"
+  export PAYLOAD_KG_MIN="-0.5"
+  export PAYLOAD_KG_MAX="1.5"
+  export MJLAB_LOG_STAMP="v60-dr-eleven-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v60-dr-eleven__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v60,rnn-memory,gru,latent-mirror,dr-escalation,vhat-odometry,arm-envelope,batch-v60,gridsearch"
+  emit_manifest "mj-gs-v60-dr-eleven"
+}
+
 
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
@@ -3175,6 +3212,7 @@ case "$BATCH" in
   v57) gen_v57; expected=14 ;;
   v58) gen_v58; expected=15 ;;
   v59) gen_v59; expected=16 ;;
+  v60) gen_v60; expected=17 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

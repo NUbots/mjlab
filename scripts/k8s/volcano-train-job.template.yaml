@@ -189,6 +189,14 @@ spec:
                   value: "${RNN_MINI_BATCHES}"
                 - name: MIRROR_LOSS_COEFF
                   value: "${MIRROR_LOSS_COEFF}"
+                - name: GAIN_DR_LO
+                  value: "${GAIN_DR_LO}"
+                - name: GAIN_DR_HI
+                  value: "${GAIN_DR_HI}"
+                - name: FOOT_FRICTION_LO
+                  value: "${FOOT_FRICTION_LO}"
+                - name: FOOT_FRICTION_HI
+                  value: "${FOOT_FRICTION_HI}"
                 - name: PYTORCH_CUDA_ALLOC_CONF
                   value: "${PYTORCH_CUDA_ALLOC_CONF}"
                 - name: RNN_HIDDEN

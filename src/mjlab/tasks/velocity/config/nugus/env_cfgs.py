@@ -1117,6 +1117,22 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # Per-servo strength / stiction DR — re-sample each episode.
   cfg.events["pd_gains"].mode = "reset"
+  # Targeted DR escalation knobs (doc 15 R45 / backlog 15g): the v59
+  # frozen-h sweep measured the adapter's edge per axis — zero falls at
+  # gain +-30%, friction 0.25, torso +30%; effort edge at 0.6. Defaults
+  # reproduce the historical hardcoded ranges exactly.
+  cfg.events["pd_gains"].params["kp_range"] = (
+    _env_float("GAIN_DR_LO", 0.9),
+    _env_float("GAIN_DR_HI", 1.1),
+  )
+  cfg.events["pd_gains"].params["kd_range"] = (
+    _env_float("GAIN_DR_LO", 0.9),
+    _env_float("GAIN_DR_HI", 1.1),
+  )
+  cfg.events["foot_friction"].params["ranges"] = (
+    _env_float("FOOT_FRICTION_LO", 0.7),
+    _env_float("FOOT_FRICTION_HI", 1.3),
+  )
   cfg.events["effort_limits"] = EventTermCfg(
     mode="reset",
     func=dr.effort_limits,
