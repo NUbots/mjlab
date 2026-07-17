@@ -370,6 +370,22 @@ un-starred items overnight — they need design attention.
     cluster); the training run is the payoff experiment: harder
     problem, better transfer.
 
+15h. **Self-harvested initial-state distribution** (Trent, 2026-07-17,
+    extending the RESET_JOINT_NOISE fix). Instead of always spawning at
+    keyframe+noise, monitor the poses the policy itself visits during
+    training and draw episode inits from the "stable visited states"
+    (e.g., states where the robot was upright, low joint accel, held
+    for N steps — banked into a reservoir per curriculum stage).
+    Kin to reference-state initialization (DeepMimic RSI) and
+    visited-state reset curricula. Would also close the "every episode
+    starts standing" blind spot: the policy never practices engaging
+    the walk from mid-stride, crouched, or recovering postures it
+    actually inhabits at deployment. Care needed: reservoir must not
+    collapse to one gait phase/chirality (stratify by phase + mirror
+    half the draws), and states must be re-playable (qpos/qvel capture
+    at low velocity). More involved research project; after the v60
+    line settles.
+
 ## Hygiene
 
 15b. ⭐ **Randomize initial episode clocks.** All envs start at

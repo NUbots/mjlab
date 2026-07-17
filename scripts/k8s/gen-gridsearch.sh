@@ -2105,7 +2105,8 @@ gen_v60() {
 # 15e twin RNNs.
 gen_v60b() {
   gen_v60
-  export PHASE_INIT_RANDOM RESET_JOINT_NOISE="1"
+  export PHASE_INIT_RANDOM="1"
+  export RESET_JOINT_NOISE="0.02"
   export MJLAB_LOG_STAMP="v60b-dr-phase-random-$(date +%Y%m%d-%H%M%S)"
   export RUN_NAME="clock_owned__v60b-dr-phase-random__8gpu-6144__s2__${BATCH}"
   export WANDB_TAGS="clock_owned,v60b,rnn-memory,gru,latent-mirror,dr-escalation,phase-random,chirality-fix,vhat-odometry,arm-envelope,batch-v60b,gridsearch"
