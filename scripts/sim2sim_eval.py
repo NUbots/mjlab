@@ -56,6 +56,18 @@ class Sim2SimEvalConfig:
   policies only). Attributes cross-engine deltas to the memory: if the
   frozen policy transfers better, the memory overfits the training
   engine; if worse, the memory was compensating (adaptation working)."""
+  kp_scale: float = 1.0
+  """Perturbation sweep (backlog 15c/15g): scale all servo kp."""
+  kd_scale: float = 1.0
+  """Perturbation sweep: scale all servo kd."""
+  effort_scale: float = 1.0
+  """Perturbation sweep: scale servo saturation/effort limits
+  (bus-brownout / hot-servo derating proxy)."""
+  torso_mass_scale: float = 1.0
+  """Perturbation sweep: scale the torso body mass (payload proxy)."""
+  foot_friction: float | None = None
+  """Perturbation sweep: override foot geom sliding friction (waxed
+  turf proxy). None keeps the model default."""
 
 
 def _load_onnx_session(cfg: Sim2SimEvalConfig) -> tuple[ort.InferenceSession, Path]:
@@ -198,6 +210,30 @@ def run_sim2sim_eval(cfg: Sim2SimEvalConfig) -> dict[str, object]:
       }
   finally:
     pass
+
+  # Perturbation sweep knobs (backlog 15c/15g): applied to the SERVO
+  # emulation and the vanilla model only — the policy is never told.
+  if cfg.kp_scale != 1.0:
+    servo.kp = servo.kp * cfg.kp_scale
+  if cfg.kd_scale != 1.0:
+    servo.kd = servo.kd * cfg.kd_scale
+  if cfg.effort_scale != 1.0:
+    servo.saturation_effort = servo.saturation_effort * cfg.effort_scale
+    servo.effort_limit = servo.effort_limit * cfg.effort_scale
+  if cfg.torso_mass_scale != 1.0:
+    torso_id = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, "torso")
+    if torso_id < 0:
+      raise ValueError("torso body not found for torso_mass_scale")
+    mj_model.body_mass[torso_id] *= cfg.torso_mass_scale
+  if cfg.foot_friction is not None:
+    n_set = 0
+    for gid in range(mj_model.ngeom):
+      name = mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_GEOM, gid) or ""
+      if "foot" in name:
+        mj_model.geom_friction[gid, 0] = cfg.foot_friction
+        n_set += 1
+    if n_set == 0:
+      raise ValueError("no foot geoms found for foot_friction")
 
   mj_data = mujoco.MjData(mj_model)
   metrics = EvalMetricsState()

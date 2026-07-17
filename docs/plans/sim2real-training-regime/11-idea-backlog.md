@@ -334,6 +334,42 @@ un-starred items overnight — they need design attention.
     both hidden states statically each tick. When: if v59b shows
     asymmetry drift or the mirror loss fights the reward.
 
+15f. **Memory-as-action registers (bolt-on sibling, not precursor)**
+    (Trent, 2026-07-17). The policy's output grows N memory-register
+    channels; an action term stores them in env state; an obs term
+    reads them back next tick. Recurrence closes through the ENV, so
+    training stays fully feedforward: stock PPO, no BPTT/padding/VRAM
+    peak, and feedforward mirror augmentation works unchanged (the
+    register block gets the defined involution as both obs and action
+    — no KL pathology, registers are real logged observations).
+    Precedent: clock_owned's phase delta IS this with N=1, champion
+    since v51s2. Motivation (Trent): the write head shares the trunk
+    that chooses actions, so the net can deliberately store INTENT —
+    which the v59 GRU never sees (it gets obs + last action, intent's
+    one-tick-late shadow). Cost: no gradient through time — what to
+    write is learned by RL credit assignment alone (literature: works,
+    slower/less reliable than BPTT). Composable with the GRU (reflexive
+    state + deliberate registers). Cheap build: action term + obs term
+    + mirror rule; no training-machinery changes. When: architecture
+    eval after the targeted-DR question; or paired vs v59 as a
+    memory-mechanism A/B.
+
+15g. ⭐ **Targeted DR escalation ("DR to 11 where it pays")** (Trent,
+    2026-07-17, licensed by the v59 frozen-h ablation: memory converts
+    DR width into specialization, not hedging — but only on axes it can
+    IDENTIFY; widening unidentifiable axes re-imposes the hedging tax).
+    Instrument first, then widen: run the 15c perturbed sim2sim sweep
+    per DR axis TWICE (memory live vs frozen-h) — the frozen-live gap
+    per axis measures how much the memory compensates that axis. Widen
+    aggressively where the gap is large AND real-world uncertainty is
+    high; leave flat-gap axes alone. Priors pre-measurement: effort/
+    torque derating (servos cook over a match), bus-voltage sag depth,
+    friction lower bound 0.4 (#14, waxed turf), obs latency jitter
+    (doc 17: ~55 ms register lag measured), encoder bias width. Output
+    = the v60 DR recipe on the GRU champion. Sweep is local (no
+    cluster); the training run is the payoff experiment: harder
+    problem, better transfer.
+
 ## Hygiene
 
 15b. ⭐ **Randomize initial episode clocks.** All envs start at
