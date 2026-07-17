@@ -340,6 +340,10 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
     last_push_s = torch.full((num_envs,), -1e9, device=device)
     print("[INFO] Odometry head found: reporting push-conditioned v_hat RMSE.")
 
+  # Chirality watch accumulators (per env, walking steps only).
+  asym_signed_sum = torch.zeros(num_envs, device=device)
+  asym_count = torch.zeros(num_envs, device=device)
+
   twist = cast(UniformVelocityCommand, unwrapped.command_manager.get_term("twist"))
   robot = unwrapped.scene["robot"]
   contact_sensor = cast(ContactSensor, unwrapped.scene["feet_ground_contact"])
@@ -395,6 +399,15 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
         vhat_n["push"] += int(recent_push.sum().item())
         vhat_sq["steady"] += sq_err[~recent_push].sum().item()
         vhat_n["steady"] += int((~recent_push).sum().item())
+
+      # Chirality watch: signed left-minus-right stance time per env,
+      # walking steps only (sensor body order is (left, right)).
+      walking = (torch.norm(cmd[:, :2], dim=1) + torch.abs(cmd[:, 2])) > 0.05
+      contact_lr = (contact_sensor.data.found[active_idx] > 0).float()
+      asym_signed_sum[active_idx] += (
+        contact_lr[:, 0] - contact_lr[:, 1]
+      ) * walking.float()
+      asym_count[active_idx] += walking.float()
 
       in_air = contact_sensor.data.found[active_idx] == 0
       foot_heights = height_sensor.data.heights[active_idx]
@@ -488,6 +501,16 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
     )
     overall["eval/vhat_rmse_push"] = _rmse(vhat_sq["push"], vhat_n["push"])
     overall["eval/vhat_rmse_steady"] = _rmse(vhat_sq["steady"], vhat_n["steady"])
+
+  # Chirality discriminator: per-env signed stance asymmetry means.
+  # pop_bias ~ 0 with magnitude > 0 = per-episode adaptive limping
+  # (healthy under per-side DR draws); pop_bias ~ +-magnitude = a fixed
+  # chirality (every robot favors the same leg).
+  valid = asym_count > 50
+  if valid.any():
+    per_env = asym_signed_sum[valid] / asym_count[valid]
+    overall["eval/gait_asym_pop_bias"] = float(per_env.mean())
+    overall["eval/gait_asym_magnitude"] = float(per_env.abs().mean())
 
   print("\n" + "=" * 50)
   print("NUgus Eval Results")
