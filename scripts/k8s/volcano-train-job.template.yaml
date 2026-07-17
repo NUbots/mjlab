@@ -199,6 +199,8 @@ spec:
                   value: "${FOOT_FRICTION_HI}"
                 - name: PHASE_INIT_RANDOM
                   value: "${PHASE_INIT_RANDOM}"
+                - name: RESET_JOINT_NOISE
+                  value: "${RESET_JOINT_NOISE}"
                 - name: PYTORCH_CUDA_ALLOC_CONF
                   value: "${PYTORCH_CUDA_ALLOC_CONF}"
                 - name: RNN_HIDDEN

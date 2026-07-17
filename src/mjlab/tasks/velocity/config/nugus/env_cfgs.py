@@ -1089,6 +1089,19 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["track_linear_velocity"].weight = track_lin_w
   cfg.rewards["track_angular_velocity"].weight = track_ang_w
 
+  # Chirality audit (doc 15 R46 addendum): the default keyframe is
+  # left-right asymmetric by 1-5 mrad (calibrated hardware offsets), and
+  # spawning EXACTLY at it every episode is a constant-direction
+  # tiebreaker of the same class as the phase-0 seed. Symmetric reset
+  # noise swamps it with a random-sign draw 10x its size each episode
+  # (and is honest DR: the real robot never boots at exactly home).
+  reset_joint_noise = _env_float("RESET_JOINT_NOISE", 0.0)
+  if reset_joint_noise > 0.0:
+    cfg.events["reset_robot_joints"].params["position_range"] = (
+      -reset_joint_noise,
+      reset_joint_noise,
+    )
+
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
   cfg.events["base_com"].params["asset_cfg"].body_names = ("torso",)
   cfg.events["link_mass"] = EventTermCfg(

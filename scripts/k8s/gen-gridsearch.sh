@@ -265,7 +265,7 @@ export RMA_GATED RMA_ZFAST_DIM RMA_HOLD_DECAY RMA_GATE_COEF
 export RNN_MEMORY RNN_HIDDEN RNN_LAYERS RNN_MINI_BATCHES
 export MIRROR_LOSS_COEFF
 export GAIN_DR_LO GAIN_DR_HI FOOT_FRICTION_LO FOOT_FRICTION_HI
-export PHASE_INIT_RANDOM
+export PHASE_INIT_RANDOM RESET_JOINT_NOISE
 export PYTORCH_CUDA_ALLOC_CONF
 export ARM_ENVELOPE_W ARM_ENVELOPE_MARGIN
 RMA="${RMA:-}"
@@ -292,6 +292,7 @@ GAIN_DR_HI="${GAIN_DR_HI:-}"
 FOOT_FRICTION_LO="${FOOT_FRICTION_LO:-}"
 FOOT_FRICTION_HI="${FOOT_FRICTION_HI:-}"
 PHASE_INIT_RANDOM="${PHASE_INIT_RANDOM:-}"
+RESET_JOINT_NOISE="${RESET_JOINT_NOISE:-}"
 PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-}"
 ARM_ENVELOPE_W="${ARM_ENVELOPE_W:-}"
 ARM_ENVELOPE_MARGIN="${ARM_ENVELOPE_MARGIN:-}"
@@ -2104,7 +2105,7 @@ gen_v60() {
 # 15e twin RNNs.
 gen_v60b() {
   gen_v60
-  export PHASE_INIT_RANDOM="1"
+  export PHASE_INIT_RANDOM RESET_JOINT_NOISE="1"
   export MJLAB_LOG_STAMP="v60b-dr-phase-random-$(date +%Y%m%d-%H%M%S)"
   export RUN_NAME="clock_owned__v60b-dr-phase-random__8gpu-6144__s2__${BATCH}"
   export WANDB_TAGS="clock_owned,v60b,rnn-memory,gru,latent-mirror,dr-escalation,phase-random,chirality-fix,vhat-odometry,arm-envelope,batch-v60b,gridsearch"
