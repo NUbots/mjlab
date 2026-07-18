@@ -1085,6 +1085,38 @@ stateless window policy (never done before the memory line launched).
   vanilla-engine optimum; possibly worth a deliberate lower-kp-nominal
   experiment someday.
 
+## R49 (2026-07-19): v61 verdict — the sensor DRs were also insurance the hedge didn't need; v62 is the capstone
+
+v61 (window recipe + IMU-mounting 2.5 deg + incline 2.5 deg + v_hat +
+envelope + hygiene, run wy5kq7gt) vs the v57 CONTROL evaluated on the
+same sensor-DR exam (v57's checkpoint loads unchanged — only obs funcs
+swapped):
+
+| same exam     | lin    | ang    | falls  | v_hat | asym bias |
+|---------------|--------|--------|--------|-------|-----------|
+| v57 uninsured | 0.0866 | 0.2886 | 0.0008 | —     | -0.0036   |
+| v61 insured   | 0.0836 | 0.3168 | 0.0000 | 0.069 | 0.0012    |
+
+- The mounting error + incline cost the UNINSURED v57 only +14% lin,
+  +5% ang, and one fall per ~21 h vs its clean exam. Fourth repetition
+  of the era's law: the hedged window policy absorbs perturbation
+  classes it never trained on. The insurance premium v61 paid is real:
+  -9% angular (training under a lying gyro teaches distrust of the
+  gyro) and cross-engine lin nearly doubled (0.092 -> 0.170).
+- v61's genuine wins: zero falls, best symmetry ever measured
+  (bias 0.0012), and the odometry head (0.069, +11% push) — the one
+  cargo v57 lacks.
+- CONCLUSION + v62: nothing added since v57 has been load-bearing for
+  the walk — not the teacher, not the gate, not the GRU, not the
+  hardened DR, not the sensor DRs. The era's durable additions are the
+  INSTRUMENTS and the artifacts: the odometry head (deliverable), the
+  chirality discriminator + fixes (real bug, fixed), the frozen-h and
+  control-sweep methodology, and the arm envelope (game legality,
+  ~free). v62 = v57's exact recipe + exactly those: v_hat + envelope +
+  hygiene. Success = v57-class numbers + v_hat <= 0.07 -> definitive
+  hardware primary. Deploy shelf: v62 primary (pending), v57 pure
+  fallback, v61 insured variant, v60b adaptation experiment.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not
