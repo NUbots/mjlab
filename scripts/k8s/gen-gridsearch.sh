@@ -2144,6 +2144,28 @@ gen_v61() {
   emit_manifest "mj-gs-v61-sensor-truth"
 }
 
+# BATCH=v62: the capstone — v57's exact champion recipe + the v_hat
+# odometry head + chirality hygiene, and NOTHING else (doc 15 R49).
+# The R48/R49 controls showed both the memory line and the sensor DRs
+# were insurance the hedged window policy never needed (v57 absorbs
+# +-30% gains, 0.25 friction, 2.5 deg mounting error and incline with
+# barely a scratch), but each premium cost real angular/cross-engine
+# tracking. v_hat is the one piece of unique cargo (walk-coupled
+# odometry, Trent's ask) and it is a DETACHED probe that cannot touch
+# the gait. Success = v57-class eval (lin ~0.076, ang ~0.276, falls 0,
+# asym ~0) + v_hat <= 0.07 => definitive hardware primary.
+gen_v62() {
+  gen_v57
+  export RMA_VHAT="1"
+  export ARM_ENVELOPE_W="-2.5"
+  export PHASE_INIT_RANDOM="1"
+  export RESET_JOINT_NOISE="0.02"
+  export MJLAB_LOG_STAMP="v62-champion-odo-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v62-champion-odo__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v62,window,e2e,vhat-odometry,phase-random,batch-v62,gridsearch"
+  emit_manifest "mj-gs-v62-champion-odo"
+}
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -3274,6 +3296,7 @@ case "$BATCH" in
   v60) gen_v60; expected=17 ;;
   v60b) gen_v60b; expected=18 ;;
   v61) gen_v61; expected=15 ;;
+  v62) gen_v62; expected=15 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)
