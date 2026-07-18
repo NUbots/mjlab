@@ -201,6 +201,10 @@ spec:
                   value: "${PHASE_INIT_RANDOM}"
                 - name: RESET_JOINT_NOISE
                   value: "${RESET_JOINT_NOISE}"
+                - name: IMU_MOUNT_DEG
+                  value: "${IMU_MOUNT_DEG}"
+                - name: INCLINE_DEG
+                  value: "${INCLINE_DEG}"
                 - name: PYTORCH_CUDA_ALLOC_CONF
                   value: "${PYTORCH_CUDA_ALLOC_CONF}"
                 - name: RNN_HIDDEN

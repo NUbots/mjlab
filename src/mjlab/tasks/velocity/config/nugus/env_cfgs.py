@@ -1816,6 +1816,30 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # dr_extras also joins the critic (dr_ratios predates the bus-voltage and
   # current-sensor DR, so the critic never saw those realizations). Gated
   # under RMA so RMA=0 stays byte-identical to pre-RMA configs.
+  # Sensor-truth DR (doc 11 #12/#13, v61 line): the IMU is never mounted
+  # perfectly and fields are never level. Actor-only sensor rotation
+  # (term names unchanged so the mirror rules still apply; the critic
+  # keeps privileged clean readings) + per-world gravity tilt. Must stay
+  # BEFORE the RMA history block so the window clones the mounted funcs.
+  imu_mount_deg = _env_float("IMU_MOUNT_DEG", 0.0)
+  if imu_mount_deg > 0.0:
+    cfg.events["imu_mounting"] = EventTermCfg(
+      func=mdp.imu_mounting_bias,
+      mode="reset",
+      params={"max_angle_deg": imu_mount_deg},
+    )
+    cfg.observations["actor"].terms["base_ang_vel"].func = mdp.imu_base_ang_vel
+    cfg.observations["actor"].terms[
+      "projected_gravity"
+    ].func = mdp.imu_projected_gravity
+  incline_deg = _env_float("INCLINE_DEG", 0.0)
+  if incline_deg > 0.0:
+    cfg.events["gravity_incline"] = EventTermCfg(
+      func=mdp.gravity_incline,
+      mode="reset",
+      params={"max_angle_deg": incline_deg},
+    )
+
   # This block must stay AFTER every actor-term mutation above.
   # RNN_MEMORY (v59 line) keeps the critic's extended privileged vector
   # for parity with the RMA lineage but needs neither the history window

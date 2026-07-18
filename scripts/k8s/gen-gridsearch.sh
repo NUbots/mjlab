@@ -265,7 +265,7 @@ export RMA_GATED RMA_ZFAST_DIM RMA_HOLD_DECAY RMA_GATE_COEF
 export RNN_MEMORY RNN_HIDDEN RNN_LAYERS RNN_MINI_BATCHES
 export MIRROR_LOSS_COEFF
 export GAIN_DR_LO GAIN_DR_HI FOOT_FRICTION_LO FOOT_FRICTION_HI
-export PHASE_INIT_RANDOM RESET_JOINT_NOISE
+export PHASE_INIT_RANDOM RESET_JOINT_NOISE IMU_MOUNT_DEG INCLINE_DEG
 export PYTORCH_CUDA_ALLOC_CONF
 export ARM_ENVELOPE_W ARM_ENVELOPE_MARGIN
 RMA="${RMA:-}"
@@ -293,6 +293,8 @@ FOOT_FRICTION_LO="${FOOT_FRICTION_LO:-}"
 FOOT_FRICTION_HI="${FOOT_FRICTION_HI:-}"
 PHASE_INIT_RANDOM="${PHASE_INIT_RANDOM:-}"
 RESET_JOINT_NOISE="${RESET_JOINT_NOISE:-}"
+IMU_MOUNT_DEG="${IMU_MOUNT_DEG:-}"
+INCLINE_DEG="${INCLINE_DEG:-}"
 PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-}"
 ARM_ENVELOPE_W="${ARM_ENVELOPE_W:-}"
 ARM_ENVELOPE_MARGIN="${ARM_ENVELOPE_MARGIN:-}"
@@ -2114,6 +2116,34 @@ gen_v60b() {
 }
 
 
+# BATCH=v61: sensor-truth robustness wave on the WINDOW champion (doc 15
+# R48: the memory line lost its motivating evidence — v57 matches the
+# adapter's entire perturbation span statelessly with better tracking;
+# Trent's call: window primary, IMU+incline DR next, self-collision
+# dropped, hardened DR NOT carried to the hedged policy — the v53 tax).
+# v61 = v57 recipe + IMU_MOUNT_DEG=2.5 (#12: per-episode sensor-frame
+# rotation on actor gyro+gravity; critic stays clean; hardware needs no
+# changes — the real IMU carries the real error) + INCLINE_DEG=2.5
+# (#13: per-world gravity tilt, fields are never level) + RMA_VHAT=1
+# (walk-coupled odometry on the WINDOW trunk — not memory's dowry, v58
+# proved 0.062) + ARM_ENVELOPE_W=-2.5 (11e) + the chirality hygiene
+# (PHASE_INIT_RANDOM, RESET_JOINT_NOISE, symmetric model in the pin).
+# Success: v57-class eval (lin ~0.076, ang ~0.276, falls ~0) with the
+# two new DRs binding + v_hat <= 0.07 + asym bias ~0.
+gen_v61() {
+  gen_v57
+  export RMA_VHAT="1"
+  export ARM_ENVELOPE_W="-2.5"
+  export PHASE_INIT_RANDOM="1"
+  export RESET_JOINT_NOISE="0.02"
+  export IMU_MOUNT_DEG="2.5"
+  export INCLINE_DEG="2.5"
+  export MJLAB_LOG_STAMP="v61-sensor-truth-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v61-sensor-truth__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v61,window,e2e,vhat-odometry,arm-envelope,imu-mount-dr,incline-dr,phase-random,batch-v61,gridsearch"
+  emit_manifest "mj-gs-v61-sensor-truth"
+}
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -3243,6 +3273,7 @@ case "$BATCH" in
   v59) gen_v59; expected=16 ;;
   v60) gen_v60; expected=17 ;;
   v60b) gen_v60b; expected=18 ;;
+  v61) gen_v61; expected=15 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

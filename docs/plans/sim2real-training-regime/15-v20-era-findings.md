@@ -1042,6 +1042,49 @@ RESET_JOINT_NOISE 0.02) on the GRU memory actor. Run ihcyte5a, pin
   cost one word of config and two milliradians of honesty about the
   keyframe.
 
+## R48 (2026-07-18): the memory verdict — the window already carries it; hedging matched the adapter everywhere we can measure
+
+The missing control: the 15c/15g perturbation sweep run on v57's
+stateless window policy (never done before the memory line launched).
+
+| cell          | v57 lin/falls | v59 memory-live lin/falls |
+|---------------|---------------|---------------------------|
+| baseline      | 0.088 / 0.00  | 0.174 / 0.00              |
+| kp -30%       | 0.080 / 0.00  | 0.129 / 0.00              |
+| kp +30%       | 0.112 / 0.00  | 0.191 / 0.00              |
+| effort -40%   | 0.093 / 0.22  | 0.174 / 0.22              |
+| friction 0.25 | 0.088 / 0.00  | 0.175 / 0.00              |
+| torso +30%    | 0.088 / 0.00  | 0.169 / 0.00              |
+
+- v57 matches the adapter's ENTIRE demonstrated robustness range
+  statelessly, with better tracking in every cell, and hits the
+  identical effort-0.6 edge (0.221 vs 0.215 falls/min — that edge is a
+  physical actuator limit, not a policy property). The frozen-h
+  collapse was real but internal: the GRU compensated for its own
+  policy's specialization; it never provided capability the hedged
+  policy lacked.
+- Trent's synthesis, adopted as the era's conclusion: the useful state
+  information saturates within ~0.5 s (consistent with R40's probe, vx
+  R^2 0.95 from the window), and the window buffer delivers it in the
+  more gradient-friendly form (BPTT-free, augmentation-compatible).
+  The RNN's residual case is minutes-scale drift (thermals, battery)
+  that sim never presents — real hardware is the only remaining court.
+- Measured memory ledger vs v57: +2% angular, -2.5% linear, worse
+  cross-engine raw transfer, equal perturbation span, equal effort
+  edge. Deploy order: v57-family PRIMARY; v60b fielded as the
+  instrumented experiment. The odometry head is not memory's dowry
+  (v58 got v_hat 0.062 from a window trunk): v61 = v57 recipe + v_hat
+  + arm envelope + IMU-mounting DR (#12) + ground-incline DR (#13),
+  per Trent's backlog pick (leg self-collision dropped — nothing close
+  to knee contact observed since the toe-in guard). Hardened DR ranges
+  deliberately NOT carried to the window policy: without an adapter,
+  wide DR is the v53 hedging tax, and the sweep shows the span comes
+  free anyway.
+- kp -30% improves BOTH families (v57: 0.080/0.303, its best
+  cross-engine numbers ever) — the trained gait is stiffer than the
+  vanilla-engine optimum; possibly worth a deliberate lower-kp-nominal
+  experiment someday.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not
