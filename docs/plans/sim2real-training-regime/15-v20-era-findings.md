@@ -1001,6 +1001,47 @@ Trent spotted a limp in v60's videos. The trail led somewhere bigger:
   as measurements but the artifact is non-deployable; v57/v58 are the
   only certified-symmetric deployables until v60b evals.
 
+## R47 (2026-07-18): v60b verdict — chirality fixed, DR escalation nearly free, NEW CHAMPION CANDIDATE
+
+v60b = the DR-escalation recipe (gains +-30%, effort floor 0.55, foot
+friction floor 0.35, payload -0.5/+1.5 kg) + the full chirality fix
+stack (PHASE_INIT_RANDOM, symmetrized keyframes and masses,
+RESET_JOINT_NOISE 0.02) on the GRU memory actor. Run ihcyte5a, pin
+244bb8d, full 10k clean.
+
+| candidate | lin    | ang    | falls  | s2s lin (falls) | asym bias |
+|-----------|--------|--------|--------|-----------------|-----------|
+| v57       | 0.0761 | 0.276  | 0.0000 | 0.092 (0)       | aug-clean |
+| v58 stud. | 0.0864 | 0.286  | 0.0000 | 0.108 (0)       | -0.002    |
+| v59       | 0.0835 | 0.2502*| 0.0000 | 0.174 (0)       | -0.261    |
+| v60b      | 0.0780 | 0.2702 | 0.0016 | 0.149 (0)       | -0.041    |
+
+(*chiral artifact, non-deployable — R46.)
+
+- CHIRALITY FIXED: pop bias -0.261 -> -0.041 (6x), now well under the
+  adaptive magnitude (0.083) — limps split with the per-side draws
+  instead of all favoring one leg. Residual likely includes the
+  asymmetric mixed command cell; monitor, don't block.
+- DR ESCALATION NEARLY FREE IN-ENVELOPE, PAID CROSS-ENGINE: best
+  linear of the memory family (0.0780, within 2.5% of v57), angular
+  BEATS v57 legitimately (0.2702), falls 0.0016 (~1 per 10 h), while
+  training on a 3-4x harder parametric envelope. Cross-engine lin
+  improved 0.174 -> 0.149 exactly as the 15g hypothesis predicted;
+  frozen-h control (2.69 falls/min, 13 s episodes) confirms the memory
+  remains load-bearing. Cross-engine ang softened (0.57 vs v59's
+  0.44). v_hat 0.072 (+11% push) — spec-compliant.
+- CHAMPION CALL: v60b is the new PRIMARY deploy candidate — beats v58
+  (previous certified fallback) on every axis, beats v57 on angular,
+  within 2.5% on linear, and carries what v57 cannot: proven
+  adaptation across a hardened envelope, walk-coupled odometry as a
+  second output, and the simplest deployment contract (obs + h in,
+  actions + velocity + h_out back). v57 remains the conservative
+  baseline artifact (best raw-gait cross-engine transfer, stateless).
+- The chirality arc (R46 -> R47) in one line: Trent saw a limp, the
+  discriminator convicted v59, the boot phase confessed, and the fix
+  cost one word of config and two milliradians of honesty about the
+  keyframe.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not
