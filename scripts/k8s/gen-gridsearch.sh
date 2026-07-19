@@ -255,9 +255,11 @@ PHASE_CONTACT_FLIGHT_EXEMPT="${PHASE_CONTACT_FLIGHT_EXEMPT:-}"
 export HEAD_SCRIPTED JOULE_ELECTRICAL
 HEAD_SCRIPTED="${HEAD_SCRIPTED:-}"
 JOULE_ELECTRICAL="${JOULE_ELECTRICAL:-}"
-export FOOT_TOEIN_W FOOT_TOEIN_MARGIN
+export FOOT_TOEIN_W FOOT_TOEIN_MARGIN FOOT_TOEOUT_W FOOT_TOEOUT_MARGIN
 FOOT_TOEIN_W="${FOOT_TOEIN_W:-}"
 FOOT_TOEIN_MARGIN="${FOOT_TOEIN_MARGIN:-}"
+FOOT_TOEOUT_W="${FOOT_TOEOUT_W:-}"
+FOOT_TOEOUT_MARGIN="${FOOT_TOEOUT_MARGIN:-}"
 export RMA RMA_WINDOW RMA_Z_DIM RMA_EST_COEF RMA_E2E
 export RMA_ZHAT_MIX_START_ITER RMA_ZHAT_MIX_END_ITER
 export RMA_VHAT RMA_VHAT_DETACH RMA_VHAT_COEF
@@ -2166,6 +2168,25 @@ gen_v62() {
   emit_manifest "mj-gs-v62-champion-odo"
 }
 
+# BATCH=v63: the extreme-duck fix on the v62 capstone (doc 15 R50).
+# Trent flagged "pronounced toe-in" in v62 video; the per-foot probe
+# revealed it is the OUTWARD duck at 77 deg/foot (speed-scaled, present
+# since at least v57 at 55-65 deg — the 38-deg toeout MEAN hid it, and
+# near-sideways feet read as pigeon on camera). R37's "leave the duck
+# free" aged badly. FOOT_TOEOUT_W charges outward yaw past 20 deg —
+# the efficiency duck stays legal, the degenerate extreme pays. Watch:
+# frontier_speed + track_linear (R37 says the duck bought velocity;
+# this measures the real price of honest feet) and foot_toeout_deg
+# converging toward ~20.
+gen_v63() {
+  gen_v62
+  export FOOT_TOEOUT_W="-2.0"
+  export MJLAB_LOG_STAMP="v63-duck-guard-$(date +%Y%m%d-%H%M%S)"
+  export RUN_NAME="clock_owned__v63-duck-guard__8gpu-6144__s2__${BATCH}"
+  export WANDB_TAGS="clock_owned,v63,window,e2e,vhat-odometry,arm-envelope,duck-guard,phase-random,batch-v63,gridsearch"
+  emit_manifest "mj-gs-v63-duck-guard"
+}
+
 # BATCH=v44: the vindication run. effort_drift removed (R29) - the
 # sim-level torque clamp no longer ratchets - and the full frontier
 # architecture gets its first run on honest physics: split governors,
@@ -3297,6 +3318,7 @@ case "$BATCH" in
   v60b) gen_v60b; expected=18 ;;
   v61) gen_v61; expected=15 ;;
   v62) gen_v62; expected=15 ;;
+  v63) gen_v63; expected=16 ;;
   v17) gen_v17_hard_decouple; expected=5 ;;
   v18) gen_v18_hard_from_start; expected=2 ;;
   *)

@@ -730,6 +730,38 @@ def foot_toein_cost(
   return cost
 
 
+def foot_toeout_cost(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg,
+  torso_cfg: SceneEntityCfg,
+  foot_signs: tuple[float, ...] = (1.0, -1.0),
+  margin: float = 0.35,
+  command_name: str | None = "twist",
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """One-sided cost on EXTREME outward (duck) foot yaw past ``margin``.
+
+  R37 deliberately left the outward duck free as velocity-limit-optimal
+  — defensible at ~38 deg, degenerate by v62 where the speed-scaled duck
+  reached 77 deg per foot (near-sideways feet: unreal ankle/hip-yaw
+  operating points and rolling-contact geometry, and it reads as broken
+  on video). The default 0.35 rad (~20 deg) margin keeps the modest
+  efficiency duck legal and charges only the extreme; mirror twin of
+  ``foot_toein_cost``, sharing its yaw geometry.
+  """
+  signed_yaw = foot_torso_yaw_signed(env, asset_cfg, torso_cfg, foot_signs)
+  violation = torch.clamp(signed_yaw - margin, min=0.0)  # [B, F]
+  cost = torch.sum(torch.square(violation), dim=1)
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      active = ((linear_norm + angular_norm) > command_threshold).float()
+      cost = cost * active
+  return cost
+
+
 class arm_envelope_cost:  # noqa: N801
   """One-sided cost on arm excursion outside a tucked box (doc 11 idea 11e).
 

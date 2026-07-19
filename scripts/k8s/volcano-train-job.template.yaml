@@ -215,6 +215,10 @@ spec:
                   value: "${FOOT_TOEIN_W}"
                 - name: FOOT_TOEIN_MARGIN
                   value: "${FOOT_TOEIN_MARGIN}"
+                - name: FOOT_TOEOUT_W
+                  value: "${FOOT_TOEOUT_W}"
+                - name: FOOT_TOEOUT_MARGIN
+                  value: "${FOOT_TOEOUT_MARGIN}"
                 - name: ARM_ENVELOPE_W
                   value: "${ARM_ENVELOPE_W}"
                 - name: ARM_ENVELOPE_MARGIN

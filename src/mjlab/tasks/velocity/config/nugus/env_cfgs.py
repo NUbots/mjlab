@@ -832,6 +832,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   arm_envelope_w = _env_float("ARM_ENVELOPE_W", 0.0)
   if arm_envelope_w > 0:
     arm_envelope_w = -arm_envelope_w
+  foot_toeout_w = _env_float("FOOT_TOEOUT_W", 0.0)
+  if foot_toeout_w > 0:
+    foot_toeout_w = -foot_toeout_w
   clearance_per_corner = _env_bool("CLEARANCE_PER_CORNER", default=False)
   swing_height_source = _env_str("SWING_HEIGHT_SOURCE", "min_corner")
   if swing_height_source not in ("min_corner", "center"):
@@ -1506,6 +1509,24 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         "torso_cfg": SceneEntityCfg("robot", body_names=("torso",)),
         "foot_signs": (1.0, -1.0),
         "margin": _env_float("FOOT_TOEIN_MARGIN", 0.05),
+        "command_name": "twist",
+        "command_threshold": 0.05,
+      },
+    )
+
+  # Extreme-duck guard (doc 15 R50): one-sided cost on OUTWARD foot yaw
+  # past a generous margin. R37 left the duck free as velocity-optimal;
+  # by v62 the speed-scaled duck reached 77 deg per foot. The 20 deg
+  # default margin keeps the efficiency duck, charges the degenerate.
+  if foot_toeout_w != 0.0:
+    cfg.rewards["foot_toeout"] = RewardTermCfg(
+      func=mdp.foot_toeout_cost,
+      weight=foot_toeout_w,
+      params={
+        "asset_cfg": SceneEntityCfg("robot", body_names=("left_foot", "right_foot")),
+        "torso_cfg": SceneEntityCfg("robot", body_names=("torso",)),
+        "foot_signs": (1.0, -1.0),
+        "margin": _env_float("FOOT_TOEOUT_MARGIN", 0.35),
         "command_name": "twist",
         "command_threshold": 0.05,
       },

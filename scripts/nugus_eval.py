@@ -40,6 +40,22 @@ COMMAND_GRID: tuple[tuple[float, float, float], ...] = (
   (0.0, 0.0, 0.0),
   (0.5, 0.3, 0.5),
 )
+# NUGUS_EVAL_GRID=fast swaps in the high-speed probe grid: the training
+# curriculum extends commands to ~1.4 m/s, a regime the standard grid
+# never visits — and where the velocity-limit-optimal foot-yaw tricks
+# (R37 duck, v55/v62 toe-in sightings) live.
+if os.environ.get("NUGUS_EVAL_GRID", "").strip().lower() == "fast":
+  COMMAND_GRID = (
+    (0.75, 0.0, 0.0),
+    (1.0, 0.0, 0.0),
+    (1.2, 0.0, 0.0),
+    (1.4, 0.0, 0.0),
+    (1.0, 0.0, 0.5),
+    (1.2, 0.0, 0.5),
+    (1.0, 0.3, 0.0),
+    (1.4, 0.0, -0.5),
+  )
+
 DEFAULT_ENVS_PER_COMMAND = 256
 DEFAULT_EPISODE_LENGTH_S = 30.0
 DEFAULT_SEED = 7
@@ -530,6 +546,14 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
     overall["eval/toein_p95"] = float(torch.quantile(toein_env, 0.95))
     overall["eval/toein_max"] = float(toein_env.max())
     overall["eval/toein_frac_over_5deg"] = float((toein_env > 5.0).float().mean())
+    # Per-command toe-in: the video recorder follows single envs with
+    # specific commands, so a command-conditional gait mode invisible in
+    # the population mean shows up here (v55/v62 lesson).
+    valid_groups = groups[valid]
+    for cmd_idx, cmd in enumerate(COMMAND_GRID):
+      cell = toein_env[valid_groups == cmd_idx]
+      if cell.numel() > 0:
+        overall[f"eval/toein_cmd_{command_label(cmd)}"] = float(cell.mean())
 
   print("\n" + "=" * 50)
   print("NUgus Eval Results")
