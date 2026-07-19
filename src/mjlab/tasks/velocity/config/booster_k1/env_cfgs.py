@@ -704,13 +704,16 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   has_tracker = adaptive_commands or adaptive_pushes or penalty_gate == "competence"
   if has_tracker:
     _add_competence_tracker_event(cfg)
-  if curriculum_style == "aimd" and (adaptive_commands or adaptive_pushes):
-    _add_aimd_curriculum(cfg)
-  else:
-    if adaptive_commands:
-      _add_adaptive_command_curriculum(cfg, l_max=adaptive_cmd_lmax)
-    if adaptive_pushes:
-      _add_adaptive_push_curriculum(cfg, l_max=adaptive_push_lmax)
+  # The difficulty controllers only make sense while learning, and they drive
+  # terms that play mode strips (the push event), so leave them out of play.
+  if not play:
+    if curriculum_style == "aimd" and (adaptive_commands or adaptive_pushes):
+      _add_aimd_curriculum(cfg)
+    else:
+      if adaptive_commands:
+        _add_adaptive_command_curriculum(cfg, l_max=adaptive_cmd_lmax)
+      if adaptive_pushes:
+        _add_adaptive_push_curriculum(cfg, l_max=adaptive_push_lmax)
   if not play and has_tracker and _env_bool("TRACK_WATCHDOG", default=True):
     _add_track_reward_watchdog(cfg)
 
