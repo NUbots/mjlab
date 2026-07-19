@@ -1117,6 +1117,41 @@ swapped):
   hardware primary. Deploy shelf: v62 primary (pending), v57 pure
   fallback, v61 insured variant, v60b adaptation experiment.
 
+## R50 (2026-07-19): v62 verdict (best everything) + the "toe-in" that was a 77-degree duck
+
+v62 (v57 recipe + v_hat + envelope + hygiene, run 1qb1rlhd) evals as
+the best policy the program has produced ON EVERY CERTIFIED AXIS:
+
+- eval lin 0.0738 (beats v57's 0.0761) / ang 0.2767 / falls 0.0000
+- v_hat 0.0634 all / 0.0710 push (best odometry)
+- sim2sim lin 0.076, 0 falls — best cross-engine transfer ever
+- symmetric (asym bias -0.0033); toe-in population clean (p95 1.3 deg)
+
+Then Trent watched the step-9793 video and saw "very pronounced toe
+in" — and the investigation that followed found a real, old, hidden
+problem that was NOT toe-in:
+
+- Sign convention ground-truthed (rendered known hip-yaw poses +
+  foot-box world axes): the metric's positive really is toes-out; the
+  neutral keyframe stance is genuinely ~4 deg pigeon (foot geometry).
+- The per-foot probe: at 0.75 m/s v62 walks with BOTH feet ~77 deg
+  externally rotated. v57: 55-65 deg at cruise. The infamous "38 deg
+  toeout" was always a MEAN over feet, envs, and mostly-slow commands,
+  hiding a speed-scaled duck that reaches near-sideways feet.
+- The perception inversion: at 60-80 deg external, a front camera sees
+  the feet's inner edges and the gait reads as pronounced PIGEON —
+  Trent's eyes and mine both made the same read against the metric.
+  Third instance of the era's metric lesson: means hide modes, and
+  aggregate conventions (mean-over-feet) hide common modes; per-foot,
+  per-command, per-quantile readouts are the honest form.
+- R37's "leave the duck free (velocity-limit-optimal)" was defensible
+  at 38 deg, degenerate at 77: unreal ankle/hip-yaw operating points,
+  rolling-contact geometry no real turf honors, and it looks broken.
+  v63 = v62 + FOOT_TOEOUT_W=-2.0 past a 20 deg margin (efficiency duck
+  stays legal, extreme pays). The run prices honest feet: watch
+  frontier_speed/track_linear for what the duck was actually buying,
+  and foot_toeout_deg converging toward ~20.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not
