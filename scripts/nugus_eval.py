@@ -14,9 +14,11 @@ import tyro
 import wandb
 
 from mjlab.envs import ManagerBasedRlEnv
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.sensor import ContactSensor, TerrainHeightSensor
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
+from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.config.nugus.env_cfgs import _PUSH_VELOCITY_RANGE_BASE
 from mjlab.tasks.velocity.mdp.velocity_command import (
   UniformVelocityCommand,
@@ -343,6 +345,13 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
   # Chirality watch accumulators (per env, walking steps only).
   asym_signed_sum = torch.zeros(num_envs, device=device)
   asym_count = torch.zeros(num_envs, device=device)
+  # Toe-in distribution watch (v55/v62 lesson: the population mean hides
+  # bimodal subpopulations — report per-env quantiles, not just means).
+  toein_sum = torch.zeros(num_envs, device=device)
+  toein_asset_cfg = SceneEntityCfg("robot", body_names=("left_foot", "right_foot"))
+  toein_torso_cfg = SceneEntityCfg("robot", body_names=("torso",))
+  toein_asset_cfg.resolve(unwrapped.scene)
+  toein_torso_cfg.resolve(unwrapped.scene)
 
   twist = cast(UniformVelocityCommand, unwrapped.command_manager.get_term("twist"))
   robot = unwrapped.scene["robot"]
@@ -408,6 +417,11 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
         contact_lr[:, 0] - contact_lr[:, 1]
       ) * walking.float()
       asym_count[active_idx] += walking.float()
+      with torch.no_grad():
+        toein_all = mdp.foot_toein_deg(
+          unwrapped, toein_asset_cfg, toein_torso_cfg, (1.0, -1.0)
+        )
+      toein_sum[active_idx] += toein_all[active_idx] * walking.float()
 
       in_air = contact_sensor.data.found[active_idx] == 0
       foot_heights = height_sensor.data.heights[active_idx]
@@ -511,6 +525,11 @@ def run_nugus_eval(cfg: NugusEvalConfig) -> dict[str, object]:
     per_env = asym_signed_sum[valid] / asym_count[valid]
     overall["eval/gait_asym_pop_bias"] = float(per_env.mean())
     overall["eval/gait_asym_magnitude"] = float(per_env.abs().mean())
+    toein_env = toein_sum[valid] / asym_count[valid]
+    overall["eval/toein_mean"] = float(toein_env.mean())
+    overall["eval/toein_p95"] = float(torch.quantile(toein_env, 0.95))
+    overall["eval/toein_max"] = float(toein_env.max())
+    overall["eval/toein_frac_over_5deg"] = float((toein_env > 5.0).float().mean())
 
   print("\n" + "=" * 50)
   print("NUgus Eval Results")
