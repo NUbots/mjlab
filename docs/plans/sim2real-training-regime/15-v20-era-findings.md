@@ -1152,6 +1152,35 @@ problem that was NOT toe-in:
   frontier_speed/track_linear for what the duck was actually buying,
   and foot_toeout_deg converging toward ~20.
 
+## R51 (2026-07-20): v63 verdict — honest feet PAID; the duck was a thirteen-generation free rider. CHAMPION.
+
+v63 = v62 + FOOT_TOEOUT_W=-2.0 past 20 deg (run ka376188, pin 34fa7e4):
+
+| candidate | lin    | ang    | falls  | v_hat       | slip  | s2s (lin, falls) |
+|-----------|--------|--------|--------|-------------|-------|------------------|
+| v57       | 0.0761 | 0.276  | 0.0000 | —           | 0.030 | 0.092, 0         |
+| v62       | 0.0738 | 0.2767 | 0.0000 | 0.063/0.071 | 0.036 | 0.076, 0         |
+| v63       | 0.0721 | 0.2767 | 0.0008 | 0.054/0.061 | 0.019 | 0.090, 0         |
+
+- The duck (foot_toeout 38-77 deg across thirteen generations) was
+  giving nothing back: charging it produced BETTER tracking (record
+  lin), RECORD odometry, and HALVED slip (sideways feet skid; straight
+  feet grip). R37's "velocity-limit-optimal" duck was a free rider the
+  whole time — it survived because nothing ever priced it, not because
+  it earned its keep. foot_toeout_deg: 38-77 -> 8.
+- Trent's refined turn/stop observation, quantified: yaw-command cells
+  read 8.2/7.8 deg inward vs the ~10 deg kinematic budget for
+  planted-foot lag (yaw_rate x stance_time — non-slipping turns REQUIRE
+  it, symmetric across directions, humans do it too). Standing pigeon =
+  the keyframe's own 4.4 deg foot geometry + stand-still pose reward.
+  Both accounted; neither is learned misbehavior; the guard's 20 deg
+  margin correctly leaves them free.
+- CHAMPION: v63 (batch-v63 ONNX, run ka376188) is the hardware primary
+  — record tracking + record walk-coupled odometry + game-legal arms +
+  symmetric + honest feet + certified cross-engine. v62 = backup
+  (best raw transfer 0.076), v57 = heritage baseline, v61 = sensor-
+  insured variant, v60b = adaptation experiment.
+
 ## Corrections to earlier docs
 
 - Doc 12 F3 verdict: correct for the STAGED-anneal clock_learned; does not
