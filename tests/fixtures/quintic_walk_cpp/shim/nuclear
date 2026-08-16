@@ -1,0 +1,10 @@
+#ifndef SHIM_NUCLEAR
+#define SHIM_NUCLEAR
+// Minimal stub: the walk generator only uses NUClear for warning logs, which
+// are no-ops here.
+namespace NUClear {
+    enum class LogLevel { TRACE, DEBUG, INFO, WARN, ERROR, FATAL };
+    template <LogLevel level, typename... Args>
+    inline void log(Args&&...) {}
+}  // namespace NUClear
+#endif
