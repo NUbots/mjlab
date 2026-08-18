@@ -32,8 +32,9 @@ from pathlib import Path
 import mujoco
 
 from mjlab import MJLAB_SRC_PATH
+from mjlab.actuator import XmlActuatorCfg
 from mjlab.asset_zoo.robots.nugus.nugus_constants import STAND_BENT_KNEES_KEYFRAME
-from mjlab.entity import EntityCfg
+from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 
 NUGUS_NUBOTS_XML: Path = (
   MJLAB_SRC_PATH / "asset_zoo" / "robots" / "nugus" / "xmls" / "nugus_nubots.xml"
@@ -41,19 +42,56 @@ NUGUS_NUBOTS_XML: Path = (
 assert NUGUS_NUBOTS_XML.exists(), f"XML not found: {NUGUS_NUBOTS_XML}"
 
 
+MOTOR_JOINT_NAMES: tuple[str, ...] = (
+  "left_hip_yaw",
+  "left_hip_roll",
+  "left_hip_pitch",
+  "left_knee_pitch",
+  "left_ankle_pitch",
+  "left_ankle_roll",
+  "right_hip_yaw",
+  "right_hip_roll",
+  "right_hip_pitch",
+  "right_knee_pitch",
+  "right_ankle_pitch",
+  "right_ankle_roll",
+  "neck_yaw",
+  "head_pitch",
+  "left_shoulder_pitch",
+  "left_shoulder_roll",
+  "left_elbow_pitch",
+  "right_shoulder_pitch",
+  "right_shoulder_roll",
+  "right_elbow_pitch",
+)
+"""The twenty joints NUbots' model actuates, one ``<position>`` element each."""
+
+
 def get_spec() -> mujoco.MjSpec:
   return mujoco.MjSpec.from_file(str(NUGUS_NUBOTS_XML))
+
+
+NUGUS_NUBOTS_ARTICULATION = EntityArticulationInfoCfg(
+  actuators=(XmlActuatorCfg(target_names_expr=MOTOR_JOINT_NAMES),),
+)
+"""Adopts the XML's own actuators rather than adding any.
+
+:class:`~mjlab.actuator.XmlActuatorCfg` wraps the ``<position>`` elements that
+are already there, leaving their ``kp``, ``forcerange`` and ``ctrlrange`` exactly
+as NUbots wrote them, so the compiled model is unchanged. Without this the model
+still simulates, but nothing in mjlab knows how to command it -- joint position
+targets have nowhere to go -- so batched evaluation cannot drive it.
+"""
 
 
 def get_nugus_nubots_robot_cfg() -> EntityCfg:
   """NUgus with NUbots' own actuators and dynamics, untouched.
 
-  ``articulation`` is left unset: the XML already declares its twenty
-  ``<position>`` actuators, so mjlab must not inject its own. Collisions are
-  likewise left as the XML defines them, since NUbots pairs the robot's
+  Collisions are left as the XML defines them, since NUbots pairs the robot's
   ``contype``/``conaffinity`` with their scene's floor.
   """
   return EntityCfg(
     init_state=STAND_BENT_KNEES_KEYFRAME,
     spec_fn=get_spec,
+    articulation=NUGUS_NUBOTS_ARTICULATION,
   )

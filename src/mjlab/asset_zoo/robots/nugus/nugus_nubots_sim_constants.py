@@ -44,6 +44,7 @@ from mjlab.asset_zoo.robots.nugus.nugus_constants import (
   NUGUS_XML,
   STAND_BENT_KNEES_KEYFRAME,
 )
+from mjlab.asset_zoo.robots.nugus.nugus_nubots_constants import MOTOR_JOINT_NAMES
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 
 ##
@@ -93,29 +94,6 @@ means hip roll, hip pitch, ankle pitch and ankle roll.
 
 NUBOTS_SIM_SOLREF = (0.005, 1.0)
 """``<geom solref="0.005 1">``: roughly four times stiffer contact than mjlab's."""
-
-MOTOR_JOINT_NAMES: tuple[str, ...] = (
-  "left_hip_yaw",
-  "left_hip_roll",
-  "left_hip_pitch",
-  "left_knee_pitch",
-  "left_ankle_pitch",
-  "left_ankle_roll",
-  "right_hip_yaw",
-  "right_hip_roll",
-  "right_hip_pitch",
-  "right_knee_pitch",
-  "right_ankle_pitch",
-  "right_ankle_roll",
-  "neck_yaw",
-  "head_pitch",
-  "left_shoulder_pitch",
-  "left_shoulder_roll",
-  "left_elbow_pitch",
-  "right_shoulder_pitch",
-  "right_shoulder_roll",
-  "right_elbow_pitch",
-)
 
 
 def get_spec() -> mujoco.MjSpec:

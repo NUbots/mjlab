@@ -17,7 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import mujoco
-import numpy as np
 import torch
 
 from mjlab.controllers.quintic_walk.exact_kinematics import (
@@ -33,6 +32,7 @@ from mjlab.controllers.quintic_walk.kinematics import (
   LegModel,
   calculate_leg_joints,
   invert_transform,
+  make_transform,
   mat_to_rpy_intrinsic,
   rpy_intrinsic_to_mat,
 )
@@ -43,6 +43,7 @@ from mjlab.controllers.quintic_walk.walk_generator import (
   WalkGenerator,
   WalkParameters,
 )
+from mjlab.utils.lab_api.math import matrix_from_quat
 
 JOINT_NAMES: tuple[str, ...] = (
   "left_hip_yaw",
@@ -116,6 +117,51 @@ def detect_planted_phase(
   ).long()
 
 
+def sole_poses_from_body_states(
+  torso_pos_w: torch.Tensor,
+  torso_quat_w: torch.Tensor,
+  left_pos_w: torch.Tensor,
+  left_quat_w: torch.Tensor,
+  right_pos_w: torch.Tensor,
+  right_quat_w: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+  """Sole poses in the torso frame, from batched body poses.
+
+  The mjlab NUgus has no ``*_foot_base`` body, so the sole frame is
+  reconstructed from the foot body with :data:`NUGUS_SOLE_OFFSET` and
+  :data:`NUGUS_SOLE_ROTATION`. Those reproduce the ``left_foot_base`` fixed
+  joint of NUbots' URDF -- ``xyz="0.038 0 0"``, ``rpy="0 -pi/2 0"`` -- exactly
+  in rotation and to within a millimetre in translation.
+
+  Args:
+    torso_pos_w: Shape ``(N, 3)`` torso position in the world frame.
+    torso_quat_w: Shape ``(N, 4)`` torso orientation, ``(w, x, y, z)``.
+    left_pos_w: Shape ``(N, 3)`` left foot body position.
+    left_quat_w: Shape ``(N, 4)`` left foot body orientation.
+    right_pos_w: Shape ``(N, 3)`` right foot body position.
+    right_quat_w: Shape ``(N, 4)`` right foot body orientation.
+
+  Returns:
+    Left and right sole poses in the torso frame, each shape ``(N, 4, 4)``.
+  """
+  device, dtype = torso_pos_w.device, torso_pos_w.dtype
+  sole_rotation = torch.tensor(NUGUS_SOLE_ROTATION, device=device, dtype=dtype)
+  sole_offset = torch.tensor(NUGUS_SOLE_OFFSET, device=device, dtype=dtype)
+  torso_rotation = matrix_from_quat(torso_quat_w)
+
+  poses = []
+  for position, quaternion in (
+    (left_pos_w, left_quat_w),
+    (right_pos_w, right_quat_w),
+  ):
+    body_rotation = matrix_from_quat(quaternion)
+    rotation = torso_rotation.transpose(-1, -2) @ body_rotation @ sole_rotation
+    offset = position + (body_rotation @ sole_offset) - torso_pos_w
+    translation = (torso_rotation.transpose(-1, -2) @ offset.unsqueeze(-1)).squeeze(-1)
+    poses.append(make_transform(translation, rotation))
+  return poses[0], poses[1]
+
+
 def sole_poses_in_torso(
   model: mujoco.MjModel,
   data: mujoco.MjData,
@@ -129,12 +175,6 @@ def sole_poses_in_torso(
   positions and reading ``Htx[L_FOOT_BASE]``; reading the simulator's body poses
   is the same computation with the same inputs.
 
-  The mjlab NUgus has no ``*_foot_base`` body, so the sole frame is
-  reconstructed from the foot body with :data:`NUGUS_SOLE_OFFSET` and
-  :data:`NUGUS_SOLE_ROTATION`. Those reproduce the ``left_foot_base`` fixed
-  joint of NUbots' URDF -- ``xyz="0.038 0 0"``, ``rpy="0 -pi/2 0"`` -- exactly
-  in rotation and to within a millimetre in translation.
-
   Args:
     model: Compiled model containing ``torso``, ``left_foot`` and
       ``right_foot`` bodies.
@@ -145,23 +185,16 @@ def sole_poses_in_torso(
   Returns:
     Left and right sole poses in the torso frame, each shape ``(1, 4, 4)``.
   """
-  sole_rotation = np.array(NUGUS_SOLE_ROTATION)
-  sole_offset = np.array(NUGUS_SOLE_OFFSET)
-  torso = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "torso")
-  torso_rotation = data.xmat[torso].reshape(3, 3)
-  torso_position = data.xpos[torso]
 
-  poses = []
-  for side in ("left", "right"):
-    body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"{side}_foot")
-    body_rotation = data.xmat[body].reshape(3, 3)
-    pose = np.eye(4)
-    pose[:3, :3] = torso_rotation.T @ body_rotation @ sole_rotation
-    pose[:3, 3] = torso_rotation.T @ (
-      data.xpos[body] + body_rotation @ sole_offset - torso_position
-    )
-    poses.append(torch.tensor(pose, device=device, dtype=dtype).unsqueeze(0))
-  return poses[0], poses[1]
+  def body_state(name: str) -> tuple[torch.Tensor, torch.Tensor]:
+    body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+    position = torch.tensor(data.xpos[body], device=device, dtype=dtype).unsqueeze(0)
+    quaternion = torch.tensor(data.xquat[body], device=device, dtype=dtype).unsqueeze(0)
+    return position, quaternion
+
+  return sole_poses_from_body_states(
+    *body_state("torso"), *body_state("left_foot"), *body_state("right_foot")
+  )
 
 
 class QuinticWalkController:
