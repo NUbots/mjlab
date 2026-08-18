@@ -8,6 +8,23 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added two NUgus asset configs for running controllers against something
+  other than the training model: ``get_nugus_eval_robot_cfg`` (sim-to-real
+  randomisation at nominal and the hardware ±π leg joint limits, otherwise
+  the training model unchanged) and ``get_nugus_nubots_robot_cfg`` (NUbots'
+  own MJCF verbatim). The training model is untouched, so trained policies
+  are unaffected.
+- Added ``mjlab.controllers.quintic_walk.playback``, the rig that drives the
+  ported NUbots quintic walk engine against a compiled NUgus, and gave
+  ``scripts/tools/play_quintic_walk.py`` a ``--plant`` selector over the
+  training, evaluation, NUbots-parity and NUbots-verbatim models. With the
+  deployed walk parameters the engine walks on the evaluation model and falls
+  after 1.75 s on the training model; the passive backlash joints are the
+  whole of that difference.
+- Added ``sole_poses_in_torso`` to the quintic walk controller, which measures
+  the foot poses ``detect_planted_phase`` consumes, so playback supplies the
+  sensed foot phase every control step and ``only_switch_when_planted`` can be
+  exercised.
 - Added a ``feet_swing_height_clock`` velocity reward and a matching
   ``gait_clock`` observation. An independent, fixed-frequency gait clock (not
   controlled by the policy) drives a desired per-foot swing-height arc, densely
