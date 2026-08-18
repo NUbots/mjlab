@@ -12,11 +12,12 @@ because the model is byte-identical to theirs.
 
 **What this is not for.** Comparing controllers against each other. This model
 differs from the default NUgus in ways that materially change stability -- no
-backlash joints, four times stiffer contacts, and a 100 N.m force range against
-the real servos' 11.09 -- and those differences flatter an open-loop controller.
-Running the quintic engine here and a policy on the default NUgus would confound
-the controller with the model. Use
-:func:`~mjlab.asset_zoo.robots.nugus.nugus_nubots_sim_constants.get_nugus_eval_robot_cfg`
+backlash joints, which is on its own the difference between the quintic engine
+walking and falling; four times stiffer contacts; and a 100 N.m force range
+against the real servos' 11.09 -- and those differences flatter an open-loop
+controller. Running the quintic engine here and a policy on the default NUgus
+would confound the controller with the model. Use
+:func:`~mjlab.asset_zoo.robots.nugus.nugus_eval_constants.get_nugus_eval_robot_cfg`
 for that, which puts both controllers on one model.
 
 **Caveat for task pipelines.** This XML carries NUbots' sensor names
