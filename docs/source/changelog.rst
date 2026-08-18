@@ -8,6 +8,20 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added ``mjlab.evaluation`` and the ``scripts/eval`` entry points: a batched,
+  GPU-parallel pipeline for comparing walk controllers over a 2x2 of engine
+  (ported quintic walk, trained policy) and plant (evaluation, training).
+  ``eval_quintic_walk.py`` and ``eval_rl_walk.py`` are thin wrappers over a
+  shared harness, and both feed one metrics recorder from raw simulator state,
+  so per-environment survival, velocity tracking, torso attitude and cadence
+  are computed identically for either engine. Results are written as a
+  per-environment CSV plus a JSON summary. See ``scripts/eval/README.md``.
+- Added ``sole_poses_from_body_states``, a batched version of the quintic
+  walk's foot-pose measurement, so planted-phase sensing works on device for a
+  whole batch rather than only for a single ``MjData``.
+- The verbatim NUbots NUgus config now wraps its MJCF's own ``<position>``
+  actuators with ``XmlActuatorCfg``, leaving the compiled model identical but
+  letting mjlab drive it with joint position targets.
 - Added two NUgus asset configs for running controllers against something
   other than the training model: ``get_nugus_eval_robot_cfg`` (sim-to-real
   randomisation at nominal and the hardware ±π leg joint limits, otherwise
