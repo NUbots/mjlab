@@ -81,11 +81,9 @@ class WalkParameters:
   only_switch_when_planted: bool = False
   """Whether to defer the foot switch until the sensed phase agrees.
 
-  Defaults to ``False`` to match what the robot actually runs. ``Walk.yaml``
-  sets this to ``true``, but ``Walk.cpp`` calls ``set_parameters`` (which copies
-  by value) *before* assigning this field, so the value never reaches the
-  generator and the deployed engine switches feet purely on the clock. Set it
-  to ``True`` to get the behaviour the config intends.
+  ``False`` reproduces the C++ struct's own default. See
+  :data:`NUGUS_WALK_PARAMETERS` for why the NUgus tuning leaves it there even
+  though ``Walk.yaml`` asks for ``true``.
   """
 
 
@@ -103,7 +101,30 @@ NUGUS_WALK_PARAMETERS = WalkParameters(
   torso_start_sway_offset=(0.0, 0.1, 0.0),
   torso_final_position_ratio=(0.5, 0.5, 1.0),
 )
-"""NUgus walk tuning, from ``module/skill/Walk/data/config/Walk.yaml``."""
+"""NUgus walk tuning, from ``module/skill/Walk/data/config/Walk.yaml``.
+
+Every value here is the config file's, with one deliberate exception:
+``only_switch_when_planted``, which ``Walk.yaml`` sets to ``true`` and which is
+left ``False`` here because the robot does not run it. ``Walk.cpp`` reads the
+config into ``cfg.walk_generator_parameters``, calls
+``walk_generator.set_parameters(...)`` -- which copies by value -- and only
+*then* assigns this one field, so the generator keeps the struct default of
+``false``. The configuration reaction runs once per process (the
+``Configuration`` DSL suppresses the extra per-hierarchy triggers at install
+time), so nothing later repairs it, and the deployed engine switches feet on the
+clock alone.
+
+Enabling it is a supported experiment rather than a fidelity fix, and playback
+always supplies the sensed phase so that it works. Measured on the eval plant,
+20 s per command: walking forward it defers each switch by a single 10 ms
+control tick and changes nothing. Turning in place at 0.5 rad/s it stalls the
+gait for up to 160 ms at a time and topples the robot after four seconds, where
+the clock-driven engine stays up. The reason is the ``Z_HEIGHT`` foot-down
+detector it consumes: it reads the swing sole's height in the *stance* sole's
+frame, so a stance foot rolled onto its edge tilts the reference plane and the
+swing foot never registers as landed. NUbots' own ``FSR`` method does not have
+that failure mode.
+"""
 
 NUGUS_MAX_ACCELERATION: tuple[float, float, float] = (0.2, 0.2, 0.5)
 """Per-second command slew limit applied by ``Walk.cpp`` before the engine."""

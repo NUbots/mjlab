@@ -1,8 +1,13 @@
 """Drive the NUgus with the ported quintic walk engine, in MuJoCo.
 
 This is the empirical check on the port: no learned policy, no mjlab
-environment, just the walk engine commanding leg joint targets against the same
-robot model and actuators the RL task uses.
+environment, just the walk engine commanding leg joint targets against a
+compiled NUgus and a floor. The rig itself lives in
+:mod:`mjlab.controllers.quintic_walk.playback` so the regression tests drive
+exactly what this script drives.
+
+Defaults are the deployed ones -- ``Walk.yaml``'s tuning, the idealised leg IK
+the robot ships, and the evaluation plant (see ``--plant``) -- and they walk.
 
 Examples::
 
@@ -12,8 +17,15 @@ Examples::
   # Headless, write a video.
   uv run python scripts/tools/play_quintic_walk.py --vx 0.2 --video /tmp/walk.mp4
 
-  # Open loop, without the FootController balance correction.
-  uv run python scripts/tools/play_quintic_walk.py --vx 0.2 --no-balance
+  # Against the model policies are trained on. Falls; that is the point.
+  uv run python scripts/tools/play_quintic_walk.py --vx 0.2 --plant training
+
+  # Open loop, without the FootController balance correction. mjlab runs tyro
+  # with flag conversion off, so booleans take an explicit value.
+  uv run python scripts/tools/play_quintic_walk.py --vx 0.2 --balance False
+
+  # Solve the legs against the compiled geometry instead of the idealised leg.
+  uv run python scripts/tools/play_quintic_walk.py --vx 0.2 --exact-ik True
 """
 
 from __future__ import annotations
@@ -21,36 +33,19 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-import mujoco
-import numpy as np
-import torch
 import tyro
 
 import mjlab
-from mjlab.asset_zoo.robots.nugus.nugus_constants import get_nugus_robot_cfg
-from mjlab.controllers.quintic_walk.controller import (
-  JOINT_NAMES,
-  QuinticWalkController,
+from mjlab.controllers.quintic_walk.playback import (
+  DEFAULT_PLANT,
+  Plant,
+  PlaybackResult,
+  WalkPlayback,
 )
-from mjlab.controllers.quintic_walk.kinematics import NUGUS_SOLE_OFFSET
 from mjlab.controllers.quintic_walk.walk_generator import (
   NUGUS_WALK_PARAMETERS,
-  EngineState,
   WalkParameters,
 )
-from mjlab.entity import Entity
-
-# Arm and head hold positions while walking, from Walk.yaml.
-POSTURE = {
-  "left_shoulder_pitch": 1.7,
-  "right_shoulder_pitch": 1.7,
-  "left_shoulder_roll": 0.35,
-  "right_shoulder_roll": -0.4,
-  "left_elbow_pitch": -0.7,
-  "right_elbow_pitch": -0.7,
-  "neck_yaw": 0.0,
-  "head_pitch": 0.0,
-}
 
 
 @dataclass
@@ -63,6 +58,13 @@ class Args:
   """Yaw rate command, in rad/s."""
   duration: float = 10.0
   """Simulated duration, in seconds."""
+  plant: Plant = DEFAULT_PLANT
+  """Which robot model to drive.
+
+  ``eval`` is the reference: sim-to-real randomisation at nominal and hardware
+  joint limits. ``training`` is the model policies are trained against, which
+  the engine falls on. ``nubots-sim`` is NUbots' dynamics on mjlab's kinematic
+  tree, ``nubots-xml`` their MJCF verbatim."""
   control_hz: float = 100.0
   """Walk engine update rate. The robot runs at 100 Hz."""
   balance: bool = True
@@ -72,11 +74,8 @@ class Args:
   video_fps: int = 50
   """Frame rate of the written video."""
 
-  # Retuning knobs. The as-deployed values topple this robot model after about
-  # five steps: the engine plans against an idealised leg that is ~9 cm off the
-  # MJCF's real geometry, so the feet land higher and further than intended and
-  # the ankles are commanded past their limits. Stability is knife-edge in
-  # torso_height, which is a symptom of the same mismatch.
+  # Experiment knobs. Every one of these departs from what the robot deploys;
+  # they are here to isolate one behaviour at a time, not to make the walk work.
   torso_height: float | None = None
   """Override the walk torso height, in metres. Deployed value is 0.44."""
   step_width: float | None = None
@@ -85,10 +84,16 @@ class Args:
   """Override the step duration, in seconds. Deployed value is 0.32."""
   step_height: float | None = None
   """Override the swing foot apex height, in metres. Deployed value is 0.085."""
+  switch_when_planted: bool = False
+  """Wait for the sensed foot phase before switching the planted foot.
+
+  What ``Walk.yaml`` asks for and what the deployed binary fails to apply; see
+  :data:`~mjlab.controllers.quintic_walk.walk_generator.NUGUS_WALK_PARAMETERS`.
+  """
   exact_ik: bool = False
-  """Solve the legs against the real MJCF geometry instead of the engine's
-  idealised leg. Not the deployed behaviour -- this is the second experimental
-  condition, isolating the algorithm from its kinematic model error."""
+  """Solve the legs against the compiled geometry instead of the engine's
+  idealised leg. Not the deployed behaviour -- the robot runs the idealised
+  solver, and this isolates the algorithm from its kinematic model error."""
 
 
 def walk_parameters(args: Args) -> WalkParameters:
@@ -103,162 +108,61 @@ def walk_parameters(args: Args) -> WalkParameters:
     )
     if value is not None
   }
+  if args.switch_when_planted:
+    overrides["only_switch_when_planted"] = True
   return replace(NUGUS_WALK_PARAMETERS, **overrides)
 
 
-def build_model() -> mujoco.MjModel:
-  """Compile the NUgus with its mjlab actuators, plus a floor to walk on."""
-  spec = Entity(get_nugus_robot_cfg()).spec
-
-  # The MJCF's default geom is non-colliding, so the floor has to opt in
-  # explicitly or the feet fall straight through it.
-  spec.worldbody.add_geom(
-    name="floor",
-    type=mujoco.mjtGeom.mjGEOM_PLANE,
-    size=[0.0, 0.0, 0.05],
-    pos=[0.0, 0.0, 0.0],
-    contype=1,
-    conaffinity=1,
-    condim=3,
-    friction=[1.0, 0.005, 0.0001],
-    rgba=[0.35, 0.37, 0.40, 1.0],
+def summarise(
+  args: Args, playback: WalkPlayback, params: WalkParameters, result: PlaybackResult
+) -> str:
+  fate = f"FELL OVER at {result.fall_time:.2f} s" if result.fell else "stayed upright"
+  ik = "exact (compiled geometry)" if playback.controller.uses_exact_ik else "idealised"
+  switching = "sensed foot contact" if params.only_switch_when_planted else "step clock"
+  return (
+    f"plant             : {args.plant}\n"
+    f"leg IK            : {ik}\n"
+    f"foot switching    : {switching}\n"
+    f"engine state      : {result.engine_state.name}\n"
+    f"simulated         : {result.elapsed:.2f} s at "
+    f"{1.0 / playback.control_dt:.0f} Hz control\n"
+    f"torso height      : {result.torso_height:.3f} m "
+    f"(walk torso_height {params.torso_height:.3f})\n"
+    f"upright           : {result.upright:+.3f}, minimum {result.min_upright:+.3f} "
+    f"({fate})\n"
+    f"displacement (x,y): {result.displacement[0]:+.3f}, "
+    f"{result.displacement[1]:+.3f} m\n"
+    f"mean forward speed: {result.mean_speed:+.3f} m/s (commanded {args.vx:+.3f})"
   )
-  spec.worldbody.add_light(
-    pos=[0.0, 0.0, 3.0],
-    dir=[0.0, 0.0, -1.0],
-    type=mujoco.mjtLightType.mjLIGHT_DIRECTIONAL,
-  )
-  return spec.compile()
-
-
-def joint_qpos_indices(model: mujoco.MjModel, names) -> np.ndarray:
-  return np.array(
-    [
-      model.jnt_qposadr[mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)]
-      for name in names
-    ]
-  )
-
-
-def actuator_indices(model: mujoco.MjModel, names) -> np.ndarray:
-  return np.array(
-    [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, name) for name in names]
-  )
-
-
-def lowest_sole_height(model: mujoco.MjModel, data: mujoco.MjData) -> float:
-  """World height of the lower foot sole."""
-  heights = []
-  for side in ("left", "right"):
-    body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"{side}_foot")
-    rotation = data.xmat[body].reshape(3, 3)
-    heights.append((data.xpos[body] + rotation @ np.array(NUGUS_SOLE_OFFSET))[2])
-  return float(min(heights))
-
-
-def settle_onto_ground(
-  model: mujoco.MjModel,
-  data: mujoco.MjData,
-  controller: QuinticWalkController,
-  leg_qpos: np.ndarray,
-  posture_qpos: np.ndarray,
-  posture_values: np.ndarray,
-) -> None:
-  """Place the robot in the engine's own standing stance, feet on the floor.
-
-  Starting from the MJCF keyframe would fight the engine on the first step, so
-  the initial joint angles come from the engine's stopped-state foot poses and
-  the torso is then dropped until the lower sole touches the ground.
-  """
-  data.qpos[:] = 0.0
-  data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
-  data.qpos[posture_qpos] = posture_values
-
-  upright = torch.eye(3, dtype=torch.float32).unsqueeze(0)
-  targets = controller.compute(
-    dt=1.0 / 100.0,
-    velocity_command=torch.zeros(1, 3),
-    torso_rotation_w=upright,
-    gyro_b=torch.zeros(1, 3),
-  )
-  data.qpos[leg_qpos] = targets[0].numpy()
-
-  # The engine holds the torso pitched forward; match it so the soles land flat.
-  half = 0.5 * controller.generator.cfg.torso_pitch
-  data.qpos[3:7] = [np.cos(half), 0.0, np.sin(half), 0.0]
-
-  mujoco.mj_forward(model, data)
-  data.qpos[2] -= lowest_sole_height(model, data)
-  mujoco.mj_forward(model, data)
-
-  controller.reset()
 
 
 def main() -> None:
   args = tyro.cli(Args, config=mjlab.TYRO_FLAGS)
 
-  model = build_model()
-  data = mujoco.MjData(model)
-
-  control_dt = 1.0 / args.control_hz
-  substeps = max(1, round(control_dt / model.opt.timestep))
-  effective_dt = substeps * model.opt.timestep
-
   params = walk_parameters(args)
-  controller = QuinticWalkController(
-    num_envs=1,
-    device="cpu",
+  playback = WalkPlayback(
+    plant=args.plant,
     walk_params=params,
+    control_hz=args.control_hz,
     use_balance_control=args.balance,
-    exact_ik_model=model if args.exact_ik else None,
+    exact_ik=args.exact_ik,
   )
-
-  leg_qpos = joint_qpos_indices(model, JOINT_NAMES)
-  leg_ctrl = actuator_indices(model, JOINT_NAMES)
-  posture_names = tuple(POSTURE)
-  posture_qpos = joint_qpos_indices(model, posture_names)
-  posture_ctrl = actuator_indices(model, posture_names)
-  posture_values = np.array([POSTURE[name] for name in posture_names])
-
-  settle_onto_ground(model, data, controller, leg_qpos, posture_qpos, posture_values)
-
-  torso = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "torso")
-  gyro = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, "imu_ang_vel")
-  gyro_adr = model.sensor_adr[gyro]
-
-  command = torch.tensor([[args.vx, args.vy, args.wz]], dtype=torch.float32)
-  num_steps = int(args.duration / effective_dt)
-  start_xy = data.xpos[torso][:2].copy()
-
-  def control_step() -> None:
-    rotation = torch.tensor(
-      data.xmat[torso].reshape(3, 3), dtype=torch.float32
-    ).unsqueeze(0)
-    angular = torch.tensor(
-      data.sensordata[gyro_adr : gyro_adr + 3], dtype=torch.float32
-    ).unsqueeze(0)
-    targets = controller.compute(
-      dt=effective_dt,
-      velocity_command=command,
-      torso_rotation_w=rotation,
-      gyro_b=angular,
-    )
-    data.ctrl[leg_ctrl] = targets[0].numpy()
-    data.ctrl[posture_ctrl] = posture_values
-    for _ in range(substeps):
-      mujoco.mj_step(model, data)
+  command = (args.vx, args.vy, args.wz)
 
   if args.video is not None:
     import mediapy
+    import mujoco
 
     frames = []
-    every = max(1, round((1.0 / args.video_fps) / effective_dt))
-    renderer = mujoco.Renderer(model, height=480, width=640)
-    for step in range(num_steps):
-      control_step()
+    every = max(1, round((1.0 / args.video_fps) / playback.control_dt))
+    renderer = mujoco.Renderer(playback.model, height=480, width=640)
+
+    def capture(step: int) -> None:
       if step % every == 0:
-        renderer.update_scene(data, camera="track")
+        renderer.update_scene(playback.data, camera="track")
         frames.append(renderer.render())
+
+    result = playback.run(command, args.duration, on_step=capture)
     renderer.close()
     args.video.parent.mkdir(parents=True, exist_ok=True)
     mediapy.write_video(str(args.video), frames, fps=args.video_fps)
@@ -266,28 +170,15 @@ def main() -> None:
   else:
     from mujoco import viewer as mujoco_viewer
 
-    with mujoco_viewer.launch_passive(model, data) as viewer:
-      for _ in range(num_steps):
-        if not viewer.is_running():
-          break
-        control_step()
-        viewer.sync()
+    with mujoco_viewer.launch_passive(playback.model, playback.data) as viewer:
 
-  travelled = data.xpos[torso][:2] - start_xy
-  elapsed = num_steps * effective_dt
-  upright = float(data.xmat[torso].reshape(3, 3)[2, 2])
-  print(
-    f"leg IK            : {'exact (MJCF geometry)' if controller.uses_exact_ik else 'idealised (as deployed)'}\n"
-    f"engine state      : {EngineState(int(controller.generator.state[0])).name}\n"
-    f"simulated         : {elapsed:.2f} s at {1.0 / effective_dt:.0f} Hz control\n"
-    f"torso height      : {data.xpos[torso][2]:.3f} m "
-    f"(walk torso_height {params.torso_height:.3f})\n"
-    f"upright           : {upright:+.3f} "
-    f"({'standing' if upright > 0.5 else 'FELL OVER'})\n"
-    f"displacement (x,y): {travelled[0]:+.3f}, {travelled[1]:+.3f} m\n"
-    f"mean forward speed: {travelled[0] / elapsed:+.3f} m/s "
-    f"(commanded {args.vx:+.3f})"
-  )
+      def sync(step: int) -> bool:
+        viewer.sync()
+        return viewer.is_running()
+
+      result = playback.run(command, args.duration, on_step=sync)
+
+  print(summarise(args, playback, params, result))
 
 
 if __name__ == "__main__":

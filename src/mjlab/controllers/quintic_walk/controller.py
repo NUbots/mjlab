@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import mujoco
+import numpy as np
 import torch
 
 from mjlab.controllers.quintic_walk.exact_kinematics import (
@@ -27,6 +28,8 @@ from mjlab.controllers.quintic_walk.exact_kinematics import (
 )
 from mjlab.controllers.quintic_walk.kinematics import (
   NUGUS_LEG,
+  NUGUS_SOLE_OFFSET,
+  NUGUS_SOLE_ROTATION,
   LegModel,
   calculate_leg_joints,
   invert_transform,
@@ -111,6 +114,54 @@ def detect_planted_phase(
   return torch.where(
     left_down & right_down, torch.full_like(height, int(Phase.DOUBLE)), phase
   ).long()
+
+
+def sole_poses_in_torso(
+  model: mujoco.MjModel,
+  data: mujoco.MjData,
+  device: torch.device | str = "cpu",
+  dtype: torch.dtype = torch.float32,
+) -> tuple[torch.Tensor, torch.Tensor]:
+  """Measure both sole poses in the torso frame from simulator state.
+
+  This is the input :func:`detect_planted_phase` wants. ``SensorFilter`` gets
+  the same quantity by running forward kinematics on the measured servo
+  positions and reading ``Htx[L_FOOT_BASE]``; reading the simulator's body poses
+  is the same computation with the same inputs.
+
+  The mjlab NUgus has no ``*_foot_base`` body, so the sole frame is
+  reconstructed from the foot body with :data:`NUGUS_SOLE_OFFSET` and
+  :data:`NUGUS_SOLE_ROTATION`. Those reproduce the ``left_foot_base`` fixed
+  joint of NUbots' URDF -- ``xyz="0.038 0 0"``, ``rpy="0 -pi/2 0"`` -- exactly
+  in rotation and to within a millimetre in translation.
+
+  Args:
+    model: Compiled model containing ``torso``, ``left_foot`` and
+      ``right_foot`` bodies.
+    data: Simulator state, already forwarded to the current ``qpos``.
+    device: Device of the returned tensors.
+    dtype: Dtype of the returned tensors.
+
+  Returns:
+    Left and right sole poses in the torso frame, each shape ``(1, 4, 4)``.
+  """
+  sole_rotation = np.array(NUGUS_SOLE_ROTATION)
+  sole_offset = np.array(NUGUS_SOLE_OFFSET)
+  torso = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "torso")
+  torso_rotation = data.xmat[torso].reshape(3, 3)
+  torso_position = data.xpos[torso]
+
+  poses = []
+  for side in ("left", "right"):
+    body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"{side}_foot")
+    body_rotation = data.xmat[body].reshape(3, 3)
+    pose = np.eye(4)
+    pose[:3, :3] = torso_rotation.T @ body_rotation @ sole_rotation
+    pose[:3, 3] = torso_rotation.T @ (
+      data.xpos[body] + body_rotation @ sole_offset - torso_position
+    )
+    poses.append(torch.tensor(pose, device=device, dtype=dtype).unsqueeze(0))
+  return poses[0], poses[1]
 
 
 class QuinticWalkController:
