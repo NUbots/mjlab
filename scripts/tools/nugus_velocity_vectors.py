@@ -30,6 +30,8 @@ from typing import Literal
 import torch
 import tyro
 
+import mjlab
+
 # Extra knobs env_cfgs.py reads via os.environ but that don't have a
 # dedicated flag below. Passed with --env KEY=VALUE.
 _KNOWN_ENV_KEYS = (
@@ -115,7 +117,7 @@ def _print_vector(title: str, terms: list[tuple[str, list[float]]]) -> None:
 
 
 def main() -> None:
-  args = tyro.cli(Args)
+  args = tyro.cli(Args, config=mjlab.TYRO_FLAGS)
   applied = _apply_env_overrides(args)
 
   print("Environment overrides applied:")
