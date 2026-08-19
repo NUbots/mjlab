@@ -59,6 +59,37 @@ uv run python scripts/eval/eval_quintic_walk.py --num-envs 2048 \
 mjlab runs tyro with flag conversion off, so boolean flags take an explicit
 value: `--balance False`, `--exact-ik True`, `--switch-when-planted True`.
 
+### Watching a run
+
+`--viser` streams one environment to a viser server so you can watch the gait in
+a browser. It is for eyeballing, not for collecting: it renders every control
+step and throttles the run to real time.
+
+```sh
+uv run python scripts/eval/eval_quintic_walk.py --num-envs 1 --duration 20 --viser True
+uv run python scripts/eval/eval_rl_walk.py --num-envs 1 --duration 20 --viser True \
+  --checkpoint logs/rsl_rl/nugus_velocity/wandb_checkpoints/5l83efo3/model_39997.pt
+```
+
+The script prints the address to open:
+
+```
+viser             : http://localhost:8080 (env 0, real time)
+```
+
+`--viser-port` moves it, `--viser-env` picks which environment of the batch to
+show, and `--viser-realtime False` lets the playback run as fast as it computes.
+
+The view sits on the `on_step` callback the harnesses already take, so it cannot
+influence the run: the physics for a step is integrated before the callback sees
+it, and all the callback does is copy state out and sleep. A one-environment run
+with `--viser` and the same run headless produce byte-identical `per_env.csv`
+(verified; the paced run just takes longer on the wall clock). With the flag off
+nothing here is constructed and viser is never imported.
+
+Nothing stops you pointing it at a batch of thousands, but it will be miserable
+and the numbers are the point there anyway.
+
 ### Checkpoints
 
 `--checkpoint` takes a path; the pattern is

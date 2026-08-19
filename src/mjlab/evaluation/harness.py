@@ -434,6 +434,11 @@ class RlEvalHarness:
     self.control_dt = float(self.env.step_dt)
     self.foot_body_ids = _body_ids(self.robot, FOOT_BODY_NAMES, device)
 
+  @property
+  def sim(self) -> Simulation:
+    """The environment's simulation, for anything that watches the run."""
+    return self.env.sim
+
   def state(self) -> EvalState:
     return EvalState.from_entity(self.robot, self.foot_body_ids)
 

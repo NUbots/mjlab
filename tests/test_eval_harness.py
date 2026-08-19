@@ -81,3 +81,35 @@ def test_sensed_phase_is_batched_and_on_device():
 
   assert phase.shape == (3,)
   assert str(phase.device).startswith(str(device).split(":")[0])
+
+
+@pytest.mark.slow
+def test_step_callback_does_not_change_the_run():
+  """The live view hooks in here, so the hook must be inert.
+
+  Same plant, same command, once with a callback and once without: identical
+  metrics, and the callback fires exactly once per control step.
+
+  One environment, because a batch of two is not bit-reproducible on the GPU --
+  identical environments in one batch drift apart by about 1e-7 through reduction
+  ordering. A single environment is exact, which makes this an equality test
+  rather than a tolerance test.
+  """
+  device = get_test_device()
+  command_args = (0.2, 0.0, 0.0, 1, device)
+  duration = 1.5
+
+  plain = QuinticEvalHarness(plant="eval", num_envs=1, device=device)
+  expected = plain.run(constant_command(*command_args), duration).result()
+
+  seen: list[int] = []
+  watched = QuinticEvalHarness(plant="eval", num_envs=1, device=device)
+  observed = watched.run(
+    constant_command(*command_args), duration, on_step=seen.append
+  ).result()
+
+  assert seen == list(range(int(duration / watched.control_dt)))
+  for name in ("achieved_vx", "achieved_vy", "min_upright", "displacement_x"):
+    assert getattr(observed, name).tolist() == pytest.approx(
+      getattr(expected, name).tolist(), abs=1e-9
+    )

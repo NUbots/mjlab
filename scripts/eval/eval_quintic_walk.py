@@ -20,7 +20,7 @@ Examples::
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import torch
@@ -32,6 +32,11 @@ from mjlab.evaluation.harness import (
   EvalPlant,
   QuinticEvalHarness,
   command_grid,
+)
+from mjlab.evaluation.live_view import (
+  LIVE_VIEW_FLAGS,
+  LiveViewCfg,
+  open_live_view,
 )
 from mjlab.evaluation.metrics import format_summary, save_run
 from mjlab.utils.torch import configure_torch_backends
@@ -76,6 +81,9 @@ class Args:
   tag: str | None = None
   """Name for this run's output directory. Defaults to engine, plant and time."""
 
+  live: LIVE_VIEW_FLAGS = field(default_factory=LiveViewCfg)
+  """Live playback in the browser; off by default. See ``--viser``."""
+
 
 def main() -> None:
   args = tyro.cli(Args, config=mjlab.TYRO_FLAGS)
@@ -101,8 +109,15 @@ def main() -> None:
     device=args.device,
   )
 
+  view = open_live_view(harness, args.live)
   started = time.time()
-  metrics = harness.run(command, args.duration)
+  try:
+    metrics = harness.run(
+      command, args.duration, on_step=None if view is None else view.on_step
+    )
+  finally:
+    if view is not None:
+      view.close()
   elapsed = time.time() - started
 
   tag = args.tag or f"quintic_{args.plant}_{time.strftime('%Y%m%d_%H%M%S')}"

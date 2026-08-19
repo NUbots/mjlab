@@ -8,6 +8,11 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added a ``--viser`` flag to both ``scripts/eval`` entry points, streaming one
+  environment of a batched evaluation run to a viser server for visual
+  inspection, with ``--viser-port``, ``--viser-env`` and ``--viser-realtime``.
+  It hangs off the harnesses' existing ``on_step`` callback and only ever draws
+  and sleeps, so a watched run and a headless one produce identical metrics.
 - Added ``mjlab.evaluation`` and the ``scripts/eval`` entry points: a batched,
   GPU-parallel pipeline for comparing walk controllers over a 2x2 of engine
   (ported quintic walk, trained policy) and plant (evaluation, training).
