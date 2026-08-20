@@ -207,19 +207,32 @@ def _gyro_address(model: mujoco.MjModel) -> int:
   raise ValueError(f"no angular velocity sensor named any of {GYRO_SENSOR_NAMES}")
 
 
-def _git_sha() -> str:
-  """Commit the recording was produced at, or ``"unknown"`` outside a repo."""
+def _git(*args: str) -> str | None:
+  """Run a git command in the source tree, or ``None`` if that is not possible."""
   try:
     result = subprocess.run(
-      ["git", "rev-parse", "HEAD"],
+      ["git", *args],
       capture_output=True,
       text=True,
       check=True,
       cwd=Path(__file__).parent,
     )
   except (OSError, subprocess.CalledProcessError):
-    return "unknown"
+    return None
   return result.stdout.strip()
+
+
+def _git_sha() -> str:
+  """Commit the recording was produced at, or ``"unknown"`` outside a repo.
+
+  A dirty tree is marked, because a bare SHA would claim a reproducibility the
+  recording does not have.
+  """
+  sha = _git("rev-parse", "HEAD")
+  if sha is None:
+    return "unknown"
+  status = _git("status", "--porcelain")
+  return f"{sha}-dirty" if status else sha
 
 
 class WalkRecorder:
