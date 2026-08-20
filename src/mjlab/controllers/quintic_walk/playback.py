@@ -9,11 +9,26 @@ The engine is a hand-tuned controller that was developed on hardware, so the
 model it runs against matters more than it would for a policy that was trained
 against one. :data:`PLANTS` collects the models worth running it on; see
 :data:`DEFAULT_PLANT` for which one is the reference and why.
+
+For the same reason it is worth being able to check this simulator against
+another one. :class:`WalkRecorder` writes a per-control-step trace of both the
+commands the engine issued and the state the robot reached, under the NUbots
+joint names, so a run here lines up column for column with a webots or on-robot
+log. Because the commands are golden-trace tested against the C++ engine, the
+two halves of the trace separate the two possible explanations for a
+discrepancy: commands that differ point at the engine or its inputs, commands
+that match while the measurements diverge point at the plant. Driving with
+``use_balance_control=False`` sharpens that further, since it removes the
+feedback path from measured torso attitude back into the commanded foot pose.
 """
 
 from __future__ import annotations
 
+import csv
+import json
+import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Literal
 
 import mujoco
@@ -36,6 +51,7 @@ from mjlab.controllers.quintic_walk.controller import (
 )
 from mjlab.controllers.quintic_walk.kinematics import (
   NUGUS_SOLE_OFFSET,
+  NUGUS_SOLE_ROTATION,
   mat_to_rpy_intrinsic,
   rpy_intrinsic_to_mat,
 )
@@ -167,6 +183,15 @@ def _joint_qpos_indices(model: mujoco.MjModel, names) -> np.ndarray:
   )
 
 
+def _joint_qvel_indices(model: mujoco.MjModel, names) -> np.ndarray:
+  return np.array(
+    [
+      model.jnt_dofadr[mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)]
+      for name in names
+    ]
+  )
+
+
 def _actuator_indices(model: mujoco.MjModel, names) -> np.ndarray:
   return np.array(
     [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, name) for name in names]
@@ -179,6 +204,143 @@ def _gyro_address(model: mujoco.MjModel) -> int:
     if sensor != -1:
       return int(model.sensor_adr[sensor])
   raise ValueError(f"no angular velocity sensor named any of {GYRO_SENSOR_NAMES}")
+
+
+def _git_sha() -> str:
+  """Commit the recording was produced at, or ``"unknown"`` outside a repo."""
+  try:
+    result = subprocess.run(
+      ["git", "rev-parse", "HEAD"],
+      capture_output=True,
+      text=True,
+      check=True,
+      cwd=Path(__file__).parent,
+    )
+  except (OSError, subprocess.CalledProcessError):
+    return "unknown"
+  return result.stdout.strip()
+
+
+class WalkRecorder:
+  """Per-control-step trace of what the engine asked for and what the robot did.
+
+  Built for comparing this simulator against another one -- webots, or the robot
+  -- trace against trace. The joint names are the NUbots names, so columns line
+  up with their logs without translation.
+
+  Every row carries both sides of the control loop:
+
+  - ``cmd_<joint>`` is the position target the engine issued, which is
+    golden-trace tested against the C++ engine. Two simulators fed the same
+    command should produce the same ``cmd_`` columns; if they do not, the
+    difference is in the engine or its inputs.
+  - ``pos_<joint>`` and ``vel_<joint>`` are what the servos did with that
+    target. If the commands match and these do not, the difference is in the
+    plant -- servo model, contacts, inertia.
+
+  **Timing convention.** Row ``t`` holds the command issued at control step
+  ``t`` and the state measured *after* that step's physics, at
+  ``time = (t + 1) * control_dt``. So ``pos_`` in a row is the response to
+  ``cmd_`` in the same row, one control period later.
+
+  Angles are radians throughout. Foot roll and pitch are the sole frame's
+  orientation in the *world*, so a foot lying flat on level ground reads zero
+  regardless of what the torso is doing.
+  """
+
+  def __init__(self, playback: WalkPlayback) -> None:
+    self._playback = playback
+    self._rows: list[list[float]] = []
+    self._feet = {
+      side: mujoco.mj_name2id(playback.model, mujoco.mjtObj.mjOBJ_BODY, f"{side}_foot")
+      for side in ("left", "right")
+    }
+
+  @property
+  def columns(self) -> list[str]:
+    """CSV header, in row order."""
+    names = ["time", "engine_state"]
+    for prefix in ("cmd", "pos", "vel"):
+      names += [f"{prefix}_{joint}" for joint in JOINT_NAMES]
+    names += ["torso_roll", "torso_pitch", "torso_yaw"]
+    names += ["gyro_x", "gyro_y", "gyro_z"]
+    for side in ("left", "right"):
+      names += [f"{side}_foot_roll", f"{side}_foot_pitch", f"{side}_sole_height"]
+    return names
+
+  @property
+  def rows(self) -> list[list[float]]:
+    return self._rows
+
+  def _world_rpy(self, rotation: np.ndarray) -> np.ndarray:
+    tensor = torch.tensor(rotation, dtype=torch.float64).unsqueeze(0)
+    return mat_to_rpy_intrinsic(tensor)[0].numpy()
+
+  def record(self, targets: np.ndarray) -> None:
+    """Append one row for the control step that has just been simulated.
+
+    Args:
+      targets: Shape ``(12,)`` joint position targets issued for this step, in
+        :data:`~mjlab.controllers.quintic_walk.controller.JOINT_NAMES` order.
+    """
+    playback = self._playback
+    data = playback.data
+    row: list[float] = [
+      (len(self._rows) + 1) * playback.control_dt,
+      float(int(playback.controller.generator.state[0])),
+    ]
+    row += [float(value) for value in targets]
+    row += [float(data.qpos[index]) for index in playback.leg_qpos]
+    row += [float(data.qvel[index]) for index in playback.leg_qvel]
+
+    torso_rpy = self._world_rpy(data.xmat[playback.torso_body].reshape(3, 3))
+    row += [float(value) for value in torso_rpy]
+    row += [
+      float(value)
+      for value in data.sensordata[playback.gyro_address : playback.gyro_address + 3]
+    ]
+
+    sole_rotation = np.array(NUGUS_SOLE_ROTATION)
+    sole_offset = np.array(NUGUS_SOLE_OFFSET)
+    for side in ("left", "right"):
+      body = self._feet[side]
+      body_rotation = data.xmat[body].reshape(3, 3)
+      foot_rpy = self._world_rpy(body_rotation @ sole_rotation)
+      height = (data.xpos[body] + body_rotation @ sole_offset)[2]
+      row += [float(foot_rpy[0]), float(foot_rpy[1]), float(height)]
+
+    self._rows.append(row)
+
+  def write(self, path: Path, metadata: dict) -> Path:
+    """Write the trace to ``path`` and its metadata alongside it.
+
+    Returns:
+      Path of the metadata file, which is ``path`` with a ``.json`` suffix.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as handle:
+      writer = csv.writer(handle)
+      writer.writerow(self.columns)
+      writer.writerows(self._rows)
+
+    metadata_path = path.with_suffix(".json")
+    full = {
+      **metadata,
+      "rows": len(self._rows),
+      "columns": self.columns,
+      "git_sha": _git_sha(),
+      "engine_state_values": {state.name: int(state) for state in EngineState},
+      "timing": (
+        "row t holds the command issued at control step t and the state "
+        "measured after that step's physics, at time (t + 1) * control_dt"
+      ),
+      "angle_units": "radians",
+      "foot_angle_frame": "sole frame in the world frame",
+    }
+    with metadata_path.open("w") as handle:
+      json.dump(full, handle, indent=2)
+      handle.write("\n")
+    return metadata_path
 
 
 class WalkPlayback:
@@ -219,6 +381,7 @@ class WalkPlayback:
     )
 
     self._leg_qpos = _joint_qpos_indices(self.model, JOINT_NAMES)
+    self._leg_qvel = _joint_qvel_indices(self.model, JOINT_NAMES)
     self._leg_ctrl = _actuator_indices(self.model, JOINT_NAMES)
     self._posture_names = tuple(POSTURE)
     self._posture_qpos = _joint_qpos_indices(self.model, self._posture_names)
@@ -226,10 +389,36 @@ class WalkPlayback:
     self._posture_values = np.array([POSTURE[name] for name in self._posture_names])
     self._torso = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "torso")
     self._gyro_adr = _gyro_address(self.model)
+    self.recorder: WalkRecorder | None = None
+    self.last_targets: np.ndarray | None = None
 
     self.reset()
 
   # Measurements.
+
+  @property
+  def leg_qpos(self) -> np.ndarray:
+    """``qpos`` addresses of the twelve leg joints, in ``JOINT_NAMES`` order."""
+    return self._leg_qpos
+
+  @property
+  def leg_qvel(self) -> np.ndarray:
+    """``qvel`` addresses of the twelve leg joints, in ``JOINT_NAMES`` order."""
+    return self._leg_qvel
+
+  @property
+  def torso_body(self) -> int:
+    return self._torso
+
+  @property
+  def gyro_address(self) -> int:
+    """``sensordata`` offset of the body-frame angular velocity sensor."""
+    return self._gyro_adr
+
+  def start_recording(self) -> WalkRecorder:
+    """Record every control step from now on. See :class:`WalkRecorder`."""
+    self.recorder = WalkRecorder(self)
+    return self.recorder
 
   @property
   def torso_position(self) -> np.ndarray:
@@ -333,10 +522,14 @@ class WalkPlayback:
       gyro_b=angular,
       sensed_phase=self.sensed_phase(),
     )
-    self.data.ctrl[self._leg_ctrl] = targets[0].numpy()
+    issued = targets[0].numpy().copy()
+    self.last_targets = issued
+    self.data.ctrl[self._leg_ctrl] = issued
     self.data.ctrl[self._posture_ctrl] = self._posture_values
     for _ in range(self.substeps):
       mujoco.mj_step(self.model, self.data)
+    if self.recorder is not None:
+      self.recorder.record(issued)
 
   def run(
     self,

@@ -6,6 +6,8 @@ parameters, driving the deployed idealised IK, keep the robot upright and moving
 on the evaluation model.
 """
 
+import json
+import math
 from dataclasses import replace
 
 import mujoco
@@ -14,6 +16,7 @@ import torch
 
 from mjlab.asset_zoo.robots.nugus import nugus_constants, nugus_eval_constants
 from mjlab.controllers.quintic_walk.controller import (
+  JOINT_NAMES,
   detect_planted_phase,
   sole_poses_in_torso,
 )
@@ -175,3 +178,60 @@ def test_training_model_is_left_alone():
   assert any(name.endswith("_backlash") for name in joint_names)
   assert training.joint("left_ankle_pitch").range[1] == pytest.approx(1.0)
   assert training.joint("left_hip_roll").range[0] == pytest.approx(0.0)
+
+
+def test_recording_pairs_commands_with_measurements():
+  """One row per control step, holding both sides of the control loop.
+
+  The ``cmd_`` columns are the engine's own output, which is golden-trace
+  tested against the C++; pinning that they reach the CSV unchanged is what
+  makes a cross-simulator comparison meaningful.
+  """
+  playback = WalkPlayback(plant="eval")
+  recorder = playback.start_recording()
+  duration = 0.3
+  playback.run(FORWARD, duration)
+
+  expected_rows = int(duration / playback.control_dt)
+  assert len(recorder.rows) == expected_rows
+  assert len(recorder.columns) == 50
+  assert all(len(row) == len(recorder.columns) for row in recorder.rows)
+
+  for name in ("time", "engine_state", "torso_roll", "gyro_x", "left_sole_height"):
+    assert name in recorder.columns
+  for joint in JOINT_NAMES:
+    for prefix in ("cmd", "pos", "vel"):
+      assert f"{prefix}_{joint}" in recorder.columns
+
+  values = [value for row in recorder.rows for value in row]
+  assert all(math.isfinite(value) for value in values)
+
+  # Time counts control steps, and the last row's commands are the ones the
+  # controller last returned.
+  assert recorder.rows[-1][0] == pytest.approx(duration, abs=1e-9)
+  assert playback.last_targets is not None
+  first_cmd = recorder.columns.index(f"cmd_{JOINT_NAMES[0]}")
+  recorded = recorder.rows[-1][first_cmd : first_cmd + len(JOINT_NAMES)]
+  assert recorded == pytest.approx(playback.last_targets.tolist(), abs=1e-12)
+
+
+def test_recording_writes_a_csv_and_a_metadata_sibling(tmp_path):
+  """The trace and the configuration that produced it travel together."""
+  playback = WalkPlayback(plant="eval")
+  recorder = playback.start_recording()
+  playback.run(FORWARD, 0.1)
+
+  csv_path = tmp_path / "trace.csv"
+  metadata_path = recorder.write(csv_path, {"plant": "eval"})
+
+  assert metadata_path == tmp_path / "trace.json"
+  lines = csv_path.read_text().strip().split("\n")
+  assert lines[0].split(",") == recorder.columns
+  assert len(lines) == len(recorder.rows) + 1
+
+  metadata = json.loads(metadata_path.read_text())
+  assert metadata["plant"] == "eval"
+  assert metadata["rows"] == len(recorder.rows)
+  assert metadata["columns"] == recorder.columns
+  assert metadata["engine_state_values"]["WALKING"] == int(EngineState.WALKING)
+  assert "git_sha" in metadata and "timing" in metadata

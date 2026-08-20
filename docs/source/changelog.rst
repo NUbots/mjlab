@@ -8,6 +8,11 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added ``--record`` to ``scripts/tools/play_quintic_walk.py``, writing a
+  per-control-step CSV of commanded joint targets, measured joint positions and
+  velocities, torso and foot orientation, gyro and sole heights, plus a metadata
+  JSON describing the run. Intended for comparing mjlab against another
+  simulator trace against trace; see ``WalkRecorder``.
 - Added a ``--viser`` flag to both ``scripts/eval`` entry points, streaming one
   environment of a batched evaluation run to a viser server for visual
   inspection, with ``--viser-port``, ``--viser-env`` and ``--viser-realtime``.

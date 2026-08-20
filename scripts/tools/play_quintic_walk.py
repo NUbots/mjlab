@@ -24,13 +24,17 @@ Examples::
   # with flag conversion off, so booleans take an explicit value.
   uv run python scripts/tools/play_quintic_walk.py --vx 0.2 --balance False
 
+  # Record a joint trace for comparing against another simulator.
+  uv run python scripts/tools/play_quintic_walk.py --vx 0.15 --duration 30 \
+    --record logs/recordings/mjlab_eval_vx015.csv
+
   # Solve the legs against the compiled geometry instead of the idealised leg.
   uv run python scripts/tools/play_quintic_walk.py --vx 0.2 --exact-ik True
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import tyro
@@ -73,6 +77,12 @@ class Args:
   """Write an mp4 here instead of opening the viewer."""
   video_fps: int = 50
   """Frame rate of the written video."""
+  record: Path | None = None
+  """Write a per-control-step joint trace to this CSV, plus a metadata JSON.
+
+  For comparing this simulator against another one -- webots, or the robot --
+  trace against trace. See
+  :class:`~mjlab.controllers.quintic_walk.playback.WalkRecorder`."""
 
   # Experiment knobs. Every one of these departs from what the robot deploys;
   # they are here to isolate one behaviour at a time, not to make the walk work.
@@ -148,6 +158,7 @@ def main() -> None:
     exact_ik=args.exact_ik,
   )
   command = (args.vx, args.vy, args.wz)
+  recorder = playback.start_recording() if args.record is not None else None
 
   if args.video is not None:
     import mediapy
@@ -177,6 +188,22 @@ def main() -> None:
         return viewer.is_running()
 
       result = playback.run(command, args.duration, on_step=sync)
+
+  if recorder is not None and args.record is not None:
+    metadata_path = recorder.write(
+      args.record,
+      {
+        "plant": args.plant,
+        "command": {"vx": args.vx, "vy": args.vy, "wz": args.wz},
+        "control_hz": 1.0 / playback.control_dt,
+        "physics_timestep": float(playback.model.opt.timestep),
+        "balance": args.balance,
+        "exact_ik": args.exact_ik,
+        "walk_parameters": asdict(params),
+      },
+    )
+    print(f"recorded          : {args.record} ({len(recorder.rows)} rows)")
+    print(f"metadata          : {metadata_path}")
 
   print(summarise(args, playback, params, result))
 
