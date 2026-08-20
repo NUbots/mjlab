@@ -8,6 +8,13 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- The quintic walk engine now computes in ``torch.float64`` by default
+  (``ENGINE_DTYPE``), matching the C++ ``WalkGenerator<double>``. Its phase
+  clock accumulates the control period and switches feet on
+  ``t >= step_period``; in float32 thirty-two additions of 0.01 fell just short
+  of the period, so every step took 0.33 s instead of 0.32 -- a three percent
+  cadence error. Simulation stays in float32, and the controller casts at the
+  boundary. Reported speeds shift by a few percent as a result.
 - Added ``--record`` to ``scripts/tools/play_quintic_walk.py``, writing a
   per-control-step CSV of commanded joint targets, measured joint positions and
   velocities, torso and foot orientation, gyro and sole heights, plus a metadata
@@ -43,7 +50,7 @@ Added
   ``scripts/tools/play_quintic_walk.py`` a ``--plant`` selector over the
   training, evaluation, NUbots-parity and NUbots-verbatim models. With the
   deployed walk parameters the engine walks on the evaluation model and falls
-  after 1.75 s on the training model; the passive backlash joints are the
+  after 1.72 s on the training model; the passive backlash joints are the
   whole of that difference.
 - Added ``sole_poses_in_torso`` to the quintic walk controller, which measures
   the foot poses ``detect_planted_phase`` consumes, so playback supplies the

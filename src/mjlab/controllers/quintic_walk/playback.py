@@ -56,6 +56,7 @@ from mjlab.controllers.quintic_walk.kinematics import (
   rpy_intrinsic_to_mat,
 )
 from mjlab.controllers.quintic_walk.walk_generator import (
+  ENGINE_DTYPE,
   NUGUS_WALK_PARAMETERS,
   EngineState,
   Phase,
@@ -474,8 +475,8 @@ class WalkPlayback:
     targets = self.controller.compute(
       dt=self.control_dt,
       velocity_command=torch.zeros(1, 3),
-      torso_rotation_w=torch.eye(3, dtype=torch.float32).unsqueeze(0),
-      gyro_b=torch.zeros(1, 3),
+      torso_rotation_w=torch.eye(3, dtype=ENGINE_DTYPE).unsqueeze(0),
+      gyro_b=torch.zeros(1, 3, dtype=ENGINE_DTYPE),
       # Standing still, both feet are down; the engine is in its STOPPED state
       # and does not switch feet, so the value only has to be well formed.
       sensed_phase=torch.full((1,), int(Phase.DOUBLE)),
@@ -510,10 +511,10 @@ class WalkPlayback:
       command: Shape ``(1, 3)`` velocity command (dx, dy, dtheta).
     """
     rotation = torch.tensor(
-      self.data.xmat[self._torso].reshape(3, 3), dtype=torch.float32
+      self.data.xmat[self._torso].reshape(3, 3), dtype=ENGINE_DTYPE
     ).unsqueeze(0)
     angular = torch.tensor(
-      self.data.sensordata[self._gyro_adr : self._gyro_adr + 3], dtype=torch.float32
+      self.data.sensordata[self._gyro_adr : self._gyro_adr + 3], dtype=ENGINE_DTYPE
     ).unsqueeze(0)
     targets = self.controller.compute(
       dt=self.control_dt,
@@ -522,6 +523,7 @@ class WalkPlayback:
       gyro_b=angular,
       sensed_phase=self.sensed_phase(),
     )
+    # MjData.ctrl is double, so the engine's targets are written unrounded.
     issued = targets[0].numpy().copy()
     self.last_targets = issued
     self.data.ctrl[self._leg_ctrl] = issued
@@ -548,7 +550,7 @@ class WalkPlayback:
     Returns:
       What happened; see :class:`PlaybackResult`.
     """
-    target = torch.tensor([command], dtype=torch.float32)
+    target = torch.tensor([command], dtype=ENGINE_DTYPE)
     num_steps = int(duration / self.control_dt)
     start_xy = self.torso_position[:2].copy()
 

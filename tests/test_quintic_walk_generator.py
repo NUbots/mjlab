@@ -14,8 +14,10 @@ import pytest
 import torch
 from conftest import get_test_device
 
+from mjlab.controllers.quintic_walk.controller import QuinticWalkController
 from mjlab.controllers.quintic_walk.kinematics import mat_to_rpy_intrinsic
 from mjlab.controllers.quintic_walk.walk_generator import (
+  ENGINE_DTYPE,
   NUGUS_WALK_PARAMETERS,
   EngineState,
   Phase,
@@ -87,10 +89,16 @@ def test_trace_matches_nubots_cpp(golden, device, scenario):
   params = replace(
     NUGUS_WALK_PARAMETERS, only_switch_when_planted=scenario == "planted"
   )
-  generator = WalkGenerator(1, device=device, params=params, dtype=torch.float64)
+  # Deliberately no dtype override: the golden trace is what pins the engine's
+  # working precision, and it only does that if it exercises the default. The
+  # clock accumulates, so float32 shifts the foot switch by a whole tick.
+  generator = WalkGenerator(1, device=device, params=params)
 
   for row in rows:
     step = int(row["step"])
+    # The command stays double: the trace was dumped from a C++ run that had
+    # exact doubles on its input, so rounding it to float32 here would inject a
+    # difference that says nothing about the engine.
     command = torch.tensor(
       [command_for(scenario, step)], dtype=torch.float64, device=device
     )
@@ -126,6 +134,39 @@ def test_trace_exercises_every_engine_state(golden):
     int(EngineState.STOPPED),
   }
   assert expected <= seen, f"states not covered: {expected - seen}"
+
+
+def test_engine_runs_in_double_by_default():
+  """The C++ engine is ``WalkGenerator<double>``, and so is this one.
+
+  Not a style preference: the phase clock accumulates the control period and
+  switches feet on ``t >= step_period``. In float32 thirty-two additions of 0.01
+  reach 0.319999963 against a period of 0.3199999928, so the switch slips a tick
+  and every step takes 0.33 s instead of 0.32.
+  """
+  assert ENGINE_DTYPE is torch.float64
+  generator = WalkGenerator(1)
+  assert generator.time.dtype is ENGINE_DTYPE
+  assert QuinticWalkController(1).dtype is ENGINE_DTYPE
+
+
+def test_foot_switches_on_the_configured_step_period(device):
+  """The clock lands on the period exactly, so the cadence is the tuned one."""
+  generator = WalkGenerator(1, device=device)
+  command = torch.tensor([[0.15, 0.0, 0.0]], device=device)
+
+  previous = int(generator.phase[0])
+  switches = []
+  for step in range(600):
+    generator.update(CONTROL_DT, command)
+    current = int(generator.phase[0])
+    if current != previous:
+      switches.append(step)
+      previous = current
+
+  gaps = {b - a for a, b in zip(switches, switches[1:], strict=False)}
+  expected = round(NUGUS_WALK_PARAMETERS.step_period / CONTROL_DT)
+  assert gaps == {expected}, f"step lasted {gaps} ticks, expected {expected}"
 
 
 def test_engine_state_values_match_the_proto():

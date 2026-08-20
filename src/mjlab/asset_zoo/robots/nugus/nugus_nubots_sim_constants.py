@@ -10,19 +10,19 @@ a higher-fidelity one -- note the 100 N.m force range below, which the real
 
 Its other use is as the reference for the question this whole model raises: the
 quintic walk engine walks on the real robot and on NUbots' simulator, but falls
-after 1.75 s on the model mjlab trains policies against. Which difference is
+after 1.72 s on the model mjlab trains policies against. Which difference is
 responsible? Each one applied alone to the training model, driving the deployed
-walk for 20 s (``scripts/tools/play_quintic_walk.py --plant training``). Fall
-times are from the 0.3 m/s run; a 0.2 m/s run agrees to within 0.01 s:
+walk at 0.3 m/s for 20 s
+(``scripts/tools/play_quintic_walk.py --plant training``):
 
 ==================================  ==============================
 change                              outcome
 ==================================  ==============================
-training model, unmodified          falls after 1.75 s
-force range 11.09 -> 100 N.m        falls after 1.75 s
-frictionloss 0 -> 0.03              falls after 1.74 s
-``solref`` 0.02 -> 0.005            falls after 1.71 s
-leg joint ranges -> hardware        falls after 1.85 s
+training model, unmodified          falls after 1.72 s
+force range 11.09 -> 100 N.m        falls after 1.72 s
+frictionloss 0 -> 0.03              falls after 1.72 s
+``solref`` 0.02 -> 0.005            falls after 1.70 s
+leg joint ranges -> hardware        falls after 1.80 s
 backlash joints removed             walks, no fall
 ==================================  ==============================
 

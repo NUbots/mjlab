@@ -34,6 +34,7 @@ from mjlab.controllers.quintic_walk.kinematics import (
   NUGUS_TORSO_FRAME_OFFSET,
   make_transform,
 )
+from mjlab.controllers.quintic_walk.walk_generator import ENGINE_DTYPE
 from mjlab.utils.lab_api.math import matrix_from_quat
 
 # Motor joints of each leg, in chain order from the torso.
@@ -135,7 +136,7 @@ class LegChain:
     model: mujoco.MjModel,
     left: bool,
     device: torch.device | str = "cpu",
-    dtype: torch.dtype = torch.float32,
+    dtype: torch.dtype = ENGINE_DTYPE,
   ) -> LegChain:
     """Extract a leg chain from a compiled model.
 

@@ -37,6 +37,7 @@ from mjlab.controllers.quintic_walk.kinematics import (
   rpy_intrinsic_to_mat,
 )
 from mjlab.controllers.quintic_walk.walk_generator import (
+  ENGINE_DTYPE,
   NUGUS_MAX_ACCELERATION,
   NUGUS_WALK_PARAMETERS,
   Phase,
@@ -166,7 +167,7 @@ def sole_poses_in_torso(
   model: mujoco.MjModel,
   data: mujoco.MjData,
   device: torch.device | str = "cpu",
-  dtype: torch.dtype = torch.float32,
+  dtype: torch.dtype = ENGINE_DTYPE,
 ) -> tuple[torch.Tensor, torch.Tensor]:
   """Measure both sole poses in the torso frame from simulator state.
 
@@ -198,7 +199,21 @@ def sole_poses_in_torso(
 
 
 class QuinticWalkController:
-  """Batched quintic walk controller producing leg joint position targets."""
+  """Batched quintic walk controller producing leg joint position targets.
+
+  **Precision boundary.** The engine works in
+  :data:`~mjlab.controllers.quintic_walk.walk_generator.ENGINE_DTYPE`, which is
+  double, because the C++ does and because its phase clock accumulates. The
+  simulator around it is single precision -- warp is float32, and so is every
+  tensor mjlab hands back. The two meet in exactly two places, and neither
+  caller has to think about it:
+
+  - inputs: :meth:`compute` casts the command, the torso rotation and the gyro
+    up to the engine dtype, so measurements can be passed straight from
+    ``entity.data`` or from ``MjData``;
+  - outputs: the joint targets come back in the engine dtype, and the caller
+    casts them down when writing to ``ctrl`` or to a position-target buffer.
+  """
 
   joint_names = JOINT_NAMES
 
@@ -211,7 +226,7 @@ class QuinticWalkController:
     leg_model: LegModel = NUGUS_LEG,
     use_balance_control: bool = True,
     max_acceleration: tuple[float, float, float] = NUGUS_MAX_ACCELERATION,
-    dtype: torch.dtype = torch.float32,
+    dtype: torch.dtype = ENGINE_DTYPE,
     exact_ik_model: mujoco.MjModel | None = None,
     exact_ik_iterations: int = 8,
   ) -> None:
@@ -301,6 +316,12 @@ class QuinticWalkController:
     Returns:
       Shape ``(N, 12)`` joint position targets ordered as :data:`JOINT_NAMES`.
     """
+    velocity_command = velocity_command.to(self.dtype)
+    if torso_rotation_w is not None:
+      torso_rotation_w = torso_rotation_w.to(self.dtype)
+    if gyro_b is not None:
+      gyro_b = gyro_b.to(self.dtype)
+
     delta = self._max_acceleration * min(dt, 1.0)
     self._command = self._command + (velocity_command - self._command).clamp(
       -delta, delta

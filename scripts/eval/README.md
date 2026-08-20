@@ -37,7 +37,7 @@ that the NUbots models do not carry.
 uv run python scripts/eval/eval_quintic_walk.py --plant eval --num-envs 512 \
   --duration 20 --vx 0.3
 
-# Quintic, training plant. Expect it to fall at about 1.75 s.
+# Quintic, training plant. Expect it to fall at about 1.72 s.
 uv run python scripts/eval/eval_quintic_walk.py --plant training --num-envs 512
 
 # RL policy, both plants. The checkpoint argument is required.
@@ -162,23 +162,25 @@ kernel cache:
 
 | environments | wall time for 5 s each | throughput | device memory |
 | --- | --- | --- | --- |
-| 256 | 5.4 s | 235 robot-s/s | 0.18 GiB |
-| 1024 | 6.4 s | 803 robot-s/s | 0.23 GiB |
-| 2048 | 8.7 s | 1174 robot-s/s | 0.45 GiB |
-| 4096 | 15.7 s | 1308 robot-s/s | 1.34 GiB |
+| 256 | 7.5 s | 171 robot-s/s | 0.19 GiB |
+| 1024 | 8.4 s | 611 robot-s/s | 0.19 GiB |
+| 2048 | 11.9 s | 861 robot-s/s | 0.46 GiB |
+| 4096 | 21.4 s | 958 robot-s/s | 1.38 GiB |
 
-Throughput saturates around 1300 robot-seconds per second; batches in the low
+Throughput saturates around 950 robot-seconds per second; batches in the low
 thousands are comfortable and memory is nowhere near the limit, so the practical
 ceiling is time, not VRAM. A 4096 × 30 s collection is about two minutes of wall
-time. Add ~30 s the first time a model is compiled on a cold kernel cache. The
+time. (The engine runs in double, which costs roughly a quarter of the
+throughput on this card and buys a cadence that matches the C++ exactly; see
+``ENGINE_DTYPE``.) Add ~30 s the first time a model is compiled on a cold kernel cache. The
 RL side is faster per robot-second (50 Hz control against the engine's 100 Hz)
 but pays for policy inference.
 
 ## Things to read before designing an experiment
 
 **Backward walking falls over.** With the deployed parameters the quintic engine
-does not walk backwards: at −0.1 m/s it falls after about 2.4 s on the
-evaluation plant and 2.5 s on NUbots' own dynamics, and its mean displacement is
+does not walk backwards: at −0.1 m/s it falls after about 2.5 s on both the
+evaluation plant and NUbots' own dynamics, and its mean displacement is
 *forwards* under a backwards command. This is the tuning, not the plant or the
 port. Sweeping `--sweep-vx` through negative values will produce a wall of falls
 that says nothing new.
@@ -186,9 +188,9 @@ that says nothing new.
 **`only_switch_when_planted` is off, deliberately.** `Walk.yaml` sets it true,
 but `Walk.cpp` calls `set_parameters` before assigning that one field, so the
 deployed binary runs with it false. `--switch-when-planted True` turns it on if
-you want to measure it: forward it defers each foot switch by a single 10 ms
-tick and changes nothing, and turning in place it stalls the gait for up to
-160 ms at a time and topples the robot. See `NUGUS_WALK_PARAMETERS` in
+you want to measure it: forward it defers a single control tick in twenty
+seconds and changes nothing, and turning in place it stalls the gait for up to
+150 ms at a time and topples the robot after 2.3 s. See `NUGUS_WALK_PARAMETERS` in
 `src/mjlab/controllers/quintic_walk/walk_generator.py`.
 
 **The two engines do not start the same way, and should not.** The walk engine

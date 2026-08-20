@@ -36,7 +36,7 @@ stiffer contact (``solref`` 0.005 against mjlab's 0.02) and it would have been
 easy to import. It is not a randomisation range and not a fidelity bug, so
 changing it would just be a second plant. Measured, it does not matter to the
 walk engine either: driven at 0.2 and 0.3 m/s for 20 s, this model walks with
-either value (0.151 / 0.187 m/s at 0.005, 0.162 / 0.206 m/s at 0.02, upright
+either value (0.155 / 0.193 m/s at 0.005, 0.166 / 0.210 m/s at 0.02, upright
 throughout in all four). Use
 :mod:`~mjlab.asset_zoo.robots.nugus.nugus_nubots_sim_constants` if you want
 NUbots' contact model.
@@ -91,7 +91,7 @@ where the XML says, several centimetres from where the engine asked. Restoring
 the hardware range is a fidelity fix, not a retuning.
 
 It is not, on its own, what keeps the robot upright: on the training model the
-widened range delays the fall by 0.1 s and no more. The backlash joints are what
+widened range delays the fall by 0.08 s and no more. The backlash joints are what
 decide that.
 """
 

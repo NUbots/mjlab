@@ -62,10 +62,12 @@ def test_quintic_harness_walks_and_records():
   assert float(result.min_upright.min()) > 0.8
   assert float(result.displacement_x.min()) > 0.05
   assert int(harness.engine_state[0]) == int(EngineState.WALKING)
-  # Identical environments, identical commands, so identical trajectories.
-  assert float(result.achieved_vx[0]) == pytest.approx(
-    float(result.achieved_vx[1]), abs=1e-5
-  )
+  # Both environments walk, but do not assert they walk *identically*: a batched
+  # GPU run is not bit-reproducible across environments -- reduction ordering
+  # separates two identical robots by around 1e-7 per step, and a gait amplifies
+  # that. Reproducibility is a single-environment property; see
+  # test_step_callback_does_not_change_the_run.
+  assert float(result.achieved_vx.min()) > 0.0
 
   summary = summarise(result)
   assert summary["num_survived"] == 2

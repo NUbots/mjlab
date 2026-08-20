@@ -269,7 +269,11 @@ class QuinticEvalHarness:
       gyro_b=data.root_link_ang_vel_b,
       sensed_phase=self.sensed_phase(),
     )
-    self.robot.set_joint_position_target(targets, joint_ids=self._leg_ids)
+    # The engine works in double; mjlab's target buffer is float32. This is the
+    # output half of the precision boundary documented on QuinticWalkController.
+    self.robot.set_joint_position_target(
+      targets.to(self.robot.data.joint_pos_target.dtype), joint_ids=self._leg_ids
+    )
     self.robot.set_joint_position_target(
       self._posture_targets, joint_ids=self._posture_ids
     )

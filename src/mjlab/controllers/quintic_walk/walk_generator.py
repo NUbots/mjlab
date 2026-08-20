@@ -31,6 +31,23 @@ from mjlab.controllers.quintic_walk.spline import (
   make_waypoint,
 )
 
+ENGINE_DTYPE: torch.dtype = torch.float64
+"""Working precision of the engine, matching the C++.
+
+``WalkGenerator`` is templated on ``double`` in the NUbots source and is only
+ever instantiated as ``WalkGenerator<double>``, so double is the faithful
+choice rather than a luxury. It is also load bearing, because the phase clock
+accumulates: the step timer adds the control period to a running total and
+switches feet when it reaches ``step_period``. At float32, thirty-two additions
+of 0.01 land on 0.319999963, just under ``float32(0.32) = 0.3199999928``, so the
+switch waits an extra tick and every step lasts 0.33 s instead of 0.32 -- a
+three percent cadence error, downstream of nothing but rounding.
+
+The simulator around the engine stays in float32; see
+:class:`~mjlab.controllers.quintic_walk.controller.QuinticWalkController` for
+where the two meet.
+"""
+
 
 class EngineState(IntEnum):
   """Walk engine states, matching ``WalkState::State``."""
@@ -116,10 +133,10 @@ clock alone.
 
 Enabling it is a supported experiment rather than a fidelity fix, and playback
 always supplies the sensed phase so that it works. Measured on the eval plant,
-20 s per command: walking forward it defers each switch by a single 10 ms
-control tick and changes nothing. Turning in place at 0.5 rad/s it stalls the
-gait for up to 160 ms at a time and topples the robot after four seconds, where
-the clock-driven engine stays up. The reason is the ``Z_HEIGHT`` foot-down
+20 s per command: walking forward at 0.2 m/s it defers one control tick in the
+whole run and changes nothing. Turning in place at 0.5 rad/s it stalls the gait
+for up to 150 ms at a time and topples the robot after 2.3 s, where the
+clock-driven engine stays up for the full 20 s. The reason is the ``Z_HEIGHT`` foot-down
 detector it consumes: it reads the swing sole's height in the *stance* sole's
 frame, so a stance foot rolled onto its edge tilts the reference plane and the
 swing foot never registers as landed. NUbots' own ``FSR`` method does not have
@@ -166,7 +183,7 @@ class WalkGenerator:
     num_envs: int,
     device: torch.device | str = "cpu",
     params: WalkParameters = NUGUS_WALK_PARAMETERS,
-    dtype: torch.dtype = torch.float32,
+    dtype: torch.dtype = ENGINE_DTYPE,
   ) -> None:
     self.num_envs = num_envs
     self.device = torch.device(device)
@@ -294,6 +311,7 @@ class WalkGenerator:
     if dt <= 0.0 or dt > self.cfg.step_period:
       return self._state
 
+    velocity_target = velocity_target.to(self.dtype)
     period = self._p.step_period
     is_zero_command = (velocity_target == 0).all(dim=-1)
 
