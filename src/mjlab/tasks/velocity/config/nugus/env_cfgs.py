@@ -160,7 +160,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # - Ankle roll is very tight for balance; ankle pitch looser for foot clearance.
   # - Shoulders/elbows get moderate freedom for natural arm swing during walking.
   # Running values are ~1.5-2x walking values to accommodate larger motion range.
-  cfg.rewards["pose"].params["std_standing"] = {".*": 0.05}
+  cfg.rewards["pose"].params["std_standing"] = {".*": 0.15}
   cfg.rewards["pose"].params["std_walking"] = {
     # Lower body.
     r".*hip_pitch.*": 0.3,

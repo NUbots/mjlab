@@ -178,7 +178,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "twist": UniformVelocityCommandCfg(
       entity_name="robot",
       resampling_time_range=(3.0, 8.0),
-      rel_standing_envs=0.1,
+      rel_standing_envs=0.2,
       rel_heading_envs=0.3,
       rel_forward_envs=0.2,
       heading_command=True,
@@ -226,11 +226,11 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       interval_range_s=(3.0, 10.0),
       params={
         "velocity_range": {
-          "x": (-0.2, 0.4),
-          "y": (-0.2, 0.2),
+          "x": (-0.5, 0.5),
+          "y": (-0.5, 0.5),
           "z": (-0.0, 0.0),
-          "roll": (-0.05, 0.05),
-          "pitch": (-0.05, 0.05),
+          "roll": (-0.1, 0.1),
+          "pitch": (-0.1, 0.1),
           "yaw": (-0.0, 0.00),
         },
       },
@@ -297,7 +297,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "upright": RewardTermCfg(
       func=mdp.upright,
-      weight=1.0,
+      weight=0.0, # Disable
       params={
         "std": math.sqrt(0.2),
         "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
@@ -305,7 +305,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "pose": RewardTermCfg(
       func=mdp.variable_posture,
-      weight=1.0,
+      weight=3.0,
       params={
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
         "command_name": "twist",
@@ -327,8 +327,8 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"sensor_name": "robot/root_angmom"},
     ),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
-    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
-    "action_acc_l2": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.1),
+    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.2),
+    "action_acc_l2": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.2),
     "actuation_power": RewardTermCfg(
       func=mdp.electrical_power_cost,
       weight=0.0,  # Override per-robot.
@@ -434,7 +434,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_threshold": 0.05,
       },
     ),
-    "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-10.0),
+    "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-30.0),
   }
 
   ##
@@ -469,20 +469,20 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "velocity_stages": [
           {
             "step": 0,
-            "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.1, 0.1),
-            "ang_vel_z": (-0.05, 0.05),
+            "lin_vel_x": (-0.9, 0.9),
+            "lin_vel_y": (-0.3, 0.3),
+            "ang_vel_z": (-0.5, 0.5),
           },
           {
             "step": 9000 * 24,
-            "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.2, 0.2),
-            "ang_vel_z": (-0.1, 0.1),
+            "lin_vel_x": (-0.9, 0.9),
+            "lin_vel_y": (-0.3, 0.3),
+            "ang_vel_z": (-0.5, 0.5),
           },
           {
             "step": 12000 * 24,
-            "lin_vel_x": (-0.5, 0.5),
-            "lin_vel_y": (-0.1, 0.1),
+            "lin_vel_x": (-0.9, 0.9),
+            "lin_vel_y": (-0.3, 0.3),
             "ang_vel_z": (-0.5, 0.5),
           },
         ],
