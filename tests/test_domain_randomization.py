@@ -972,6 +972,12 @@ def _make_cam_light_env(device, num_envs=NUM_ENVS):
       "cam_intrinsic",
       "light_pos",
       "light_dir",
+      "light_diffuse",
+      "light_specular",
+      "light_ambient",
+      "light_attenuation",
+      "light_cutoff",
+      "light_exponent",
     ),
   )
 
@@ -1093,6 +1099,70 @@ def test_light_dir_add(cam_light_env):
     lo = default_dir[..., ax] - 0.5 - 1e-5
     hi = default_dir[..., ax] + 0.5 + 1e-5
     assert torch.all((result[..., ax] >= lo) & (result[..., ax] <= hi))
+
+
+@pytest.mark.parametrize(
+  ("func_name", "field", "ranges"),
+  [
+    ("light_diffuse", "light_diffuse", (0.2, 0.8)),
+    ("light_specular", "light_specular", (0.0, 1.0)),
+    ("light_ambient", "light_ambient", (0.1, 0.5)),
+    ("light_attenuation", "light_attenuation", (0.0, 1.0)),
+  ],
+)
+def test_light_vec3_fields_abs(cam_light_env, func_name, field, ranges):
+  """Vec3 light fields randomize per selected light."""
+  torch.manual_seed(42)
+  env = cam_light_env
+  robot = env.scene["robot"]
+  light_cfg = SceneEntityCfg("robot", light_names=(".*",))
+  light_cfg.resolve(env.scene)
+  light_ids = robot.indexing.light_ids[light_cfg.light_ids]
+  func = getattr(dr, func_name)
+
+  func(
+    env,
+    env_ids=None,
+    ranges=ranges,
+    operation="abs",
+    asset_cfg=light_cfg,
+  )
+
+  values = getattr(env.sim.model, field)[:, light_ids, :]
+  lower, upper = ranges
+  assert torch.all((values >= lower - 1e-5) & (values <= upper + 1e-5))
+  assert len(torch.unique(values[:, 0, 0])) >= 2
+
+
+@pytest.mark.parametrize(
+  ("func_name", "field", "ranges"),
+  [
+    ("light_cutoff", "light_cutoff", (20.0, 60.0)),
+    ("light_exponent", "light_exponent", (1.0, 20.0)),
+  ],
+)
+def test_light_scalar_fields_abs(cam_light_env, func_name, field, ranges):
+  """Scalar light fields randomize per selected light."""
+  torch.manual_seed(42)
+  env = cam_light_env
+  robot = env.scene["robot"]
+  light_cfg = SceneEntityCfg("robot", light_names=(".*",))
+  light_cfg.resolve(env.scene)
+  light_ids = robot.indexing.light_ids[light_cfg.light_ids]
+  func = getattr(dr, func_name)
+
+  func(
+    env,
+    env_ids=None,
+    ranges=ranges,
+    operation="abs",
+    asset_cfg=light_cfg,
+  )
+
+  values = getattr(env.sim.model, field)[:, light_ids]
+  lower, upper = ranges
+  assert torch.all((values >= lower - 1e-5) & (values <= upper + 1e-5))
+  assert len(torch.unique(values[:, 0])) >= 2
 
 
 def test_camera_partial_env_ids(cam_light_env):
@@ -1780,6 +1850,284 @@ def test_mat_rgba_invalid_name(mat_env):
       ranges=(0.2, 0.8),
       asset_cfg=cfg,
     )
+
+
+# geom_matid DR tests.
+
+GEOM_MATID_XML = """
+<mujoco>
+  <asset>
+    <material name="mat_a" rgba="1 0 0 1"/>
+    <material name="mat_b" rgba="0 1 0 1"/>
+    <material name="mat_c" rgba="0 0 1 1"/>
+  </asset>
+  <worldbody>
+    <body name="base" pos="0 0 1">
+      <freejoint name="free_joint"/>
+      <geom name="geom1" type="box" size="0.1 0.1 0.1" mass="1.0" material="mat_a"/>
+      <geom name="geom2" type="sphere" size="0.05" mass="0.3" material="mat_b"/>
+    </body>
+  </worldbody>
+</mujoco>
+"""
+
+
+def _make_matid_env(device, num_envs=NUM_ENVS):
+  entity_cfg = EntityCfg(spec_fn=lambda: mujoco.MjSpec.from_string(GEOM_MATID_XML))
+  scene_cfg = SceneCfg(num_envs=num_envs, entities={"robot": entity_cfg})
+  scene = Scene(scene_cfg, device)
+  model = scene.compile()
+  sim = Simulation(num_envs=num_envs, cfg=SimulationCfg(), model=model, device=device)
+  scene.initialize(model, sim.model, sim.data)
+  sim.expand_model_fields(("geom_matid",))
+  return Env(scene, sim, device)
+
+
+@pytest.fixture(scope="module")
+def matid_env(device):
+  return _make_matid_env(device)
+
+
+def test_geom_matid_draws_from_pool(matid_env):
+  """Assigned matids come from the pool and actually change from the defaults."""
+  torch.manual_seed(42)
+  env = matid_env
+  robot = env.scene["robot"]
+  asset_cfg = SceneEntityCfg("robot", geom_names=(".*",), material_names=(".*",))
+  asset_cfg.resolve(env.scene)
+
+  geom_ids = robot.indexing.geom_ids[asset_cfg.geom_ids]
+  mat_ids = robot.indexing.mat_ids[asset_cfg.material_ids]
+  original = env.sim.model.geom_matid[:, geom_ids].clone()
+
+  dr.geom_matid(env, env_ids=None, asset_cfg=asset_cfg)
+
+  assigned = env.sim.model.geom_matid[:, geom_ids]
+  # Every assignment is a valid member of the selected pool.
+  assert torch.all(torch.isin(assigned, mat_ids))
+  # Randomization is not a no-op: values differ from the baked defaults, and at
+  # least one geom draws a material it did not start with (proving the full pool
+  # is sampled, not just the compile-time defaults).
+  assert not torch.equal(assigned, original)
+  assert torch.isin(assigned, torch.unique(original), invert=True).any()
+
+
+def test_geom_matid_partial_env_ids(matid_env):
+  """Randomizing subset of envs leaves others unchanged."""
+  torch.manual_seed(42)
+  env = matid_env
+  robot = env.scene["robot"]
+  asset_cfg = SceneEntityCfg("robot", geom_names=(".*",), material_names=(".*",))
+  asset_cfg.resolve(env.scene)
+  geom_ids = robot.indexing.geom_ids[asset_cfg.geom_ids]
+
+  original = env.sim.model.geom_matid[:, geom_ids].clone()
+
+  dr.geom_matid(
+    env, env_ids=torch.tensor([0, 2], device=env.device), asset_cfg=asset_cfg
+  )
+
+  result = env.sim.model.geom_matid[:, geom_ids]
+  assert torch.all(result[1] == original[1])
+  assert torch.all(result[3] == original[3])
+
+
+def test_geom_matid_invalid_material_name(matid_env):
+  """Unknown material name is rejected during config resolution."""
+  env = matid_env
+
+  with pytest.raises(ValueError, match="nonexistent_material"):
+    cfg = SceneEntityCfg(
+      "robot", geom_names=(".*",), material_names=("nonexistent_material",)
+    )
+    cfg.resolve(env.scene)
+    dr.geom_matid(env, env_ids=None, asset_cfg=cfg)
+
+
+def test_geom_matid_empty_material_selection(matid_env):
+  """geom_matid raises when the resolved material pool is empty."""
+  env = matid_env
+  cfg = SceneEntityCfg("robot", geom_names=(".*",), material_names=())
+  cfg.resolve(env.scene)
+
+  with pytest.raises(ValueError, match="No materials selected"):
+    dr.geom_matid(env, env_ids=None, asset_cfg=cfg)
+
+
+def test_geom_matid_shared_random(matid_env):
+  """All geoms within same env get same material, envs differ."""
+  torch.manual_seed(42)
+  env = matid_env
+  robot = env.scene["robot"]
+  asset_cfg = SceneEntityCfg("robot", geom_names=(".*",), material_names=(".*",))
+  asset_cfg.resolve(env.scene)
+  geom_ids = robot.indexing.geom_ids[asset_cfg.geom_ids]
+
+  dr.geom_matid(env, env_ids=None, asset_cfg=asset_cfg, shared_random=True)
+
+  assigned = env.sim.model.geom_matid[:, geom_ids]
+  for env_idx in range(env.num_envs):
+    env_matids = assigned[env_idx]
+    assert torch.all(env_matids == env_matids[0])
+
+  assert len(torch.unique(assigned[:, 0])) > 1
+
+
+# mat_texid DR tests.
+
+MAT_TEXID_XML = """
+<mujoco>
+  <asset>
+    <texture name="tex_a" type="2d" builtin="flat" rgb1="1 0 0" width="4" height="4"/>
+    <texture name="tex_b" type="2d" builtin="flat" rgb1="0 1 0" width="4" height="4"/>
+    <texture name="tex_c" type="2d" builtin="flat" rgb1="0 0 1" width="4" height="4"/>
+    <texture name="tex_d" type="2d" builtin="flat" rgb1="1 1 0" width="4" height="4"/>
+    <material name="mat_a" texture="tex_a"/>
+    <material name="mat_b" texture="tex_b"/>
+  </asset>
+  <worldbody>
+    <body name="base" pos="0 0 1">
+      <freejoint name="free_joint"/>
+      <geom name="geom1" type="box" size="0.1 0.1 0.1" mass="1.0" material="mat_a"/>
+      <geom name="geom2" type="sphere" size="0.05" mass="0.3" material="mat_b"/>
+    </body>
+  </worldbody>
+</mujoco>
+"""
+
+
+def _make_texid_env(device, num_envs=NUM_ENVS):
+  entity_cfg = EntityCfg(spec_fn=lambda: mujoco.MjSpec.from_string(MAT_TEXID_XML))
+  scene_cfg = SceneCfg(num_envs=num_envs, entities={"robot": entity_cfg})
+  scene = Scene(scene_cfg, device)
+  model = scene.compile()
+  sim = Simulation(num_envs=num_envs, cfg=SimulationCfg(), model=model, device=device)
+  scene.initialize(model, sim.model, sim.data)
+  sim.expand_model_fields(("mat_texid",))
+  return Env(scene, sim, device)
+
+
+@pytest.fixture
+def texid_env(device):
+  # Function-scoped so tests compare against pristine mat_texid defaults.
+  return _make_texid_env(device)
+
+
+def test_mat_texid_draws_from_pool(texid_env):
+  """Assigned texids come from the pool and actually change from the defaults."""
+  torch.manual_seed(42)
+  env = texid_env
+  robot = env.scene["robot"]
+  asset_cfg = SceneEntityCfg("robot", material_names=(".*",), texture_names=(".*",))
+  asset_cfg.resolve(env.scene)
+
+  mat_ids = robot.indexing.mat_ids[asset_cfg.material_ids]
+  tex_ids = robot.indexing.tex_ids[asset_cfg.texture_ids]
+  role = mujoco.mjtTextureRole.mjTEXROLE_RGB.value
+  original = env.sim.model.mat_texid[:, mat_ids, role].clone()
+
+  dr.mat_texid(env, env_ids=None, asset_cfg=asset_cfg)
+
+  assigned = env.sim.model.mat_texid[:, mat_ids, role]
+  assert torch.all(torch.isin(assigned, tex_ids))
+  assert not torch.equal(assigned, original)
+  assert torch.isin(assigned, torch.unique(original), invert=True).any()
+
+
+def test_mat_texid_respects_texture_subset(texid_env):
+  """Textures outside the selection are never sampled."""
+  torch.manual_seed(42)
+  env = texid_env
+  robot = env.scene["robot"]
+  # The pool excludes tex_a and tex_b, which are the two materials' defaults.
+  asset_cfg = SceneEntityCfg(
+    "robot", material_names=(".*",), texture_names=("tex_c", "tex_d")
+  )
+  asset_cfg.resolve(env.scene)
+
+  mat_ids = robot.indexing.mat_ids[asset_cfg.material_ids]
+  tex_ids = robot.indexing.tex_ids[asset_cfg.texture_ids]
+  role = mujoco.mjtTextureRole.mjTEXROLE_RGB.value
+  excluded = torch.unique(env.sim.model.mat_texid[:, mat_ids, role])
+
+  dr.mat_texid(env, env_ids=None, asset_cfg=asset_cfg)
+
+  assigned = env.sim.model.mat_texid[:, mat_ids, role]
+  assert torch.all(torch.isin(assigned, tex_ids))
+  assert not torch.isin(assigned, excluded).any()
+  assert len(torch.unique(assigned)) >= 2
+
+
+def test_mat_texid_partial_env_ids(texid_env):
+  """Randomizing subset of envs leaves others unchanged."""
+  torch.manual_seed(42)
+  env = texid_env
+  robot = env.scene["robot"]
+  asset_cfg = SceneEntityCfg(
+    "robot", material_names=(".*",), texture_names=("tex_c", "tex_d")
+  )
+  asset_cfg.resolve(env.scene)
+  mat_ids = robot.indexing.mat_ids[asset_cfg.material_ids]
+  tex_ids = robot.indexing.tex_ids[asset_cfg.texture_ids]
+  role = mujoco.mjtTextureRole.mjTEXROLE_RGB.value
+
+  original = env.sim.model.mat_texid[:, mat_ids, role].clone()
+
+  dr.mat_texid(
+    env, env_ids=torch.tensor([0, 2], device=env.device), asset_cfg=asset_cfg
+  )
+
+  result = env.sim.model.mat_texid[:, mat_ids, role]
+  # Envs 0, 2 changed, the pool excludes their defaults.
+  assert torch.all(torch.isin(result[0], tex_ids))
+  assert torch.all(torch.isin(result[2], tex_ids))
+  assert not torch.equal(result[0], original[0])
+  assert not torch.equal(result[2], original[2])
+  # Envs 1, 3 unchanged.
+  assert torch.all(result[1] == original[1])
+  assert torch.all(result[3] == original[3])
+
+
+def test_mat_texid_invalid_texture_name(texid_env):
+  """Unknown texture name is rejected during config resolution."""
+  env = texid_env
+
+  with pytest.raises(ValueError, match="nonexistent_texture"):
+    cfg = SceneEntityCfg(
+      "robot", material_names=(".*",), texture_names=("nonexistent_texture",)
+    )
+    cfg.resolve(env.scene)
+    dr.mat_texid(env, env_ids=None, asset_cfg=cfg)
+
+
+def test_mat_texid_empty_texture_selection(texid_env):
+  """mat_texid raises when the resolved texture pool is empty."""
+  env = texid_env
+  cfg = SceneEntityCfg("robot", material_names=(".*",), texture_names=())
+  cfg.resolve(env.scene)
+
+  with pytest.raises(ValueError, match="No textures selected"):
+    dr.mat_texid(env, env_ids=None, asset_cfg=cfg)
+
+
+def test_mat_texid_shared_random(texid_env):
+  """All materials within same env get same texture, envs differ."""
+  torch.manual_seed(42)
+  env = texid_env
+  robot = env.scene["robot"]
+  asset_cfg = SceneEntityCfg("robot", material_names=(".*",), texture_names=(".*",))
+  asset_cfg.resolve(env.scene)
+  mat_ids = robot.indexing.mat_ids[asset_cfg.material_ids]
+  role = mujoco.mjtTextureRole.mjTEXROLE_RGB.value
+
+  dr.mat_texid(env, env_ids=None, asset_cfg=asset_cfg, shared_random=True)
+
+  assigned = env.sim.model.mat_texid[:, mat_ids, role]
+  for env_idx in range(env.num_envs):
+    env_texids = assigned[env_idx]
+    assert torch.all(env_texids == env_texids[0])
+
+  assert len(torch.unique(assigned[:, 0])) > 1
 
 
 # pair_friction tests.

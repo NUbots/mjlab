@@ -39,6 +39,7 @@ _ENTITY_NAMES_ATTR: dict[str, str] = {
   "camera": "camera_names",
   "light": "light_names",
   "material": "material_names",
+  "texture": "texture_names",
   "pair": "pair_names",
 }
 
@@ -226,6 +227,8 @@ def _get_entity_indices(
       return indexing.light_ids[asset_cfg.light_ids]
     case "material":
       return indexing.mat_ids[asset_cfg.material_ids]
+    case "texture":
+      return indexing.tex_ids[asset_cfg.texture_ids]
     case "pair":
       return indexing.pair_ids[asset_cfg.pair_ids]
     case _:
@@ -310,6 +313,42 @@ def _generate_random_values(
       result = random_vals
 
   return result
+
+
+# Categorical engine.
+
+
+def _randomize_categorical_field(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  field: str,
+  *,
+  entity_type: str,
+  pool: torch.Tensor,
+  asset_cfg: SceneEntityCfg,
+  shared_random: bool = False,
+  axis: int | None = None,
+) -> None:
+  """Core engine for categorical fields: assign each entry a value from ``pool``."""
+  asset = env.scene[asset_cfg.name]
+
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
+  else:
+    env_ids = env_ids.to(env.device, dtype=torch.int)
+
+  entity_indices = _get_entity_indices(asset.indexing, asset_cfg, entity_type, False)
+  env_grid, entity_grid = torch.meshgrid(env_ids, entity_indices, indexing="ij")
+
+  sample_shape = (env_ids.numel(), 1) if shared_random else env_grid.shape
+  pick = torch.randint(0, int(pool.numel()), sample_shape, device=env.device)
+  pick = pick.expand(env_grid.shape)
+
+  model_field = getattr(env.sim.model, field)
+  if axis is None:
+    model_field[env_grid, entity_grid] = pool[pick]
+  else:
+    model_field[env_grid, entity_grid, axis] = pool[pick]
 
 
 # Quaternion helpers.
