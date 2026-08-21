@@ -1,23 +1,26 @@
 # Walk engine evaluation
 
-Batched, GPU-parallel evaluation of two walk controllers on two robot models.
+Batched, GPU-parallel evaluation of three walk controllers on two robot models.
 The scripts here set up and run the comparison; **collecting the data is left to
 you** — everything below has only been smoke-tested at 64 environments.
 
 - `eval_quintic_walk.py` — the ported NUbots quintic walk engine.
+- `eval_distilled_quintic_walk.py` — NUbots' distilled copy of that engine, the
+  policy their `module/skill/NeuralWalk` deploys.
 - `eval_rl_walk.py` — a trained RL policy, from an rsl-rl checkpoint.
 
-Both are thin entry points over `mjlab.evaluation`, which holds the plant
-construction, the two harnesses, the metrics and the output format. Neither
-script computes a metric of its own: they both hand raw simulator state to
-`WalkMetrics`, so the two engines' numbers are produced by the same code.
+All three are thin entry points over `mjlab.evaluation`, which holds the plant
+construction, the harnesses, the metrics and the output format. No script
+computes a metric of its own: they all hand raw simulator state to
+`WalkMetrics`, so every controller's numbers are produced by the same code.
 
-## The 2x2
+## The grid
 
-|                  | `--plant eval`                     | `--plant training`                    |
-| ---------------- | ---------------------------------- | ------------------------------------- |
-| **quintic walk** | `eval_quintic_walk.py`             | `eval_quintic_walk.py --plant training` |
-| **RL policy**    | `eval_rl_walk.py --checkpoint ...` | `eval_rl_walk.py --plant training --checkpoint ...` |
+|                    | `--plant eval`                     | `--plant training`                    |
+| ------------------ | ---------------------------------- | ------------------------------------- |
+| **quintic walk**   | `eval_quintic_walk.py`             | `eval_quintic_walk.py --plant training` |
+| **distilled copy** | `eval_distilled_quintic_walk.py`   | `eval_distilled_quintic_walk.py --plant training` |
+| **RL policy**      | `eval_rl_walk.py --checkpoint ...` | `eval_rl_walk.py --plant training --checkpoint ...` |
 
 `eval` is the reference model: sim-to-real randomisation at nominal and the
 hardware's ±π leg joint limits, and otherwise the training model untouched.
@@ -25,10 +28,11 @@ hardware's ±π leg joint limits, and otherwise the training model untouched.
 latency, narrow RL joint clamps. See
 `src/mjlab/asset_zoo/robots/nugus/nugus_eval_constants.py` for the argument.
 
-The quintic script additionally takes `--plant nubots-sim` (NUbots' dynamics on
-mjlab's kinematic tree) and `--plant nubots-xml` (their MJCF verbatim). The
-policy cannot run on those: its observations read mjlab sensor and site names
-that the NUbots models do not carry.
+The quintic and distilled scripts additionally take `--plant nubots-sim`
+(NUbots' dynamics on mjlab's kinematic tree) and `--plant nubots-xml` (their
+MJCF verbatim). The RL policy cannot run on those: its observations read mjlab
+sensor and site names that the NUbots models do not carry. The distilled policy
+can, because it reads nothing at all — see below.
 
 ## Running
 
@@ -39,6 +43,15 @@ uv run python scripts/eval/eval_quintic_walk.py --plant eval --num-envs 512 \
 
 # Quintic, training plant. Expect it to fall at about 1.72 s.
 uv run python scripts/eval/eval_quintic_walk.py --plant training --num-envs 512
+
+# The distilled copy of the engine, both plants. No checkpoint to supply: the
+# policy NUbots deploys ships with mjlab.
+uv run python scripts/eval/eval_distilled_quintic_walk.py --plant eval \
+  --num-envs 512 --duration 20 --vx 0.3
+uv run python scripts/eval/eval_distilled_quintic_walk.py --plant training
+
+# How far the copy runs from the engine it copies, joint by joint.
+uv run python scripts/eval/eval_distilled_quintic_walk.py --track-teacher True
 
 # RL policy, both plants. The checkpoint argument is required.
 uv run python scripts/eval/eval_rl_walk.py --plant eval --num-envs 512 \
@@ -67,6 +80,8 @@ step and throttles the run to real time.
 
 ```sh
 uv run python scripts/eval/eval_quintic_walk.py --num-envs 1 --duration 20 --viser True
+uv run python scripts/eval/eval_distilled_quintic_walk.py --num-envs 1 --duration 20 \
+  --viser True
 uv run python scripts/eval/eval_rl_walk.py --num-envs 1 --duration 20 --viser True \
   --checkpoint logs/rsl_rl/nugus_velocity/wandb_checkpoints/5l83efo3/model_39997.pt
 ```
@@ -104,6 +119,60 @@ machine, `5l83efo3/model_39997.pt` tracks a 0.3 m/s command to within 0.005 m/s,
 stands. A 10 s run at 64 environments takes well under a minute and tells you
 which you have: look at `achieved_vx` against the command you gave.
 
+### The distilled policy
+
+`eval_distilled_quintic_walk.py` needs no checkpoint. The policy NUbots deploys
+is copied into the repository at
+`src/mjlab/controllers/distilled_walk/data/walk_policy.onnx` (their
+`module/skill/NeuralWalk/data/model/walk_policy.onnx`, with its external weight
+file folded in) and is the default for `--policy`. Its weights are read out of
+the ONNX and replayed with torch operators, so a whole batch infers on the GPU
+at once; `test_distilled_walk_policy.py` pins that replay against onnxruntime
+and against two hundred steps of NUbots' own recorded training data, which it
+reproduces to 0.03°.
+
+**The policy is blind.** Its forty-six observations are the velocity command,
+the walk engine's phase clock and state, and its own three previous outputs —
+no joint positions, no attitude, no contact. It is a learned trajectory
+generator, not a feedback controller, and it will keep producing a gait for a
+robot lying on the floor. That is also why it runs on every plant: it asks the
+model for nothing. The phase clock is mjlab's port of the walk engine, the same
+object `WalkDataCollector` drove to generate the training set; replaying a
+recorded episode through it reproduces the recorded clock columns to 3e-8.
+
+**It learned a different IK from the one this engine ships.** The training
+targets came from NUbots' deployed solver — the analytical solution refined
+numerically against `models/robot.urdf` — while `calculate_leg_joints` here is
+the analytical one alone. Standing, the policy asks for 1.359 rad of knee where
+this engine's idealised IK asks for 0.845 and its exact-geometry solver
+(`--exact-ik`) asks for 1.723. So the policy stands in a deeper crouch than
+`eval_quintic_walk.py` does, and comparing the two joint angle by joint angle
+mostly measures that calibration rather than the distillation.
+
+Two flags follow from it:
+
+- `--history-init` chooses what the run starts from. The default, `settled`,
+  iterates the policy at zero command until its output stops moving and starts
+  the robot in *that* pose — standing is a fixed point of an autoregressive
+  policy, and this one's fixed point matches the stance recorded in NUbots'
+  training data to 1e-4 rad, so the training-time stance is recovered without
+  needing the IK that produced it. `stance` starts from the walk engine's stance
+  instead, which is the same start `eval_quintic_walk.py` uses; the policy
+  leaves it within three control steps. `zeros` reproduces the thirty-six zeros
+  `NeuralWalk.cpp` assigns on start.
+- `--track-teacher` runs the walk engine alongside on the same commands and
+  writes a `teacher_tracking` block into `summary.json`. Read
+  `stance_relative_mean_abs_error_rad`, not `mean_abs_error_rad`: the first
+  subtracts each controller's own standing pose and leaves the shape of the
+  motion, the second is dominated by the IK offset above. At 0.2 m/s forward on
+  the evaluation plant they come out around 0.012 rad and 0.165 rad
+  respectively.
+
+The engine it is compared against runs with balance control off, because
+`WalkDataCollector` recorded the generator's own foot poses and never ran
+`FootController` over them — the policy never saw a balance correction and
+cannot produce one.
+
 ## Output
 
 Each run writes a directory under `--output-dir` (default `logs/eval/`), named
@@ -132,8 +201,9 @@ logs/eval/quintic_eval_20260819_084037/
 CSV rather than parquet: a run is one row per environment, so even a large sweep
 is a few thousand rows, and CSV costs no dependency and opens anywhere.
 
-`summary.json` carries `run` (engine, plant, checkpoint, batch size, duration,
-control rate, wall time), the fall statistics, and then two blocks of the same
+`summary.json` carries `run` (engine, plant, checkpoint or policy, batch size,
+duration, control rate, wall time), a `teacher_tracking` block if the distilled
+run was given `--track-teacher`, the fall statistics, and then two blocks of the same
 walking metrics: `survivors` and `all_envs`. Quote the survivor figures —
 averaging a fallen robot's slide into a mean speed describes neither population
 — and note that when nothing survives they are all NaN and only `all_envs` has
@@ -174,7 +244,10 @@ time. (The engine runs in double, which costs roughly a quarter of the
 throughput on this card and buys a cadence that matches the C++ exactly; see
 ``ENGINE_DTYPE``.) Add ~30 s the first time a model is compiled on a cold kernel cache. The
 RL side is faster per robot-second (50 Hz control against the engine's 100 Hz)
-but pays for policy inference.
+but pays for policy inference. The distilled policy replaces the engine's IK
+with one small matrix multiply per control step and keeps the phase clock, so it
+is a little cheaper than the quintic side at the same rate — until
+`--track-teacher`, which runs both and costs both.
 
 ## Things to read before designing an experiment
 
@@ -193,12 +266,24 @@ seconds and changes nothing, and turning in place it stalls the gait for up to
 150 ms at a time and topples the robot after 2.3 s. See `NUGUS_WALK_PARAMETERS` in
 `src/mjlab/controllers/quintic_walk/walk_generator.py`.
 
-**The two engines do not start the same way, and should not.** The walk engine
-begins in the stance its own generator holds, at 100 Hz; the policy begins at
-the task keyframe, at the task's 50 Hz. Each controller gets its own home pose
-and its own control rate because that is what each one is; forcing either onto
-the other's terms would measure the transplant. What *is* shared is the plant,
-built from one place for both, and the measurement.
+**The three controllers do not start the same way, and should not.** The walk
+engine begins in the stance its own generator holds, at 100 Hz; the distilled
+policy begins in the stance *it* holds at rest, also at 100 Hz, and the two
+stances are not the same one; the RL policy begins at the task keyframe, at the
+task's 50 Hz. Each controller gets its own home pose and its own control rate
+because that is what each one is, and a robot planted in another controller's
+stance spends its first control steps being dragged out of it. What *is* shared
+is the plant, built from one place for all three, and the measurement.
+
+**The distilled policy is not the engine with a different label.** It copies the
+engine's trajectories through a different IK, at a different stance, with no
+balance correction and no way to react to the robot at all. Where it beats the
+engine — on the evaluation plant at 0.2 m/s it tracked forward speed slightly
+better and halved RMS pitch in a short smoke test, and on the training plant it
+fell at 1.4 s against the engine's 1.7 — the interesting question is which of
+those differences it is, and the answer is usually the crouch rather than the
+network. `--track-teacher` and `--exact-ik` on the quintic side are the two
+handles for separating them.
 
 **The RL script uses the task environment internally.** The policy expects
 noise-shaped, delayed, clock-augmented, normalised observations, so

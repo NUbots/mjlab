@@ -9,8 +9,10 @@ import pytest
 import torch
 from conftest import get_test_device
 
+from mjlab.controllers.quintic_walk.controller import JOINT_NAMES
 from mjlab.controllers.quintic_walk.walk_generator import EngineState
 from mjlab.evaluation.harness import (
+  DistilledEvalHarness,
   QuinticEvalHarness,
   command_grid,
   constant_command,
@@ -115,3 +117,41 @@ def test_step_callback_does_not_change_the_run():
     assert getattr(observed, name).tolist() == pytest.approx(
       getattr(expected, name).tolist(), abs=1e-9
     )
+
+
+@pytest.mark.slow
+def test_distilled_harness_walks_and_records():
+  """The distilled policy drives the same rig, and its copy holds up."""
+  device = get_test_device()
+  harness = DistilledEvalHarness(
+    plant="eval", num_envs=2, device=device, track_teacher=True
+  )
+
+  assert harness.control_dt == pytest.approx(0.01), "policy runs at 100 Hz"
+
+  result = harness.run(constant_command(0.2, 0.0, 0.0, 2, device), 3.0).result()
+
+  assert result.survived.tolist() == [1.0, 1.0]
+  assert float(result.displacement_x.min()) > 0.05
+  assert int(harness.engine_state[0]) == int(EngineState.WALKING)
+
+  tracking = harness.teacher_tracking()
+  assert tracking is not None
+  assert tracking["steps"] == int(3.0 / harness.control_dt)
+  # About its own stance the copy stays close to the engine it was fit to. The
+  # raw gap is larger because the two solve different IK; see the harness.
+  assert tracking["stance_relative_mean_abs_error_rad"] < 0.05
+  assert tracking["mean_abs_error_rad"] > tracking["stance_relative_mean_abs_error_rad"]
+
+
+@pytest.mark.slow
+def test_distilled_harness_starts_in_the_pose_the_policy_asks_for():
+  """Otherwise the first control step is a yank rather than a walk."""
+  device = get_test_device()
+  harness = DistilledEvalHarness(plant="eval", num_envs=1, device=device)
+  lookup = {name: index for index, name in enumerate(harness.robot.joint_names)}
+
+  legs = [lookup[name] for name in JOINT_NAMES]
+  standing = harness.robot.data.joint_pos[0, legs]
+
+  assert torch.allclose(standing, harness.controller.home_targets[0], atol=1e-5)

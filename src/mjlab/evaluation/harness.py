@@ -1,45 +1,63 @@
 """Batched harnesses for the walk-engine comparison.
 
-Two engines, two robot models, one set of metrics. The engines are as different
-as they can be -- one is a hand-tuned trajectory generator, the other a learned
-policy with its own observation pipeline -- so the thing that has to be shared
-is everything *around* them:
+Three controllers, two robot models, one set of metrics. The controllers are as
+different as they can be -- a hand-tuned trajectory generator, a policy
+supervised to copy it, and a policy that learned to walk from reward, the last
+with an observation pipeline of its own -- so the thing that has to be shared is
+everything *around* them:
 
-- the plant, built here from one place for both (:func:`eval_scene_cfg`), taking
-  its terrain and solver settings from the same task config the policy trains
-  against, so the two engines meet the same floor and the same integrator;
+- the plant, built here from one place for all of them
+  (:func:`eval_scene_cfg`), taking its terrain and solver settings from the same
+  task config the policy trains against, so every controller meets the same
+  floor and the same integrator;
 - the measurement, via
   :meth:`~mjlab.evaluation.metrics.EvalState.from_entity`, which reads the same
-  robot state in both harnesses.
+  robot state in every harness.
 
-What is *not* shared is each engine's own home stance and control rate. The walk
-engine runs at 100 Hz from the stance its own trajectory generator holds; the
-policy runs at the task's 50 Hz from the keyframe it was trained from. Forcing
-either onto the other's terms would measure the transplant rather than the
-controller.
+What is *not* shared is each controller's own home stance and control rate. The
+walk engine runs at 100 Hz from the stance its own trajectory generator holds;
+the distilled policy runs at 100 Hz from the stance it holds at rest, which is
+not the same stance; the reinforcement-learned policy runs at the task's 50 Hz
+from the keyframe it was trained from. Forcing any of them onto another's terms
+would measure the transplant rather than the controller.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable, Generic, Literal, Protocol, TypeVar
 
 import mujoco
 import numpy as np
 import torch
 
+from mjlab.controllers.distilled_walk.controller import (
+  DistilledWalkController,
+  HistoryInit,
+)
+from mjlab.controllers.distilled_walk.policy import (
+  DEFAULT_POLICY_PATH,
+  DistilledWalkPolicy,
+)
 from mjlab.controllers.quintic_walk.controller import (
   JOINT_NAMES,
   QuinticWalkController,
   detect_planted_phase,
   sole_poses_from_body_states,
 )
-from mjlab.controllers.quintic_walk.playback import PLANTS, POSTURE, WalkPlayback
+from mjlab.controllers.quintic_walk.playback import (
+  PLANTS,
+  POSTURE,
+  WalkPlayback,
+  build_model,
+  stand_on_leg_targets,
+)
 from mjlab.controllers.quintic_walk.walk_generator import (
   NUGUS_WALK_PARAMETERS,
   EngineState,
   Phase,
+  WalkGenerator,
   WalkParameters,
 )
 from mjlab.entity import Entity
@@ -140,33 +158,58 @@ def constant_command(
   )
 
 
+class WalkController(Protocol):
+  """What :class:`WalkEvalHarness` needs from a controller.
+
+  Both :class:`~mjlab.controllers.quintic_walk.controller.QuinticWalkController`
+  and
+  :class:`~mjlab.controllers.distilled_walk.controller.DistilledWalkController`
+  satisfy this. The generator is here because the two run the same phase clock,
+  so a run of either can be asked what state its engine ended in.
+  """
+
+  generator: WalkGenerator
+
+  def reset(self, env_ids: torch.Tensor | None = None) -> None: ...
+
+
+ControllerT = TypeVar("ControllerT", bound=WalkController)
+
+
 def _body_ids(entity: Entity, names: tuple[str, ...], device) -> torch.Tensor:
   lookup = {name: index for index, name in enumerate(entity.body_names)}
   return torch.tensor([lookup[name] for name in names], device=device)
 
 
-class QuinticEvalHarness:
-  """Batched playback of the quintic walk engine.
+class WalkEvalHarness(Generic[ControllerT]):
+  """Plant, stance and measurement shared by the scripted-controller rigs.
 
   Mirrors the single-environment rig in
   :mod:`~mjlab.controllers.quintic_walk.playback`, with two differences that
   come from running through mjlab's stack rather than raw MuJoCo: joint targets
   go through the entity's actuators, so actuator latency applies where the plant
   configures it, and the physics runs at the task's timestep.
+
+  A subclass supplies a ``controller`` -- which has to expose ``reset()`` and a
+  ``generator``, so the phase clock reads the same way for both engines -- the
+  stance to start from, and the targets for one control step. Everything else is
+  the same code either way, which is what makes the two sets of numbers
+  comparable.
   """
+
+  controller: ControllerT
+  _stance_root_pose: torch.Tensor
+  _stance_joint_pos: torch.Tensor
 
   def __init__(
     self,
-    plant: EvalPlant = "eval",
-    num_envs: int = 64,
-    device: str = "cuda:0",
-    walk_params: WalkParameters = NUGUS_WALK_PARAMETERS,
-    use_balance_control: bool = True,
-    exact_ik: bool = False,
+    plant: EvalPlant,
+    num_envs: int,
+    device: str,
     control_hz: float = QUINTIC_CONTROL_HZ,
   ) -> None:
     scene_cfg, sim_cfg = eval_scene_cfg(plant, num_envs)
-    self.plant = plant
+    self.plant: EvalPlant = plant
     self.num_envs = num_envs
     self.device = device
 
@@ -179,14 +222,6 @@ class QuinticEvalHarness:
     self.physics_dt = float(self.sim.mj_model.opt.timestep)
     self.decimation = max(1, round((1.0 / control_hz) / self.physics_dt))
     self.control_dt = self.decimation * self.physics_dt
-
-    self.controller = QuinticWalkController(
-      num_envs=num_envs,
-      device=device,
-      walk_params=walk_params,
-      use_balance_control=use_balance_control,
-      exact_ik_model=self.sim.mj_model if exact_ik else None,
-    )
 
     joint_lookup = {name: index for index, name in enumerate(self.robot.joint_names)}
     self._leg_ids = torch.tensor(
@@ -202,19 +237,26 @@ class QuinticEvalHarness:
     self._torso_id = int(_body_ids(self.robot, ("torso",), device)[0])
     self.foot_body_ids = _body_ids(self.robot, FOOT_BODY_NAMES, device)
 
-    self._stance_root_pose, self._stance_joint_pos = self._solve_stance(plant)
-    self.reset()
+  # What a subclass provides.
 
-  def _solve_stance(self, plant: EvalPlant) -> tuple[torch.Tensor, torch.Tensor]:
-    """Stance to start from, solved once on a single-environment CPU model.
+  def _solve_stance(self) -> tuple[torch.Tensor, torch.Tensor]:
+    """Root pose and joint positions to start every environment in."""
+    raise NotImplementedError
 
-    Reuses :class:`~mjlab.controllers.quintic_walk.playback.WalkPlayback`, so
-    the batch starts in exactly the pose the single-environment rig does: the
-    engine's own stopped stance, levelled onto the floor. Every environment is
-    identical here, so solving it once and broadcasting is not an approximation.
+  def compute_targets(self, command: torch.Tensor) -> torch.Tensor:
+    """Shape ``(N, 12)`` leg joint targets for one control step."""
+    raise NotImplementedError
+
+  # Shared.
+
+  def _read_stance(
+    self, model: mujoco.MjModel, data: mujoco.MjData
+  ) -> tuple[torch.Tensor, torch.Tensor]:
+    """Read a standing pose off a single-environment CPU model.
+
+    Every environment starts identically, so solving the stance once on one
+    robot and broadcasting it is not an approximation.
     """
-    playback = WalkPlayback(plant=plant)
-    model, data = playback.model, playback.data
     root_pose = torch.tensor(data.qpos[:7], device=self.device, dtype=torch.float32)
     joint_pos = np.empty(len(self.robot.joint_names))
     for index, name in enumerate(self.robot.joint_names):
@@ -223,7 +265,7 @@ class QuinticEvalHarness:
     return root_pose, torch.tensor(joint_pos, device=self.device, dtype=torch.float32)
 
   def reset(self) -> None:
-    """Put every environment in the engine's stance, at its own origin."""
+    """Put every environment in the controller's stance, at its own origin."""
     self.sim.reset()
     self.scene.reset()
     self.controller.reset()
@@ -256,19 +298,12 @@ class QuinticEvalHarness:
     return EvalState.from_entity(self.robot, self.foot_body_ids)
 
   def step(self, command: torch.Tensor) -> None:
-    """One control step of the engine plus its physics substeps.
+    """One control step of the controller plus its physics substeps.
 
     Args:
       command: Shape ``(N, 3)`` velocity command.
     """
-    data = self.robot.data
-    targets = self.controller.compute(
-      dt=self.control_dt,
-      velocity_command=command,
-      torso_rotation_w=matrix_from_quat(data.root_link_quat_w),
-      gyro_b=data.root_link_ang_vel_b,
-      sensed_phase=self.sensed_phase(),
-    )
+    targets = self.compute_targets(command)
     # The engine works in double; mjlab's target buffer is float32. This is the
     # output half of the precision boundary documented on QuinticWalkController.
     self.robot.set_joint_position_target(
@@ -313,6 +348,197 @@ class QuinticEvalHarness:
       if count:
         counts[state.name] = count
     return counts
+
+
+class QuinticEvalHarness(WalkEvalHarness[QuinticWalkController]):
+  """Batched playback of the quintic walk engine."""
+
+  def __init__(
+    self,
+    plant: EvalPlant = "eval",
+    num_envs: int = 64,
+    device: str = "cuda:0",
+    walk_params: WalkParameters = NUGUS_WALK_PARAMETERS,
+    use_balance_control: bool = True,
+    exact_ik: bool = False,
+    control_hz: float = QUINTIC_CONTROL_HZ,
+  ) -> None:
+    super().__init__(plant, num_envs, device, control_hz)
+    self.controller = QuinticWalkController(
+      num_envs=num_envs,
+      device=device,
+      walk_params=walk_params,
+      use_balance_control=use_balance_control,
+      exact_ik_model=self.sim.mj_model if exact_ik else None,
+    )
+    self._walk_params = walk_params
+    self._use_balance_control = use_balance_control
+    self._exact_ik = exact_ik
+    self._stance_root_pose, self._stance_joint_pos = self._solve_stance()
+    self.reset()
+
+  def _solve_stance(self) -> tuple[torch.Tensor, torch.Tensor]:
+    """Stance to start from, solved once on a single-environment CPU model.
+
+    Reuses :class:`~mjlab.controllers.quintic_walk.playback.WalkPlayback`, so
+    the batch starts in exactly the pose the single-environment rig does: the
+    engine's own stopped stance, levelled onto the floor.
+    """
+    playback = WalkPlayback(
+      plant=self.plant,
+      walk_params=self._walk_params,
+      use_balance_control=self._use_balance_control,
+      exact_ik=self._exact_ik,
+    )
+    return self._read_stance(playback.model, playback.data)
+
+  def compute_targets(self, command: torch.Tensor) -> torch.Tensor:
+    data = self.robot.data
+    return self.controller.compute(
+      dt=self.control_dt,
+      velocity_command=command,
+      torso_rotation_w=matrix_from_quat(data.root_link_quat_w),
+      gyro_b=data.root_link_ang_vel_b,
+      sensed_phase=self.sensed_phase(),
+    )
+
+
+class DistilledEvalHarness(WalkEvalHarness[DistilledWalkController]):
+  """Batched playback of the distilled walk policy.
+
+  The policy replaces the engine's trajectory generation and IK, and nothing
+  else: the plant, the rate, the arm posture and the measurement are the
+  quintic harness's, unchanged.
+
+  It starts from its own standing pose rather than the engine's. The two differ
+  -- the policy learned NUbots' numerically refined IK and this engine ships the
+  idealised one, half a radian of knee apart -- and a robot planted in the other
+  controller's stance would spend its first control steps being dragged out of
+  it. Each controller gets its own home pose for the same reason each gets its
+  own control rate; see ``scripts/eval/README.md``.
+  """
+
+  def __init__(
+    self,
+    policy_path: Path = DEFAULT_POLICY_PATH,
+    plant: EvalPlant = "eval",
+    num_envs: int = 64,
+    device: str = "cuda:0",
+    walk_params: WalkParameters = NUGUS_WALK_PARAMETERS,
+    history_init: HistoryInit = "settled",
+    track_teacher: bool = False,
+    control_hz: float = QUINTIC_CONTROL_HZ,
+  ) -> None:
+    """Build the rig.
+
+    Args:
+      policy_path: ONNX export to run. Defaults to the policy NUbots deploys.
+      track_teacher: Also run the walk engine the policy was distilled from, on
+        the same commands, and accumulate the difference between the two sets of
+        joint targets. See :meth:`teacher_tracking`.
+    """
+    super().__init__(plant, num_envs, device, control_hz)
+    self.policy_path = Path(policy_path)
+    self.controller = DistilledWalkController(
+      num_envs=num_envs,
+      policy=DistilledWalkPolicy.from_onnx(self.policy_path, device),
+      device=device,
+      walk_params=walk_params,
+      history_init=history_init,
+    )
+    # The engine as the policy learned it: no balance correction, because
+    # WalkDataCollector recorded the generator's own foot poses and never ran
+    # FootController over them.
+    self.teacher = (
+      QuinticWalkController(
+        num_envs=num_envs,
+        device=device,
+        walk_params=walk_params,
+        use_balance_control=False,
+      )
+      if track_teacher
+      else None
+    )
+    self._teacher_stance = torch.zeros(num_envs, len(JOINT_NAMES), device=device)
+    self._error_sum = torch.zeros(num_envs, len(JOINT_NAMES), device=device)
+    self._relative_sum = torch.zeros(num_envs, len(JOINT_NAMES), device=device)
+    self._error_steps = 0
+    self._stance_root_pose, self._stance_joint_pos = self._solve_stance()
+    self.reset()
+
+  def _solve_stance(self) -> tuple[torch.Tensor, torch.Tensor]:
+    """The policy's own standing pose, levelled onto the floor.
+
+    Same levelling as the quintic rig, over the targets the policy holds at
+    rest instead of the ones the engine holds.
+    """
+    model = build_model(self.plant)
+    data = mujoco.MjData(model)
+    stand_on_leg_targets(
+      model,
+      data,
+      self.controller.home_targets[0].double().cpu().numpy(),
+      stance_left=int(self.controller.generator.phase[0]) == int(Phase.LEFT),
+    )
+    return self._read_stance(model, data)
+
+  def reset(self) -> None:
+    super().reset()
+    if self.teacher is not None:
+      self.teacher.reset()
+      self._teacher_stance = self.teacher.compute(
+        self.control_dt, torch.zeros(self.num_envs, 3, device=self.device)
+      ).to(self._teacher_stance.dtype)
+      self.teacher.reset()
+    self._error_sum.zero_()
+    self._relative_sum.zero_()
+    self._error_steps = 0
+
+  def compute_targets(self, command: torch.Tensor) -> torch.Tensor:
+    targets = self.controller.compute(self.control_dt, command)
+    if self.teacher is not None:
+      reference = self.teacher.compute(self.control_dt, command).to(targets.dtype)
+      self._error_sum += (targets - reference).abs()
+      self._relative_sum += (
+        (targets - self.controller.home_targets) - (reference - self._teacher_stance)
+      ).abs()
+      self._error_steps += 1
+    return targets
+
+  def teacher_tracking(self) -> dict | None:
+    """How far the policy's joint targets ran from the engine's, or ``None``.
+
+    Two readings of the same difference, both means of absolute error over
+    every step and environment of the run so far:
+
+    ``mean_abs_error_rad``
+      the raw gap. It is dominated by the IK the two solve with rather than by
+      the distillation -- the policy learned NUbots' numerically refined
+      solution and this engine ships the idealised one -- so it is a floor on
+      how differently the two stand, not a measure of how well the policy
+      learned the gait.
+    ``stance_relative_mean_abs_error_rad``
+      the same gap after subtracting each controller's own standing pose, which
+      takes that calibration offset out and leaves the shape of the motion.
+    """
+    if self.teacher is None:
+      return None
+    steps = max(self._error_steps, 1)
+    absolute = (self._error_sum / steps).mean(dim=0)
+    relative = (self._relative_sum / steps).mean(dim=0)
+    return {
+      "steps": self._error_steps,
+      "mean_abs_error_rad": float(absolute.mean()),
+      "stance_relative_mean_abs_error_rad": float(relative.mean()),
+      "per_joint_abs_error_rad": {
+        name: float(value)
+        for name, value in zip(JOINT_NAMES, absolute.tolist(), strict=True)
+      },
+      "stance_relative_per_joint_abs_error_rad": {
+        name: float(value)
+        for name, value in zip(JOINT_NAMES, relative.tolist(), strict=True)
+      },
+    }
 
 
 def prescribe_velocity_commands(env, command: torch.Tensor) -> None:
@@ -429,7 +655,7 @@ class RlEvalHarness:
     device: str = "cuda:0",
     task_id: str = TASK_ID,
   ) -> None:
-    self.plant = plant
+    self.plant: EvalPlant = plant
     self.num_envs = num_envs
     self.device = device
     self.env = build_rl_env(plant, num_envs, device, task_id)

@@ -8,6 +8,21 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added ``scripts/eval/eval_distilled_quintic_walk.py`` and
+  ``mjlab.controllers.distilled_walk``, which run NUbots' distilled walk policy
+  -- the MLP their ``module/skill/NeuralWalk`` deploys, trained to copy the
+  quintic walk engine's joint targets -- as a third controller in the
+  evaluation, on the same plants and metrics as the other two. The deployed
+  ``walk_policy.onnx`` ships with mjlab and its weights are replayed in torch so
+  a whole batch infers at once. The policy reads no measurement of the robot, so
+  it runs on all four plants. ``--track-teacher`` runs the walk engine alongside
+  and reports how far the copy's joint targets ran from the original's, and
+  ``--history-init`` selects what the run starts from. See
+  ``scripts/eval/README.md``.
+- Added ``stand_on_leg_targets`` to the quintic walk playback module: the
+  standing-pose solve (adopt the joint angles, level the stance sole, drop it
+  onto the floor) that both ``WalkPlayback`` and the evaluation harnesses use to
+  start a robot in whatever pose its controller is about to ask for.
 - The quintic walk engine now computes in ``torch.float64`` by default
   (``ENGINE_DTYPE``), matching the C++ ``WalkGenerator<double>``. Its phase
   clock accumulates the control period and switches feet on

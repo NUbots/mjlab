@@ -199,6 +199,70 @@ def _actuator_indices(model: mujoco.MjModel, names) -> np.ndarray:
   )
 
 
+def lowest_sole_height(model: mujoco.MjModel, data: mujoco.MjData) -> float:
+  """World height of the lower foot sole, in the current state."""
+  heights = []
+  for side in ("left", "right"):
+    body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"{side}_foot")
+    rotation = data.xmat[body].reshape(3, 3)
+    heights.append((data.xpos[body] + rotation @ np.array(NUGUS_SOLE_OFFSET))[2])
+  return float(min(heights))
+
+
+def stand_on_leg_targets(
+  model: mujoco.MjModel,
+  data: mujoco.MjData,
+  leg_targets: np.ndarray,
+  stance_left: bool = True,
+) -> None:
+  """Stand a NUgus with its legs at ``leg_targets``, stance sole on the floor.
+
+  Whatever controller is about to drive the robot should also decide what pose
+  the robot starts in, or the first control step fights the initial condition.
+  So the joint angles are adopted verbatim and only the floating base is solved
+  for, which no controller here has an opinion about -- both the walk engine and
+  the policy distilled from it plan in the planted foot's frame:
+
+  - Orientation is the rotation that levels the *achieved* stance sole, read
+    back from the model after the joints are set. Yaw is dropped so the robot
+    faces +x. On the engine's deployed idealised IK this comes out around 14.4
+    degrees of torso pitch rather than its nominal 12, and the 2.4 degree gap is
+    the idealised leg's model error showing up as a posture error; with
+    ``exact_ik`` the two agree. Levelling the achieved sole rather than the
+    commanded one is what puts the robot flat-footed on the ground instead of
+    balanced on its toe edges.
+  - Height is then whatever drops the lower sole onto the floor.
+
+  Args:
+    model: Compiled NUgus model.
+    data: State to write, left forwarded to the standing pose.
+    leg_targets: Twelve joint angles in :data:`JOINT_NAMES` order.
+    stance_left: Which sole to level on. The engine resets onto its left foot.
+  """
+  data.qpos[:] = 0.0
+  data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
+  data.qvel[:] = 0.0
+  posture_names = tuple(POSTURE)
+  data.qpos[_joint_qpos_indices(model, posture_names)] = [
+    POSTURE[name] for name in posture_names
+  ]
+  data.qpos[_joint_qpos_indices(model, JOINT_NAMES)] = leg_targets
+  mujoco.mj_forward(model, data)
+
+  sole_t = sole_poses_in_torso(model, data)[0 if stance_left else 1]
+  levelled = mat_to_rpy_intrinsic(sole_t[:, :3, :3].transpose(-1, -2))
+  levelled[:, 2] = 0.0
+  quat = np.empty(4)
+  mujoco.mju_mat2Quat(
+    quat, rpy_intrinsic_to_mat(levelled)[0].numpy().flatten().astype(np.float64)
+  )
+  data.qpos[3:7] = quat
+
+  mujoco.mj_forward(model, data)
+  data.qpos[2] -= lowest_sole_height(model, data)
+  mujoco.mj_forward(model, data)
+
+
 def _gyro_address(model: mujoco.MjModel) -> int:
   for name in GYRO_SENSOR_NAMES:
     sensor = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, name)
@@ -398,7 +462,8 @@ class WalkPlayback:
     self._leg_qvel = _joint_qvel_indices(self.model, JOINT_NAMES)
     self._leg_ctrl = _actuator_indices(self.model, JOINT_NAMES)
     self._posture_names = tuple(POSTURE)
-    self._posture_qpos = _joint_qpos_indices(self.model, self._posture_names)
+    # Held by the actuators every step; the qpos side of the same pose is set
+    # once at reset, by stand_on_leg_targets.
     self._posture_ctrl = _actuator_indices(self.model, self._posture_names)
     self._posture_values = np.array([POSTURE[name] for name in self._posture_names])
     self._torso = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "torso")
@@ -449,12 +514,7 @@ class WalkPlayback:
 
   def lowest_sole_height(self) -> float:
     """World height of the lower foot sole."""
-    heights = []
-    for side in ("left", "right"):
-      body = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"{side}_foot")
-      rotation = self.data.xmat[body].reshape(3, 3)
-      heights.append((self.data.xpos[body] + rotation @ np.array(NUGUS_SOLE_OFFSET))[2])
-    return float(min(heights))
+    return lowest_sole_height(self.model, self.data)
 
   # Stepping.
 
@@ -463,27 +523,9 @@ class WalkPlayback:
 
     Starting from the MJCF keyframe would fight the engine on the first step, so
     the joint angles come from the engine's own stopped state: it is asked for a
-    zero-velocity step, and whatever it returns is adopted verbatim.
-
-    That fixes the joints but not the floating base, which the engine has no
-    opinion about -- it plans in the planted foot's frame. The base follows from
-    requiring the stance sole to lie flat on the floor:
-
-    - Orientation is the rotation that levels the *achieved* stance sole, read
-      back from the model after the joints are set. Yaw is dropped so the robot
-      faces +x. On the deployed idealised IK this comes out around 14.4 degrees
-      of torso pitch rather than the engine's nominal 12, and the 2.4 degree gap
-      is the idealised leg's model error showing up as a posture error; with
-      ``exact_ik`` the two agree. Levelling the achieved sole rather than the
-      commanded one is what puts the robot flat-footed on the ground instead of
-      balanced on its toe edges.
-    - Height is then whatever drops the lower sole onto the floor.
+    zero-velocity step, and whatever it returns is adopted verbatim by
+    :func:`stand_on_leg_targets`.
     """
-    self.data.qpos[:] = 0.0
-    self.data.qpos[3:7] = [1.0, 0.0, 0.0, 0.0]
-    self.data.qvel[:] = 0.0
-    self.data.qpos[self._posture_qpos] = self._posture_values
-
     self.controller.reset()
     targets = self.controller.compute(
       dt=self.control_dt,
@@ -494,23 +536,12 @@ class WalkPlayback:
       # and does not switch feet, so the value only has to be well formed.
       sensed_phase=torch.full((1,), int(Phase.DOUBLE)),
     )
-    self.data.qpos[self._leg_qpos] = targets[0].numpy()
-    mujoco.mj_forward(self.model, self.data)
-
-    stance_left = int(self.controller.generator.phase[0]) == int(Phase.LEFT)
-    sole_t = sole_poses_in_torso(self.model, self.data)[0 if stance_left else 1]
-    levelled = mat_to_rpy_intrinsic(sole_t[:, :3, :3].transpose(-1, -2))
-    levelled[:, 2] = 0.0
-    quat = np.empty(4)
-    mujoco.mju_mat2Quat(
-      quat, rpy_intrinsic_to_mat(levelled)[0].numpy().flatten().astype(np.float64)
+    stand_on_leg_targets(
+      self.model,
+      self.data,
+      targets[0].numpy(),
+      stance_left=int(self.controller.generator.phase[0]) == int(Phase.LEFT),
     )
-    self.data.qpos[3:7] = quat
-
-    mujoco.mj_forward(self.model, self.data)
-    self.data.qpos[2] -= self.lowest_sole_height()
-    mujoco.mj_forward(self.model, self.data)
-
     self.controller.reset()
 
   def step(self, command: torch.Tensor) -> None:
