@@ -1,5 +1,7 @@
 """Tests for reward manager functionality."""
 
+import math
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import mujoco
@@ -13,6 +15,12 @@ from mjlab.envs.mdp.rewards import electrical_power_cost, joint_torques_l2
 from mjlab.managers.reward_manager import RewardManager, RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sim.sim import Simulation, SimulationCfg
+from mjlab.tasks.velocity.mdp.rewards import (
+  cost_of_transport_proxy,
+  feet_flat_orientation,
+  gait_phase_regularity_cost,
+)
+from mjlab.utils.lab_api.math import quat_from_euler_xyz
 
 PARTIALLY_ACTUATED_ROBOT_XML = """
 <mujoco>
@@ -228,6 +236,186 @@ def test_electrical_power_cost_partially_actuated(device):
   #           env1 = max(0,1.0*2.0) + max(0,-4.0*1.0) = 2.0 + 0 = 2.0.
   expected = torch.tensor([6.0, 2.0], device=device)
   assert torch.allclose(power_cost, expected)
+
+
+def test_cost_of_transport_proxy_matches_expected_formula():
+  """CoT proxy should be positive power divided by horizontal speed."""
+  env = Mock()
+  env.num_envs = 2
+  env.device = "cpu"
+  env.extras = {"log": {}}
+  env.command_manager.get_command = Mock(
+    return_value=torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+  )
+
+  asset = Mock()
+  asset.find_joints = Mock(return_value=([0, 2], ["joint0", "joint2"]))
+  asset.find_actuators = Mock(return_value=([0, 1], ["act0", "act1"]))
+  asset.data = SimpleNamespace(
+    actuator_force=torch.tensor([[2.0, 3.0], [1.0, 4.0]], dtype=torch.float32),
+    joint_vel=torch.tensor([[1.0, 0.0, 2.0], [2.0, 0.0, 1.0]], dtype=torch.float32),
+    root_link_lin_vel_w=torch.tensor(
+      [[0.5, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=torch.float32
+    ),
+  )
+  env.scene = {"robot": asset}
+
+  asset_cfg = SceneEntityCfg(name="robot", joint_names=(".*",))
+  reward_cfg = RewardTermCfg(
+    func=cost_of_transport_proxy,
+    weight=1.0,
+    params={"asset_cfg": asset_cfg},
+  )
+  reward = cost_of_transport_proxy(reward_cfg, env)
+
+  cot_cost = reward(
+    env,
+    asset_cfg=asset_cfg,
+    speed_floor=0.1,
+    command_name="twist",
+    command_threshold=0.05,
+  )
+
+  # Positive mechanical powers: [8.0, 6.0], speeds: [0.5, 1.0].
+  expected = torch.tensor([16.0, 6.0], dtype=torch.float32)
+  assert torch.allclose(cot_cost, expected)
+  assert "Metrics/cot_proxy_mean" in env.extras["log"]
+  assert "Metrics/locomotion_speed_mean" in env.extras["log"]
+
+
+def test_gait_phase_regularity_cost_penalizes_asymmetry():
+  """Gait phase regularity should be zero for symmetric timing and positive for asymmetric timing."""
+  env = Mock()
+  env.num_envs = 2
+  env.device = "cpu"
+  env.extras = {"log": {}}
+  env.command_manager.get_command = Mock(
+    return_value=torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+  )
+
+  sensor = Mock()
+  sensor.data = SimpleNamespace(
+    last_air_time=torch.tensor([[0.2, 0.2], [0.1, 0.3]], dtype=torch.float32),
+    last_contact_time=torch.tensor([[0.4, 0.4], [0.2, 0.5]], dtype=torch.float32),
+  )
+  env.scene = {"feet_ground_contact": sensor}
+
+  cost = gait_phase_regularity_cost(
+    env,
+    sensor_name="feet_ground_contact",
+    command_name="twist",
+    command_threshold=0.05,
+  )
+
+  assert cost[0] == pytest.approx(0.0)
+  assert cost[1] > 0.0
+  assert "Metrics/gait_air_cv_mean" in env.extras["log"]
+  assert "Metrics/gait_contact_cv_mean" in env.extras["log"]
+
+
+def test_gait_phase_regularity_cost_respects_command_threshold():
+  """Gait phase regularity should be disabled for environments with no motion command."""
+  env = Mock()
+  env.num_envs = 2
+  env.device = "cpu"
+  env.extras = {"log": {}}
+  env.command_manager.get_command = Mock(
+    return_value=torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+  )
+
+  sensor = Mock()
+  sensor.data = SimpleNamespace(
+    last_air_time=torch.tensor([[0.1, 0.3], [0.1, 0.3]], dtype=torch.float32),
+    last_contact_time=torch.tensor([[0.2, 0.5], [0.2, 0.5]], dtype=torch.float32),
+  )
+  env.scene = {"feet_ground_contact": sensor}
+
+  cost = gait_phase_regularity_cost(
+    env,
+    sensor_name="feet_ground_contact",
+    command_name="twist",
+    command_threshold=0.05,
+  )
+
+  assert cost[0] > 0.0
+  assert cost[1] == pytest.approx(0.0)
+
+
+def _make_flat_foot_env(quats, found, command):
+  env = Mock()
+  num_envs = quats.shape[0]
+  env.num_envs = num_envs
+  env.device = "cpu"
+  env.extras = {"log": {}}
+  env.command_manager.get_command = Mock(return_value=command)
+
+  asset = Mock()
+  asset.data = SimpleNamespace(
+    body_link_quat_w=quats,
+    gravity_vec_w=torch.tensor([0.0, 0.0, -1.0]).expand(num_envs, 3),
+  )
+  sensor = Mock()
+  sensor.data = SimpleNamespace(found=found)
+  env.scene = {"robot": asset, "feet_ground_contact": sensor}
+  return env
+
+
+def test_feet_flat_orientation_penalizes_tilt_in_swing():
+  """A level swing foot costs nothing; a pitched swing foot is penalized."""
+  zero = torch.zeros(1)
+  level = quat_from_euler_xyz(zero, zero, zero)[0]  # [4]
+  pitched = quat_from_euler_xyz(zero, torch.tensor([0.5]), zero)[0]  # 0.5 rad pitch
+
+  # Env 0: both feet level. Env 1: left foot pitched.
+  quats = torch.stack(
+    [torch.stack([level, level]), torch.stack([pitched, level])]
+  )  # [2, 2, 4]
+  found = torch.zeros(2, 2)  # all feet in the air (swing)
+  command = torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+
+  env = _make_flat_foot_env(quats, found, command)
+  asset_cfg = SceneEntityCfg(name="robot", body_ids=[0, 1])
+
+  cost = feet_flat_orientation(
+    env,
+    sensor_name="feet_ground_contact",
+    command_name="twist",
+    command_threshold=0.05,
+    sole_normal_axis=2,
+    asset_cfg=asset_cfg,
+  )
+
+  assert cost[0] == pytest.approx(0.0, abs=1e-6)
+  assert cost[1] == pytest.approx(math.sin(0.5) ** 2, abs=1e-5)
+  assert "Metrics/foot_tilt_mean" in env.extras["log"]
+
+
+def test_feet_flat_orientation_ignores_stance_and_zero_command():
+  """Stance feet and standing-still environments are not penalized."""
+  zero = torch.zeros(1)
+  pitched = quat_from_euler_xyz(zero, torch.tensor([0.5]), zero)[0]
+
+  quats = torch.stack(
+    [torch.stack([pitched, pitched]), torch.stack([pitched, pitched])]
+  )
+  # Env 0: pitched feet but in contact (stance). Env 1: in air but no command.
+  found = torch.tensor([[1.0, 1.0], [0.0, 0.0]])
+  command = torch.tensor([[1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+
+  env = _make_flat_foot_env(quats, found, command)
+  asset_cfg = SceneEntityCfg(name="robot", body_ids=[0, 1])
+
+  cost = feet_flat_orientation(
+    env,
+    sensor_name="feet_ground_contact",
+    command_name="twist",
+    command_threshold=0.05,
+    sole_normal_axis=2,
+    asset_cfg=asset_cfg,
+  )
+
+  assert cost[0] == pytest.approx(0.0, abs=1e-6)
+  assert cost[1] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_reward_manager_handles_nan_values(mock_env):

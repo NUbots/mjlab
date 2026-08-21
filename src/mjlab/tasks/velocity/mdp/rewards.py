@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import math
+import re
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import torch
@@ -244,9 +246,25 @@ def feet_clearance(
   height_sensor_name: str,
   command_name: str | None = None,
   command_threshold: float = 0.01,
+  power: int = 1,
+  only_below: bool = False,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Penalize deviation from target clearance height, weighted by foot velocity."""
+  """Penalize deviation from target clearance height, weighted by foot speed.
+
+  Horizontal foot speed acts as a swing/stance gate: at lift-off and touchdown
+  the foot is necessarily low *and* slow, so the penalty fades there and the
+  term only shapes clearance while the foot is travelling mid-swing.
+
+  Args:
+    power: Exponent on the height error. ``1`` is the original absolute
+      deviation; ``2`` gives a squared error whose gradient grows the further
+      below target the foot sits, so it is harder to "buy out" with a small
+      constant offset.
+    only_below: If ``True``, only penalize the foot for being *below* the
+      target. Clearing higher than ``target_height`` is then never penalized,
+      removing the symmetric pull that drags a high apex back down to target.
+  """
   asset: Entity = env.scene[asset_cfg.name]
   height_sensor = env.scene[height_sensor_name]
   assert isinstance(height_sensor, TerrainHeightSensor), (
@@ -255,8 +273,11 @@ def feet_clearance(
   foot_height = height_sensor.data.heights  # [B, F]
   foot_vel_xy = asset.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]  # [B, F, 2]
   vel_norm = torch.norm(foot_vel_xy, dim=-1)  # [B, F]
-  delta = torch.abs(foot_height - target_height)  # [B, F]
-  cost = torch.sum(delta * vel_norm, dim=1)  # [B]
+  if only_below:
+    delta = (foot_height - target_height).neg().clamp(min=0.0)  # [B, F]
+  else:
+    delta = torch.abs(foot_height - target_height)  # [B, F]
+  cost = torch.sum(delta.pow(power) * vel_norm, dim=1)  # [B]
   if command_name is not None:
     command = env.command_manager.get_command(command_name)
     if command is not None:
@@ -323,6 +344,110 @@ class feet_swing_height:
     return cost
 
 
+def _swing_height_profile(
+  phase: torch.Tensor,
+  amplitude: float,
+  profile: Literal["sin", "bump"],
+) -> torch.Tensor:
+  """Desired foot height as a function of normalized swing phase ``psi``.
+
+  ``phase`` (``psi``) runs from 0 at takeoff to 1 at the nominal landing. Both
+  profiles vanish at the endpoints and peak at ``amplitude`` mid-swing, so the
+  target traces a single lift-and-lower arc:
+
+  - ``"sin"``: ``A * sin(pi * psi)``. Smooth, but has nonzero slope at the
+    endpoints (the foot is still rising at takeoff / falling at landing).
+  - ``"bump"``: ``A * 16 * psi^2 * (1 - psi)^2``. A quartic bump with zero
+    slope at both endpoints, so the target eases away from and back to the
+    ground -- gentler near takeoff and touchdown.
+  """
+  if profile == "sin":
+    return amplitude * torch.sin(math.pi * phase)
+  if profile == "bump":
+    return amplitude * 16.0 * torch.square(phase) * torch.square(1.0 - phase)
+  raise ValueError(f"Unknown swing-height profile '{profile}'.")
+
+
+def feet_swing_height_clock(
+  env: ManagerBasedRlEnv,
+  height_sensor_name: str,
+  target_height: float,
+  period: float,
+  swing_ratio: float,
+  std: float,
+  foot_offsets: tuple[float, ...] = (0.0, 0.5),
+  profile: Literal["sin", "bump"] = "sin",
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Dense swing-height tracking against an *independent* gait clock.
+
+  Unlike :class:`feet_swing_height` (sparse, scored once at landing) and unlike
+  an air-time-driven phase (self-referential: the target adapts to whatever the
+  foot does, so a quick low step always matches a low target), this term drives
+  the desired height from a fixed-frequency clock that the policy does not
+  control. The clock advances with episode time and resets with the episode::
+
+      base_phase = (episode_time / period) mod 1
+      foot_phase = (base_phase + foot_offset) mod 1   # offsets put feet out of
+                                                      # phase, e.g. (0, 0.5)
+
+  Each foot's cycle is split into a swing window ``foot_phase < swing_ratio``
+  (desired height follows the lift-and-lower arc, see
+  :func:`_swing_height_profile`) and a stance window (desired height 0, i.e.
+  foot on the ground). The foot is scored every step by
+  ``exp(-(h - h_des)^2 / std^2)`` against its measured terrain clearance, summed
+  over feet. Because the target reaches ``target_height`` mid-swing regardless
+  of what the foot is doing, a foot that fails to lift on schedule is genuinely
+  penalized -- which is what forces a higher, slower step.
+
+  ``period`` is the full gait-cycle duration (both feet complete one
+  swing+stance); a larger ``period`` commands a slower cadence. Feed the same
+  clock to the policy as an observation (``mdp.gait_clock`` with a matching
+  ``period``) so it can act periodically.
+  """
+  height_sensor = env.scene[height_sensor_name]
+  assert isinstance(height_sensor, TerrainHeightSensor), (
+    "feet_swing_height_clock requires a TerrainHeightSensor, got "
+    f"{type(height_sensor).__name__}"
+  )
+
+  foot_heights = height_sensor.data.heights  # [B, F]
+  num_feet = foot_heights.shape[1]
+  assert len(foot_offsets) == num_feet, (
+    f"foot_offsets has {len(foot_offsets)} entries but sensor reports {num_feet} feet."
+  )
+
+  t = env.episode_length_buf.float() * env.step_dt  # [B]
+  base_phase = torch.remainder(t / period, 1.0)  # [B]
+  offsets = torch.tensor(foot_offsets, device=env.device, dtype=foot_heights.dtype)
+  foot_phase = torch.remainder(base_phase[:, None] + offsets[None, :], 1.0)  # [B, F]
+
+  in_swing = foot_phase < swing_ratio  # [B, F]
+  psi = torch.clamp(foot_phase / swing_ratio, 0.0, 1.0)  # [B, F]
+  arc = _swing_height_profile(psi, target_height, profile)  # [B, F]
+  desired = torch.where(in_swing, arc, torch.zeros_like(arc))  # [B, F]
+
+  error = foot_heights - desired  # [B, F]
+  tracking = torch.exp(-torch.square(error) / std**2)  # [B, F]
+  reward = torch.sum(tracking, dim=1)  # [B]
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      total_command = linear_norm + angular_norm
+      active = (total_command > command_threshold).float()
+      reward = reward * active
+
+  swing_mask = in_swing.float()
+  num_swing = torch.clamp(torch.sum(swing_mask), min=1.0)
+  mean_swing_error = torch.sum(torch.abs(error) * swing_mask) / num_swing
+  env.extras["log"]["Metrics/swing_clock_error_mean"] = mean_swing_error
+  return reward
+
+
 def feet_slip(
   env: ManagerBasedRlEnv,
   sensor_name: str,
@@ -353,6 +478,212 @@ def feet_slip(
   return cost
 
 
+def feet_flat_orientation(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  command_name: str,
+  command_threshold: float = 0.05,
+  sole_normal_axis: int = 2,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Penalize foot-sole tilt during swing to encourage flat-footed stepping.
+
+  The foot sole lies in the plane perpendicular to one of the foot body's local
+  axes (``sole_normal_axis``). Projecting world gravity into the foot frame gives
+  a unit vector that points purely along that axis when the sole is level; its
+  two in-plane (tangent) components measure tilt. Penalizing them keeps the sole
+  parallel to the ground so the toe/front edge does not pitch down and dig in on
+  touchdown.
+
+  For the Nugus foot the four corner sites share the same local-X coordinate, so
+  the sole normal is the local X axis (``sole_normal_axis=0``); the tangent
+  components then correspond to fore-aft pitch and medial-lateral roll.
+
+  Only swing feet (no ground contact) are penalized so the term does not fight
+  terrain conformance during stance.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  contact_sensor: ContactSensor = env.scene[sensor_name]
+  assert contact_sensor.data.found is not None
+
+  foot_quat_w = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :]  # [B, F, 4]
+  num_feet = foot_quat_w.shape[1]
+  gravity_w = asset.data.gravity_vec_w.unsqueeze(1).expand(-1, num_feet, -1)
+  gravity_b = quat_apply_inverse(foot_quat_w, gravity_w)  # [B, F, 3]
+
+  tangent_axes = [a for a in range(3) if a != sole_normal_axis]
+  tilt = torch.sum(torch.square(gravity_b[..., tangent_axes]), dim=-1)  # [B, F]
+
+  in_air = (contact_sensor.data.found == 0).float()  # [B, F]
+  cost = torch.sum(tilt * in_air, dim=1)  # [B]
+
+  command = env.command_manager.get_command(command_name)
+  if command is not None:
+    linear_norm = torch.norm(command[:, :2], dim=1)
+    angular_norm = torch.abs(command[:, 2])
+    total_command = linear_norm + angular_norm
+    active = (total_command > command_threshold).float()
+    cost = cost * active
+
+  num_in_air = torch.clamp(torch.sum(in_air), min=1)
+  env.extras["log"]["Metrics/foot_tilt_mean"] = torch.sum(tilt * in_air) / num_in_air
+  return cost
+
+
+class cost_of_transport_proxy:
+  """Penalize energy per traveled distance to improve transport efficiency.
+
+  This computes an online CoT proxy:
+
+    sum(max(0, tau * qd)) / max(horizontal_speed, speed_floor)
+
+  For a fixed robot, true CoT differs by a constant factor (mass * gravity),
+  so this proxy is sufficient for reward shaping.
+  """
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    asset: Entity = env.scene[cfg.params["asset_cfg"].name]
+
+    joint_ids, _ = asset.find_joints(
+      cfg.params["asset_cfg"].joint_names,
+    )
+    actuator_ids, _ = asset.find_actuators(
+      cfg.params["asset_cfg"].joint_names,
+    )
+    self._joint_ids = torch.tensor(joint_ids, device=env.device, dtype=torch.long)
+    self._actuator_ids = torch.tensor(actuator_ids, device=env.device, dtype=torch.long)
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    speed_floor: float = 0.1,
+    command_name: str | None = None,
+    command_threshold: float = 0.05,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+
+    tau = asset.data.actuator_force[:, self._actuator_ids]
+    qd = asset.data.joint_vel[:, self._joint_ids]
+    mech_pos = torch.clamp(tau * qd, min=0.0)
+    mechanical_power = torch.sum(mech_pos, dim=1)
+
+    horizontal_speed = torch.norm(asset.data.root_link_lin_vel_w[:, :2], dim=1)
+    cot_proxy = mechanical_power / torch.clamp(horizontal_speed, min=speed_floor)
+
+    if command_name is not None:
+      command = env.command_manager.get_command(command_name)
+      if command is not None:
+        linear_norm = torch.norm(command[:, :2], dim=1)
+        angular_norm = torch.abs(command[:, 2])
+        total_command = linear_norm + angular_norm
+        active = (total_command > command_threshold).float()
+        cot_proxy = cot_proxy * active
+
+    env.extras["log"]["Metrics/cot_proxy_mean"] = torch.mean(cot_proxy)
+    env.extras["log"]["Metrics/locomotion_speed_mean"] = torch.mean(horizontal_speed)
+    return cot_proxy
+
+
+def gait_phase_regularity_cost(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+  eps: float = 1e-6,
+) -> torch.Tensor:
+  """Penalize irregular left-right gait timing using contact phase durations.
+
+  Uses coefficient of variation (CV) across feet for completed swing and stance
+  durations from the contact sensor's airtime tracker.
+  """
+  contact_sensor: ContactSensor = env.scene[sensor_name]
+  sensor_data = contact_sensor.data
+  assert sensor_data.last_air_time is not None
+  assert sensor_data.last_contact_time is not None
+
+  last_air_time = sensor_data.last_air_time
+  last_contact_time = sensor_data.last_contact_time
+
+  num_feet = last_air_time.shape[1]
+  if num_feet < 2:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+  air_var = torch.var(last_air_time, dim=1, unbiased=False)
+  contact_var = torch.var(last_contact_time, dim=1, unbiased=False)
+  air_mean = torch.mean(last_air_time, dim=1)
+  contact_mean = torch.mean(last_contact_time, dim=1)
+
+  air_cv = torch.sqrt(air_var) / torch.clamp(air_mean, min=eps)
+  contact_cv = torch.sqrt(contact_var) / torch.clamp(contact_mean, min=eps)
+  cost = air_cv + contact_cv
+
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      total_command = linear_norm + angular_norm
+      active = (total_command > command_threshold).float()
+      cost = cost * active
+
+  env.extras["log"]["Metrics/gait_air_cv_mean"] = torch.mean(air_cv)
+  env.extras["log"]["Metrics/gait_contact_cv_mean"] = torch.mean(contact_cv)
+  return cost
+
+
+def feet_lateral_distance_cost(
+  env: ManagerBasedRlEnv,
+  nominal_distance: float,
+  sharpness: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Penalize feet whose lateral body-frame separation falls below nominal.
+
+  The foot-to-foot vector is expressed in the robot's body frame so that yaw
+  rotation does not affect the measurement. Only the body-Y component is used,
+  isolating lateral spread from fore-aft offset during a stride.
+
+
+  The penalty shape is ``exp(sharpness * shortfall) - 1`` where 
+  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``. 
+  When nominal_distance == lateral_distance the cost is zero. For 
+  anything else, the cost grows exponentially with the difference. 
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
+
+  num_feet = foot_pos_w.shape[1]
+  if num_feet < 2:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+  root_quat_w = asset.data.root_link_quat_w  # [B, 4]
+
+  pair_i, pair_j = torch.triu_indices(num_feet, num_feet, offset=1)
+  foot_a = foot_pos_w[:, pair_i, :]  # [B, P, 3]
+  foot_b = foot_pos_w[:, pair_j, :]  # [B, P, 3]
+
+  num_pairs = pair_i.shape[0]
+  # Rotate foot-to-foot vectors into body frame.
+  quat_exp = root_quat_w.unsqueeze(1).expand(-1, num_pairs, -1)  # [B, P, 4]
+  delta_b = quat_apply_inverse(quat_exp, foot_a - foot_b)  # [B, P, 3]
+
+  pair_distance = torch.abs(delta_b[..., 1])  # body-Y component [B, P]
+
+  shortfall = torch.clamp(abs(nominal_distance - pair_distance), min=0.0)
+  cost = torch.sum(torch.exp(sharpness * shortfall) - 1.0, dim=1)
+
+  min_pair_distance = torch.amin(pair_distance, dim=1)
+  max_pair_distance = torch.amax(pair_distance, dim=1)
+  env.extras["log"]["Metrics/min_foot_lateral_distance_mean"] = torch.mean(
+    min_pair_distance
+  )
+  env.extras["log"]["Metrics/max_foot_lateral_distance_mean"] = torch.mean(
+    max_pair_distance
+  )
+  return cost
+
+
 def soft_landing(
   env: ManagerBasedRlEnv,
   sensor_name: str,
@@ -380,6 +711,102 @@ def soft_landing(
       active = (total_command > command_threshold).float()
       cost = cost * active
   return cost
+
+
+class left_right_joint_symmetry_cost:
+  """Penalize left-right asymmetry for matched joint pairs.
+
+  The cost compares left/right joint motion magnitudes around the default pose,
+  which encourages balanced limb usage without forcing identical joint signs.
+  """
+
+  # Common naming conventions for left-right counterparts.
+  _DEFAULT_NAME_SUBSTITUTIONS = (
+    ("left_", "right_"),
+    ("right_", "left_"),
+    ("_left", "_right"),
+    ("_right", "_left"),
+    ("left", "right"),
+    ("right", "left"),
+    ("_l_", "_r_"),
+    ("_r_", "_l_"),
+    ("_l", "_r"),
+    ("_r", "_l"),
+    ("l_", "r_"),
+    ("r_", "l_"),
+    ("FL_", "FR_"),
+    ("FR_", "FL_"),
+    ("RL_", "RR_"),
+    ("RR_", "RL_"),
+    ("_FL", "_FR"),
+    ("_FR", "_FL"),
+    ("_RL", "_RR"),
+    ("_RR", "_RL"),
+  )
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    asset: Entity = env.scene[cfg.params["asset_cfg"].name]
+
+    joint_ids, joint_names = asset.find_joints(cfg.params["asset_cfg"].joint_names)
+    name_to_joint_id = dict(zip(joint_names, joint_ids, strict=False))
+
+    substitutions = cfg.params.get(
+      "name_substitutions", self._DEFAULT_NAME_SUBSTITUTIONS
+    )
+    substitution_pairs = [
+      (str(left), str(right)) for left, right in substitutions if left and right
+    ]
+
+    pair_set: set[tuple[int, int]] = set()
+    for name, joint_id in zip(joint_names, joint_ids, strict=False):
+      for src, dst in substitution_pairs:
+        if src in name:
+          counterpart_name = re.sub(re.escape(src), dst, name, count=1)
+          counterpart_id = name_to_joint_id.get(counterpart_name)
+          if counterpart_id is not None and counterpart_id != joint_id:
+            pair_set.add((min(joint_id, counterpart_id), max(joint_id, counterpart_id)))
+
+    sorted_pairs = sorted(pair_set)
+    if sorted_pairs:
+      self._joint_a_ids = torch.tensor(
+        [pair[0] for pair in sorted_pairs], device=env.device, dtype=torch.long
+      )
+      self._joint_b_ids = torch.tensor(
+        [pair[1] for pair in sorted_pairs], device=env.device, dtype=torch.long
+      )
+    else:
+      self._joint_a_ids = torch.empty(0, device=env.device, dtype=torch.long)
+      self._joint_b_ids = torch.empty(0, device=env.device, dtype=torch.long)
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    position_weight: float = 1.0,
+    velocity_weight: float = 0.1,
+  ) -> torch.Tensor:
+    if self._joint_a_ids.numel() == 0:
+      return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+    asset: Entity = env.scene[asset_cfg.name]
+    default_joint_pos = asset.data.default_joint_pos
+    assert default_joint_pos is not None
+
+    joint_pos = asset.data.joint_pos
+    joint_vel = asset.data.joint_vel
+
+    dev_a = joint_pos[:, self._joint_a_ids] - default_joint_pos[:, self._joint_a_ids]
+    dev_b = joint_pos[:, self._joint_b_ids] - default_joint_pos[:, self._joint_b_ids]
+    pos_cost = torch.mean(torch.square(torch.abs(dev_a) - torch.abs(dev_b)), dim=1)
+
+    vel_a = joint_vel[:, self._joint_a_ids]
+    vel_b = joint_vel[:, self._joint_b_ids]
+    vel_cost = torch.mean(torch.square(torch.abs(vel_a) - torch.abs(vel_b)), dim=1)
+
+    env.extras["log"]["Metrics/symmetry_pos_cost_mean"] = torch.mean(pos_cost)
+    env.extras["log"]["Metrics/symmetry_vel_cost_mean"] = torch.mean(vel_cost)
+
+    return position_weight * pos_cost + velocity_weight * vel_cost
 
 
 class variable_posture:

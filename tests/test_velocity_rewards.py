@@ -10,7 +10,13 @@ import torch
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import RayCastData, RayCastSensor
-from mjlab.tasks.velocity.mdp.rewards import upright
+from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
+from mjlab.tasks.velocity.mdp.observations import gait_clock
+from mjlab.tasks.velocity.mdp.rewards import (
+  _swing_height_profile,
+  feet_swing_height_clock,
+  upright,
+)
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
 
 
@@ -188,3 +194,107 @@ def test_batch_consistency():
   assert r[1].item() > 0.99
   assert r[2].item() < 0.7
   assert r[3].item() > 0.99
+
+
+def test_swing_height_profile_endpoints_and_peak():
+  psi = torch.tensor([0.0, 0.5, 1.0])
+  for profile in ("sin", "bump"):
+    h = _swing_height_profile(psi, amplitude=0.1, profile=profile)
+    # Vanishes at takeoff/landing, peaks at the target amplitude mid-swing.
+    assert math.isclose(h[0].item(), 0.0, abs_tol=1e-6)
+    assert math.isclose(h[2].item(), 0.0, abs_tol=1e-6)
+    assert math.isclose(h[1].item(), 0.1, rel_tol=1e-6)
+
+
+def _make_clock_env(heights: torch.Tensor, episode_step: int, command: torch.Tensor):
+  """Mock env exposing just what feet_swing_height_clock reads."""
+  height_sensor = MagicMock(spec=TerrainHeightSensor)
+  type(height_sensor).data = PropertyMock(return_value=MagicMock(heights=heights))
+  env = MagicMock()
+  env.device = torch.device("cpu")
+  env.step_dt = 0.1
+  env.episode_length_buf = torch.tensor([episode_step], dtype=torch.long)
+  env.scene.__getitem__ = MagicMock(return_value=height_sensor)
+  env.command_manager.get_command = MagicMock(return_value=command)
+  env.extras = {"log": {}}
+  return env
+
+
+def _clock_reward(env):
+  # period=0.8, step_dt=0.1, swing_ratio=0.5: at episode_step=2 the base phase is
+  # 0.25, so foot 0 (offset 0) is mid-swing (psi=0.5, desired=target) and foot 1
+  # (offset 0.5) is in stance (desired=0).
+  return feet_swing_height_clock(
+    env,
+    height_sensor_name="foot_height_scan",
+    target_height=0.1,
+    period=0.8,
+    swing_ratio=0.5,
+    std=0.05,
+    foot_offsets=(0.0, 0.5),
+    profile="sin",
+    command_name="twist",
+    command_threshold=0.05,
+  )
+
+
+def test_clock_reward_rewards_on_schedule_lift():
+  moving = torch.tensor([[0.5, 0.0, 0.0]])
+  # Foot on the clock-prescribed arc (swing foot at target, stance foot down).
+  matched = _clock_reward(_make_clock_env(torch.tensor([[0.1, 0.0]]), 2, moving))
+  # Same clock, but the swing foot fails to lift (stays low) -> penalized.
+  low = _clock_reward(_make_clock_env(torch.tensor([[0.03, 0.0]]), 2, moving))
+  assert matched.item() > 1.99  # both feet match their targets
+  assert low.item() < matched.item() - 0.5  # low swing foot is genuinely worse
+
+
+def test_clock_reward_gated_off_when_not_commanded():
+  still = torch.tensor([[0.0, 0.0, 0.0]])
+  r = _clock_reward(_make_clock_env(torch.tensor([[0.1, 0.0]]), 2, still))
+  assert r.item() == 0.0
+
+
+def _make_clock_obs_env(episode_step: int, command: torch.Tensor):
+  """Mock env exposing just what gait_clock reads."""
+  env = MagicMock()
+  env.step_dt = 0.1
+  env.episode_length_buf = torch.tensor([episode_step], dtype=torch.long)
+  env.command_manager.get_command = MagicMock(return_value=command)
+  return env
+
+
+def test_gait_clock_advances_with_episode_time():
+  # period=0.8, step_dt=0.1: at episode_step=2 the phase is 0.25, so the clock
+  # is at angle pi/2 -> [sin, cos] = [1, 0].
+  moving = torch.tensor([[0.5, 0.0, 0.0]])
+  clock = gait_clock(
+    _make_clock_obs_env(2, moving),
+    period=0.8,
+    command_name="twist",
+    command_threshold=0.05,
+  )
+  assert clock.shape == (1, 2)
+  assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
+  assert math.isclose(clock[0, 1].item(), 0.0, abs_tol=1e-6)
+
+
+def test_gait_clock_zeroed_when_not_commanded():
+  # At zero command the clock must collapse to the origin so the policy gets a
+  # distinct standing signal instead of a sweeping walking phase (which would
+  # otherwise drive marching on the spot).
+  still = torch.tensor([[0.0, 0.0, 0.0]])
+  clock = gait_clock(
+    _make_clock_obs_env(2, still),
+    period=0.8,
+    command_name="twist",
+    command_threshold=0.05,
+  )
+  assert torch.equal(clock, torch.zeros(1, 2))
+
+
+def test_gait_clock_ungated_without_command_name():
+  # Without command_name the clock always ticks regardless of command.
+  still = torch.tensor([[0.0, 0.0, 0.0]])
+  clock = gait_clock(_make_clock_obs_env(2, still), period=0.8)
+  assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
+  assert math.isclose(clock[0, 1].item(), 0.0, abs_tol=1e-6)

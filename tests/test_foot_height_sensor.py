@@ -199,6 +199,46 @@ def test_foot_penetration_plane(device):
   assert heights[1].item() < 0.5
 
 
+def test_foot_height_group_size(device):
+  """group_size=2 takes the min across pairs of consecutive frames.
+
+  Two sites per "foot": one at z=0.8 (left_foot), one at z=0.6 (right_foot).
+  With group_size=2 the sensor should report the min of each pair.
+  Here we reuse the flat-platform scene but configure 4 frames (two copies of
+  each site) grouped into 2 logical feet.
+  """
+  cfg = TerrainHeightSensorCfg(
+    name="foot_height_group",
+    frame=(
+      ObjRef(type="site", name="left_foot", entity="robot"),
+      ObjRef(type="site", name="right_foot", entity="robot"),
+      ObjRef(type="site", name="left_foot", entity="robot"),
+      ObjRef(type="site", name="right_foot", entity="robot"),
+    ),
+    ray_alignment="yaw",
+    pattern=RingPatternCfg.single_ring(radius=0.04, num_samples=4),
+    max_distance=1.0,
+    exclude_parent_body=True,
+    include_geom_groups=(0,),
+    group_size=2,
+  )
+  scene, sim = make_scene_and_sim(device, TWO_FEET_ABOVE_PLATFORM_XML, (cfg,))
+  sim.step()
+  sim.sense()
+
+  sensor: TerrainHeightSensor = scene["foot_height_group"]
+
+  # num_frames reflects the post-grouping count.
+  assert sensor.num_frames == 2
+
+  heights = sensor.data.heights
+  assert heights.shape == (1, 2)
+  # Group 0: min(left=0.3, right=0.1) = 0.1
+  assert heights[0, 0].item() == pytest.approx(0.1, abs=0.05)
+  # Group 1: min(left=0.3, right=0.1) = 0.1
+  assert heights[0, 1].item() == pytest.approx(0.1, abs=0.05)
+
+
 def test_foot_penetration_box(device):
   """Foot inside box terrain should report near-zero, not box thickness.
 

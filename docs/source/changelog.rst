@@ -264,6 +264,28 @@ Added
 
 - Added ``reduce="max"`` to ``MetricsTermCfg`` for reporting episode-peak values
   (e.g. peak power, peak contact force) without needing stateful wrapper classes.
+- Added a ``feet_swing_height_clock`` velocity reward and a matching
+  ``gait_clock`` observation. An independent, fixed-frequency gait clock (not
+  controlled by the policy) drives a desired per-foot swing-height arc, densely
+  rewarding the foot for tracking it; the same clock is fed to the policy as a
+  ``[sin, cos]`` phase observation. A larger clock ``period`` commands a slower
+  cadence. Enabled for NUbots Nugus to encourage larger, slower steps with more
+  foot clearance.
+- Added an optional ``feet_flat_orientation`` reward for velocity tasks that
+  penalizes foot-sole tilt during swing, encouraging flat-footed stepping so
+  the toe/front edge does not pitch down and dig into the ground on touchdown.
+  Enabled and tuned for NUbots Nugus.
+- Added ``ContactSensor.primary_names`` property to expose the resolved
+  primary names in the order they appear along the per-contact axis of the
+  output tensors. This makes it possible to map a contact-data column back
+  to the primary it belongs to (:issue:`914`).
+- Added a servo backlash model to the NUbots Nugus robot. Each actuated
+  joint now has a passive ``_backlash`` sibling joint with the same axis
+  bounded to ±``NUGUS_BACKLASH_VALUE`` (default 0.035 rad) that models
+  transmission play between the motor and the link. The nugus velocity
+  task observations, rewards, and reset events are scoped to motor joints
+  only via ``NUGUS_MOTOR_JOINT_REGEX`` so the passive joints do not appear
+  in the policy's view.
 - Added ``BuiltinDcMotorActuator``, a native MuJoCo ``<dcmotor>`` wrapper.
   Supports voltage / position / velocity input modes with back-EMF,
   configurable motor constants, and optional integral, slew, inductance,
@@ -279,6 +301,27 @@ Added
 Changed
 ^^^^^^^
 
+- Added ``power`` and ``only_below`` parameters to the ``feet_clearance``
+  velocity reward. ``power=2`` uses a squared height error (stronger gradient
+  far below target) and ``only_below=True`` penalizes only feet below the
+  target height, leaving a high swing apex unpenalized. Defaults preserve the
+  previous linear, symmetric behavior; enabled for NUbots Nugus.
+- Replaced the single ``scale`` parameter in ``DifferentialIKActionCfg`` with
+  separate ``delta_pos_scale`` and ``delta_ori_scale`` for independent scaling
+  of position and orientation components.
+- Updated velocity task training defaults to improve gait naturalness: added
+  optional left-right limb symmetry and actuation power cost rewards, and
+  slowed velocity command curriculum ramp-up. Enabled/tuned these rewards for
+  NUbots Nugus.
+- Enabled the left-right limb symmetry reward for NUbots Nugus (previously
+  disabled) and expanded it to cover the full leg (hip yaw/roll/pitch, knee,
+  ankle pitch/roll) rather than only the sagittal pitch joints, to address a
+  lop-sided trained gait.
+- Added an optional feet-separation penalty for velocity tasks to discourage
+  feet from getting too close; enabled and tuned for NUbots Nugus.
+- Added optional ``cot_proxy`` and ``gait_phase_regularity`` rewards for
+  velocity tasks to improve locomotion efficiency and left-right gait timing.
+  Enabled and tuned these for NUbots Nugus.
 - Bumped ``rsl-rl-lib`` from 5.2.0 to 5.4.0.
 - Bumped ``mujoco`` and ``mujoco-warp`` to 3.10, both pinned from PyPI. The
   ``py.mujoco.org`` nightly index and the ``mujoco-warp`` git pin are dropped, so
@@ -938,6 +981,9 @@ Fixed
 - Bundled ``ffmpeg`` for ``mediapy`` via ``imageio-ffmpeg``, removing the
   requirement for a system ``ffmpeg`` install. Thanks to
   `@rdeits-bd <https://github.com/rdeits-bd>`_ for the suggestion.
+- Fixed W&B checkpoint resume for runs where ``run.files()`` fails but direct
+  file lookup still works, by trying ``model_<summary_step>.pt`` and then
+  fallback names such as ``last.pt``/``model.pt``.
 - Fixed ``height_scan`` returning ~0 for missed rays; now defaults to
   ``max_distance``. Replaced ``clip=(-1, 1)`` with ``scale`` normalization
   in the velocity task config. Thanks to `@eufrizz <https://github.com/eufrizz>`_

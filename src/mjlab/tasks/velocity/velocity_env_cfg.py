@@ -82,20 +82,20 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
-      noise=Unoise(n_min=-0.2, n_max=0.2),
+      noise=Unoise(n_min=-0.2, n_max=0.2),  # Override for nugus
     ),
     "projected_gravity": ObservationTermCfg(
       func=mdp.projected_gravity,
-      noise=Unoise(n_min=-0.05, n_max=0.05),
+      noise=Unoise(n_min=-0.05, n_max=0.05),  # Override for nugus
     ),
     "joint_pos": ObservationTermCfg(
       func=mdp.joint_pos_rel,
       params={"biased": True},
-      noise=Unoise(n_min=-0.01, n_max=0.01),
+      noise=Unoise(n_min=-0.01, n_max=0.01), # Override for nugus
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
-      noise=Unoise(n_min=-1.5, n_max=1.5),
+      noise=Unoise(n_min=-1.5, n_max=1.5),  # Override for nugus
     ),
     "actions": ObservationTermCfg(func=mdp.last_action),
     "command": ObservationTermCfg(
@@ -141,7 +141,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "actor": ObservationGroupCfg(
       terms=actor_terms,
       concatenate_terms=True,
-      enable_corruption=True,
+      enable_corruption=True,  # Domain randomisation
     ),
     "critic": ObservationGroupCfg(
       terms=critic_terms,
@@ -181,17 +181,17 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "twist": UniformVelocityCommandCfg(
       entity_name="robot",
       resampling_time_range=(3.0, 8.0),
-      rel_standing_envs=0.1,
+      rel_standing_envs=0.2,
       rel_heading_envs=0.3,
       rel_forward_envs=0.2,
       heading_command=True,
       heading_control_stiffness=0.5,
       debug_vis=True,
       ranges=UniformVelocityCommandCfg.Ranges(
-        lin_vel_x=(-1.0, 1.0),
-        lin_vel_y=(-1.0, 1.0),
-        ang_vel_z=(-0.5, 0.5),
-        heading=(-math.pi, math.pi),
+        lin_vel_x=(-1.0, 1.0),  # Target x velocity range
+        lin_vel_y=(-1.0, 1.0),  # Target y velocity range
+        ang_vel_z=(-0.5, 0.5),  # Target yaw velocity range
+        heading=(-math.pi, math.pi),  # Target heading range
       ),
     )
   }
@@ -226,15 +226,15 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
-      interval_range_s=(1.0, 3.0),
+      interval_range_s=(3.0, 10.0),
       params={
         "velocity_range": {
           "x": (-0.5, 0.5),
           "y": (-0.5, 0.5),
-          "z": (-0.4, 0.4),
-          "roll": (-0.52, 0.52),
-          "pitch": (-0.52, 0.52),
-          "yaw": (-0.78, 0.78),
+          "z": (-0.0, 0.0),
+          "roll": (-0.1, 0.1),
+          "pitch": (-0.1, 0.1),
+          "yaw": (-0.0, 0.00),
         },
       },
     ),
@@ -244,8 +244,9 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "asset_cfg": SceneEntityCfg("robot", geom_names=()),  # Set per-robot.
         "operation": "abs",
-        "ranges": (0.3, 1.2),
-        "shared_random": True,  # All foot geoms share the same friction.
+        "ranges": (0.7, 1.3),
+        # Per-foot independent friction so the policy sees asymmetric traction.
+        "shared_random": False,
       },
     ),
     "encoder_bias": EventTermCfg(
@@ -269,6 +270,17 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         },
       },
     ),
+    # PD gain scaling
+    "pd_gains": EventTermCfg(
+      mode="startup",
+      func=dr.pd_gains,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "kp_range": (0.9, 1.1),
+        "kd_range": (0.9, 1.1),
+        "operation": "scale",
+      },
+    ),
   }
 
   ##
@@ -279,7 +291,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "track_linear_velocity": RewardTermCfg(
       func=mdp.track_linear_velocity,
       weight=2.0,
-      params={"command_name": "twist", "std": math.sqrt(0.25)},
+      params={"command_name": "twist", "std": math.sqrt(0.05)},
     ),
     "track_angular_velocity": RewardTermCfg(
       func=mdp.track_angular_velocity,
@@ -288,7 +300,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "upright": RewardTermCfg(
       func=mdp.upright,
-      weight=1.0,
+      weight=0.0, # Disable
       params={
         "std": math.sqrt(0.2),
         "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
@@ -296,7 +308,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "pose": RewardTermCfg(
       func=mdp.variable_posture,
-      weight=1.0,
+      weight=3.0,
       params={
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
         "command_name": "twist",
@@ -318,7 +330,32 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"sensor_name": "robot/root_angmom"},
     ),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
-    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
+    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.2),
+    "action_acc_l2": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.2),
+    "actuation_power": RewardTermCfg(
+      func=mdp.electrical_power_cost,
+      weight=0.0,  # Override per-robot.
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    "cot_proxy": RewardTermCfg(
+      func=mdp.cost_of_transport_proxy,
+      weight=0.0,  # Override per-robot.
+      params={
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+        "speed_floor": 0.1,
+        "command_name": "twist",
+        "command_threshold": 0.05,
+      },
+    ),
+    "limb_symmetry": RewardTermCfg(
+      func=mdp.left_right_joint_symmetry_cost,
+      weight=0.0,  # Override per-robot.
+      params={
+        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+        "position_weight": 0.0,  # Override per-robot
+        "velocity_weight": 0.0,  # Override per-robot
+      },
+    ),
     "air_time": RewardTermCfg(
       func=mdp.feet_air_time,
       weight=0.0,  # Override per-robot.
@@ -327,14 +364,23 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "threshold_min": 0.05,
         "threshold_max": 0.5,
         "command_name": "twist",
-        "command_threshold": 0.5,
+        "command_threshold": 0.03,  # Minimum command magnitude for which this reward is active
+      },
+    ),
+    "gait_phase_regularity": RewardTermCfg(
+      func=mdp.gait_phase_regularity_cost,
+      weight=0.0,  # Override per-robot.
+      params={
+        "sensor_name": "feet_ground_contact",
+        "command_name": "twist",
+        "command_threshold": 0.05,
       },
     ),
     "foot_clearance": RewardTermCfg(
       func=mdp.feet_clearance,
       weight=-2.0,
       params={
-        "target_height": 0.1,
+        "target_height": 0.08,
         "height_sensor_name": "foot_height_scan",
         "command_name": "twist",
         "command_threshold": 0.05,
@@ -343,22 +389,42 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "foot_swing_height": RewardTermCfg(
       func=mdp.feet_swing_height,
-      weight=-0.25,
+      weight=-0.5,
       params={
         "sensor_name": "feet_ground_contact",
         "height_sensor_name": "foot_height_scan",
-        "target_height": 0.1,
+        "target_height": 0.08,
         "command_name": "twist",
         "command_threshold": 0.05,
       },
     ),
     "foot_slip": RewardTermCfg(
       func=mdp.feet_slip,
-      weight=-0.1,
+      weight=-1.0,
       params={
         "sensor_name": "feet_ground_contact",
         "command_name": "twist",
         "command_threshold": 0.05,
+        "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
+      },
+    ),
+    "foot_flat": RewardTermCfg(
+      func=mdp.feet_flat_orientation,
+      weight=0.0,  # Override per-robot.
+      params={
+        "sensor_name": "feet_ground_contact",
+        "command_name": "twist",
+        "command_threshold": 0.05,
+        "sole_normal_axis": 2,  # Set per-robot.
+        "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
+      },
+    ),
+    "feet_distance": RewardTermCfg(
+      func=mdp.feet_lateral_distance_cost,
+      weight=0.0,  # Override per-robot.
+      params={
+        "nominal_distance": 0.0,  # Set per-robot.
+        "sharpness": 10.0,  # Set per-robot.
         "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
       },
     ),
@@ -371,6 +437,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_threshold": 0.05,
       },
     ),
+    "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-30.0),
   }
 
   ##
@@ -381,7 +448,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
     "fell_over": TerminationTermCfg(
       func=mdp.bad_orientation,
-      params={"limit_angle": math.radians(70.0)},
+      params={"limit_angle": math.radians(50.0)},
     ),
     "out_of_terrain_bounds": TerminationTermCfg(
       func=mdp.out_of_terrain_bounds,
@@ -403,9 +470,24 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "command_name": "twist",
         "velocity_stages": [
-          {"step": 0, "lin_vel_x": (-1.0, 1.0), "ang_vel_z": (-0.5, 0.5)},
-          {"step": 5000 * 24, "lin_vel_x": (-1.5, 2.0), "ang_vel_z": (-0.7, 0.7)},
-          {"step": 10000 * 24, "lin_vel_x": (-2.0, 3.0)},
+          {
+            "step": 0,
+            "lin_vel_x": (-0.9, 0.9),
+            "lin_vel_y": (-0.3, 0.3),
+            "ang_vel_z": (-0.5, 0.5),
+          },
+          {
+            "step": 9000 * 24,
+            "lin_vel_x": (-0.9, 0.9),
+            "lin_vel_y": (-0.3, 0.3),
+            "ang_vel_z": (-0.5, 0.5),
+          },
+          {
+            "step": 12000 * 24,
+            "lin_vel_x": (-0.9, 0.9),
+            "lin_vel_y": (-0.3, 0.3),
+            "ang_vel_z": (-0.5, 0.5),
+          },
         ],
       },
     ),
@@ -454,3 +536,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     decimation=4,
     episode_length_s=20.0,
   )
+# warp-lang 1.16 tightened if/elif/else symbol scoping in its kernel codegen,
+  # which trips a latent bug in the pinned mujoco-warp rev: the UNKNOWN branch of
+  # _frame_axis (sensor.py) reads `xmat` without ever assigning it on that path.
+  # Any model with a framexaxis/framezaxis sensor then fails to compile.

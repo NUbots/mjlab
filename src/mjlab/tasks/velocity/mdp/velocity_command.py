@@ -22,11 +22,14 @@ if TYPE_CHECKING:
 
 
 class UniformVelocityCommand(CommandTerm):
+  """Command term for sampling uniform velocity commands for robot control."""
+
   cfg: UniformVelocityCommandCfg
 
   def __init__(self, cfg: UniformVelocityCommandCfg, env: ManagerBasedRlEnv):
     super().__init__(cfg, env)
 
+    # Validate heading command configuration
     if self.cfg.heading_command and self.cfg.ranges.heading is None:
       raise ValueError("heading_command=True but ranges.heading is set to None.")
     if self.cfg.ranges.heading and not self.cfg.heading_command:
@@ -34,19 +37,28 @@ class UniformVelocityCommand(CommandTerm):
 
     self.robot: Entity = env.scene[cfg.entity_name]
 
+    # Initialize velocity command buffer (x, y linear + z angular)
     self.vel_command_b = torch.zeros(self.num_envs, 3, device=self.device)
+    # vel_command_w
     self.vel_command_w = torch.zeros(self.num_envs, 3, device=self.device)
+    # Target heading angle for heading control mode
     self.heading_target = torch.zeros(self.num_envs, device=self.device)
+    # Current heading error from target
     self.heading_error = torch.zeros(self.num_envs, device=self.device)
+    # Mask for environments using heading control
     self.is_heading_env = torch.zeros(
       self.num_envs, dtype=torch.bool, device=self.device
     )
+    # Mask for environments that should stand still
     self.is_standing_env = torch.zeros_like(self.is_heading_env)
     self.is_world_env = torch.zeros_like(self.is_heading_env)
     self.is_forward_env = torch.zeros_like(self.is_heading_env)
 
+    # Initialize tracking metrics
     self.metrics["error_vel_xy"] = torch.zeros(self.num_envs, device=self.device)
     self.metrics["error_vel_yaw"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["error_vel_x"] = torch.zeros(self.num_envs, device=self.device)
+    self.metrics["error_vel_y"] = torch.zeros(self.num_envs, device=self.device)
 
     # Set by create_gui() when the viewer is active.
     self._joystick_enabled: viser.GuiCheckboxHandle | None = None
@@ -55,31 +67,50 @@ class UniformVelocityCommand(CommandTerm):
 
   @property
   def command(self) -> torch.Tensor:
+    """Returns the current velocity command in body frame."""
     return self.vel_command_b
 
   def _update_metrics(self) -> None:
+    """Accumulate velocity tracking errors for metrics."""
     max_command_time = self.cfg.resampling_time_range[1]
     max_command_step = max_command_time / self._env.step_dt
+    # Accumulate normalized xy linear velocity error
     self.metrics["error_vel_xy"] += (
       torch.norm(
         self.vel_command_b[:, :2] - self.robot.data.root_link_lin_vel_b[:, :2], dim=-1
       )
       / max_command_step
     )
+    # Accumulate normalized yaw angular velocity error
     self.metrics["error_vel_yaw"] += (
       torch.abs(self.vel_command_b[:, 2] - self.robot.data.root_link_ang_vel_b[:, 2])
       / max_command_step
     )
+    # Accumulate separate x and y linear velocity errors for analysis
+    self.metrics["error_vel_x"] += (
+      torch.abs(self.vel_command_b[:, 0] - self.robot.data.root_link_lin_vel_b[:, 0])
+      / max_command_step
+    )
+    self.metrics["error_vel_y"] += (
+      torch.abs(self.vel_command_b[:, 1] - self.robot.data.root_link_lin_vel_b[:, 1])
+      / max_command_step
+    )
 
   def _resample_command(self, env_ids: torch.Tensor) -> None:
+    """Sample new velocity commands for specified environments."""
     r = torch.empty(len(env_ids), device=self.device)
+    # Sample linear and angular velocity commands from uniform distributions
     self.vel_command_b[env_ids, 0] = r.uniform_(*self.cfg.ranges.lin_vel_x)
     self.vel_command_b[env_ids, 1] = r.uniform_(*self.cfg.ranges.lin_vel_y)
     self.vel_command_b[env_ids, 2] = r.uniform_(*self.cfg.ranges.ang_vel_z)
+
+    # Sample heading targets if heading control is enabled
     if self.cfg.heading_command:
       assert self.cfg.ranges.heading is not None
       self.heading_target[env_ids] = r.uniform_(*self.cfg.ranges.heading)
       self.is_heading_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_heading_envs
+
+    # Randomly select environments to stand still
     self.is_standing_env[env_ids] = r.uniform_(0.0, 1.0) <= self.cfg.rel_standing_envs
 
     # Randomly assign world-frame envs.
@@ -134,6 +165,7 @@ class UniformVelocityCommand(CommandTerm):
       self.vel_command_b[w_ids, 0] = cos_h * vx_w + sin_h * vy_w
       self.vel_command_b[w_ids, 1] = -sin_h * vx_w + cos_h * vy_w
 
+    # Zero out commands for standing environments
     standing_env_ids = self.is_standing_env.nonzero(as_tuple=False).flatten()
     self.vel_command_b[standing_env_ids, :] = 0.0
     self.vel_command_w[standing_env_ids, :] = 0.0
@@ -166,9 +198,9 @@ class UniformVelocityCommand(CommandTerm):
       for label, max_val in axes:
         max_input = server.gui.add_slider(
           f"Max {label}",
-          initial_value=max_val,
+          initial_value=max(0.0, min(10.0, max_val)),
           step=0.1,
-          min=0.1,
+          min=0.0,
           max=10.0,
         )
         slider = server.gui.add_slider(
@@ -216,6 +248,7 @@ class UniformVelocityCommand(CommandTerm):
     if not env_indices:
       return
 
+    # Convert data to numpy for visualization
     cmds = self.command.cpu().numpy()
     base_pos_ws = self.robot.data.root_link_pos_w.cpu().numpy()
     base_quat_w = self.robot.data.root_link_quat_w
@@ -301,24 +334,30 @@ class UniformVelocityCommandCfg(CommandTermCfg):
 
   @dataclass
   class Ranges:
-    lin_vel_x: tuple[float, float]
-    lin_vel_y: tuple[float, float]
-    ang_vel_z: tuple[float, float]
-    heading: tuple[float, float] | None = None
+    """Sampling ranges for velocity commands."""
+
+    lin_vel_x: tuple[float, float]  # Forward/backward linear velocity range
+    lin_vel_y: tuple[float, float]  # Left/right linear velocity range
+    ang_vel_z: tuple[float, float]  # Yaw angular velocity range
+    heading: tuple[float, float] | None = None  # Target heading angle range
 
   ranges: Ranges
 
   @dataclass
   class VizCfg:
-    z_offset: float = 0.2
-    scale: float = 0.5
+    """Visualization configuration."""
+
+    z_offset: float = 0.2  # Height offset for arrows above robot
+    scale: float = 0.5  # Scale factor for arrow lengths
 
   viz: VizCfg = field(default_factory=VizCfg)
 
   def build(self, env: ManagerBasedRlEnv) -> UniformVelocityCommand:
+    """Construct the velocity command term."""
     return UniformVelocityCommand(self, env)
 
   def __post_init__(self):
+    """Validate configuration after initialization."""
     if self.heading_command and self.ranges.heading is None:
       raise ValueError(
         "The velocity command has heading commands active (heading_command=True) but "
