@@ -1,6 +1,10 @@
 .PHONY: sync
 sync:
-	uv sync --all-extras --all-packages --group dev
+	uv sync --all-packages --extra cu128 --group dev
+
+.PHONY: sync-cpu
+sync-cpu:
+	uv sync --all-packages --extra cpu --group dev
 
 .PHONY: format
 format:
@@ -11,6 +15,10 @@ format:
 type:
 	uv run ty check
 	uv run pyright
+
+.PHONY: stubs
+stubs:
+	bash typings/generate_mujoco_stubs.sh
 
 .PHONY: check
 check: format type
