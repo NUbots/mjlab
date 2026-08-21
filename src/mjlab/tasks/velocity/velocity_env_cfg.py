@@ -299,7 +299,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_name": "twist",
         "std_standing": {},  # Set per-robot.
         "std_walking": {},  # Set per-robot.
-        "std_running": {},  # Set per-robot. Hello there
+        "std_running": {},  # Set per-robot.
         "walking_threshold": 0.05,
         "running_threshold": 1.5,
       },
