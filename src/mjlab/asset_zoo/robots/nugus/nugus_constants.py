@@ -213,6 +213,7 @@ FEET_COLLISION = CollisionCfg(
   # Feet collide with the ground and with each other.
   conaffinity=1,
   condim=3,
+  priority=0,
   friction=(FOOT_GROUND_FRICTION,),
 )
 
@@ -222,6 +223,7 @@ FULL_COLLISION = CollisionCfg(
   # Enable robot-robot and robot-ground contacts for collision geoms.
   conaffinity=1,
   condim=3,
+  priority=0,
   friction={
     FOOT_COLLISION_REGEX: (FOOT_GROUND_FRICTION,),
     ".*_collision": (NON_FOOT_COLLISION_FRICTION,),
@@ -235,6 +237,7 @@ FULL_COLLISION_GND_ONLY = CollisionCfg(
   # Ground/environment contacts only (no self-collisions).
   conaffinity=0,
   condim=3,
+  priority=0,
   friction={
     FOOT_COLLISION_REGEX: (FOOT_GROUND_FRICTION,),
     ".*_collision": (NON_FOOT_COLLISION_FRICTION,),
