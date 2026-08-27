@@ -20,6 +20,29 @@ Added
   ``history_window``, ``history_obs_dim``, and ``history_layout`` describing
   that deployment contract. Enabled for NUbots Nugus with a 25-step (0.5 s)
   window.
+- Added competence-gated movement penalties for velocity tasks. A new
+  ``mjlab.tasks.velocity.mdp.competence`` module tracks per-env episode
+  statistics (tracking error, attainment, near-fall wobble, falls, episode
+  length) and EMAs them into population competence signals. The
+  ``staged_on_competence`` curriculum term walks a penalty term's weight up a
+  five-stage ramp from zero while the population is demonstrably stable, backs
+  it down a stage when stability is badly lost, and freezes in between, so
+  penalty pressure never suppresses the motion a policy still needs to learn
+  and a policy already sliding down the penalty gradient has a path back.
+  Enabled for NUbots Nugus over ``joule_heating``, ``joint_acc_l2``,
+  ``torque_rate`` and ``soft_landing``.
+- Added a ``competence_diagnostics`` curriculum term publishing the frontier
+  estimates behind the gate: fall hazard and attainment as functions of
+  commanded speed and of the Mahalanobis command radius, push survival by
+  shove magnitude, and the push-to-fall delay distribution, plus W&B histogram
+  views of each. Pushes are stratified into a pushed cohort and a push-free
+  clean cohort (via ``push_cohort_by_setting_velocity``) so the frontier is
+  measured on uncontaminated episodes and the push effect reads as a
+  difference in rates. Log-only; it drives nothing.
+- Added an ``actuator_torque_rate_l2`` velocity reward penalizing rapid
+  actuator torque changes, and registered ``joint_acc_l2``, ``joule_heating``
+  and ``torque_rate`` penalty terms (weight ``0.0`` by default) on the base
+  velocity task config.
 
 Version 1.6.0 (August 8, 2026)
 ------------------------------

@@ -10,6 +10,8 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.envs.mdp.curriculums import RewardCurriculumStage
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import (
   ObservationGroupCfg,
@@ -33,6 +35,71 @@ HISTORY_WINDOW = 25
 """Length (in control steps) of the actor observation window fed to the
 policy's history encoder (``mjlab.rl.obs_history``). At the 50 Hz policy
 rate this is 0.5 s, roughly one gait cycle."""
+
+# Peak weights the competence-gated movement penalties ramp toward. Each
+# term starts at 0.0 and only advances a stage while the population is
+# demonstrably stable, so these are the pressure at full competence, never
+# the pressure a fresh policy sees.
+_JOULE_HEATING_PEAK_W = -3e-4
+_JOINT_ACC_PEAK_W = -1e-4
+_TORQUE_RATE_PEAK_W = -1e-3
+_SOFT_LANDING_PEAK_W = -1e-5
+
+
+def _competence_penalty_stages(
+  final_weight: float, *, n_steps: int = 4
+) -> list[RewardCurriculumStage]:
+  """Build competence-gated penalty ramp stages (0 -> full in ``n_steps``)."""
+  return [{"step": i, "weight": final_weight * i / n_steps} for i in range(n_steps + 1)]
+
+
+def _add_competence_tracker_event(cfg: ManagerBasedRlEnvCfg) -> None:
+  """Accumulate the per-step competence statistics on every env step."""
+  cfg.events["competence_tracker"] = EventTermCfg(
+    mode="step",
+    func=mdp.competence_tracker_step,
+    params={},
+  )
+
+
+def _add_competence_penalty_gating(cfg: ManagerBasedRlEnvCfg) -> None:
+  """Ramp movement penalties in only while stability competence holds.
+
+  Applying full penalty pressure to a policy that has not yet learned to
+  walk suppresses the motion it needs to learn from; applying it and never
+  releasing it lets a policy slide down the penalty gradient with no way
+  back. Each term walks a five-stage ladder: promote on demonstrated
+  stability, demote when it is badly lost, freeze in between.
+  """
+  for reward_name, peak_weight in (
+    ("joule_heating", _JOULE_HEATING_PEAK_W),
+    ("joint_acc_l2", _JOINT_ACC_PEAK_W),
+    ("torque_rate", _TORQUE_RATE_PEAK_W),
+    ("soft_landing", _SOFT_LANDING_PEAK_W),
+  ):
+    cfg.curriculum[f"{reward_name}_competence"] = CurriculumTermCfg(
+      func=mdp.staged_on_competence,
+      params={
+        "reward_name": reward_name,
+        "stages": _competence_penalty_stages(peak_weight),
+      },
+    )
+
+
+def _add_competence_diagnostics(cfg: ManagerBasedRlEnvCfg) -> None:
+  """Stratify pushes by cohort and publish the frontier diagnostics.
+
+  Only the low ``PUSH_COHORT_FRAC`` share of env indices is pushed; the
+  clean cohort is the uncontaminated tracking-competence baseline (and the
+  only source of frontier exposure), and it matches the mostly push-free
+  deployment distribution.
+  """
+  if "push_robot" in cfg.events:
+    cfg.events["push_robot"].func = mdp.push_cohort_by_setting_velocity
+  cfg.curriculum["competence_diagnostics"] = CurriculumTermCfg(
+    func=mdp.competence_diagnostics,
+    params={},
+  )
 
 
 def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -92,7 +159,13 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       if term is not None:
         term.params["asset_cfg"] = motor_cfg()
   cfg.events["reset_robot_joints"].params["asset_cfg"] = motor_cfg()
-  for reward_name in ("pose", "actuation_power"):
+  for reward_name in (
+    "pose",
+    "actuation_power",
+    "joint_acc_l2",
+    "joule_heating",
+    "torque_rate",
+  ):
     cfg.rewards[reward_name].params["asset_cfg"].joint_names = (
       NUGUS_MOTOR_JOINT_REGEX,
     )
@@ -292,6 +365,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["feet_distance"].weight = -0.1
   cfg.rewards["foot_flat"].weight = -0.5  # Encourage flat-footed, level swing.
 
+  # Competence-gated movement penalties plus the frontier diagnostics that
+  # explain them. Always on. These install event/curriculum terms and retune
+  # reward weights; they add no actor observation terms, so they are free to
+  # sit either side of the history block below.
+  _add_competence_tracker_event(cfg)
+  _add_competence_penalty_gating(cfg)
+  if not play:
+    _add_competence_diagnostics(cfg)
+
   # Actor observation history (see mjlab.rl.obs_history): a HISTORY_WINDOW-step
   # window of the actor observation stream, shaped [B, T, D], encoded by a TCN
   # inside the actor model and concatenated onto the current observation.
@@ -300,7 +382,8 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # built from deep copies of the actor terms, so it only clones the final
   # layout. That equality is the deployment contract — one history frame is
   # byte-for-byte the actor observation vector, so the robot keeps a single
-  # ring buffer of the vector it already builds.
+  # ring buffer of the vector it already builds. Keep it last in this
+  # function so new config blocks land above it by default.
   #
   # The copies carry their own noise/delay state, so the window draws an
   # independent corruption realization rather than replaying the exact frames
