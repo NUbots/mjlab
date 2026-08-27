@@ -645,10 +645,10 @@ def feet_lateral_distance_cost(
   isolating lateral spread from fore-aft offset during a stride.
 
 
-  The penalty shape is ``exp(sharpness * shortfall) - 1`` where 
-  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``. 
-  When nominal_distance == lateral_distance the cost is zero. For 
-  anything else, the cost grows exponentially with the difference. 
+  The penalty shape is ``exp(sharpness * shortfall) - 1`` where
+  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``.
+  When nominal_distance == lateral_distance the cost is zero. For
+  anything else, the cost grows exponentially with the difference.
   """
   asset: Entity = env.scene[asset_cfg.name]
   foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
@@ -682,6 +682,34 @@ def feet_lateral_distance_cost(
     max_pair_distance
   )
   return cost
+
+
+class actuator_torque_rate_l2:
+  """Penalize rapid actuator torque changes (shuffle reversals)."""
+
+  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
+    asset: Entity = env.scene[cfg.params["asset_cfg"].name]
+    actuator_ids, _ = asset.find_actuators(
+      cfg.params["asset_cfg"].joint_names,
+    )
+    self._actuator_ids = torch.tensor(actuator_ids, device=env.device, dtype=torch.long)
+    self._prev_tau = torch.zeros(
+      (env.num_envs, len(actuator_ids)), device=env.device, dtype=torch.float32
+    )
+
+  def __call__(
+    self,
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  ) -> torch.Tensor:
+    asset: Entity = env.scene[asset_cfg.name]
+    tau = asset.data.actuator_force[:, self._actuator_ids]
+    cost = torch.sum(torch.square(tau - self._prev_tau), dim=1)
+    self._prev_tau = tau.clone()
+    return cost
+
+  def reset(self, env_ids: torch.Tensor) -> None:
+    self._prev_tau[env_ids] = 0.0
 
 
 def soft_landing(

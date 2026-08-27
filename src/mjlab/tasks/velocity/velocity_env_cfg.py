@@ -332,6 +332,23 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.2),
     "action_acc_l2": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.2),
+    # Movement penalties. Disabled by default; the NUgus config ramps them
+    # in from zero via the competence-gated curriculum.
+    "joint_acc_l2": RewardTermCfg(
+      func=mdp.joint_acc_l2,
+      weight=0.0,  # Override per-robot.
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    "joule_heating": RewardTermCfg(
+      func=mdp.joint_torques_l2,
+      weight=0.0,  # Override per-robot.
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
+    "torque_rate": RewardTermCfg(
+      func=mdp.actuator_torque_rate_l2,
+      weight=0.0,  # Override per-robot.
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=(".*",))},
+    ),
     "actuation_power": RewardTermCfg(
       func=mdp.electrical_power_cost,
       weight=0.0,  # Override per-robot.
