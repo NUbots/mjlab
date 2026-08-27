@@ -5,6 +5,22 @@ Changelog
 Upcoming version (not yet released)
 -----------------------------------
 
+Added
+^^^^^
+
+- Added ``mjlab.rl.obs_history``: an actor observation-history encoder. The
+  environment publishes a ``"history"`` observation group holding a T-step
+  window of the actor observation stream (shape ``[num_envs, T, obs_dim]``),
+  and ``HistoryActor`` compresses it with a small temporal convolutional
+  network into a latent that is concatenated onto the current observation
+  before the policy MLP. The encoder trains end-to-end with PPO (no auxiliary
+  loss, no teacher/student stage) and stays stateless, so
+  ``OnnxHistoryPolicy`` exports encoder plus policy as one graph driven by a
+  flat ring buffer of past observation vectors. ONNX metadata gains
+  ``history_window``, ``history_obs_dim``, and ``history_layout`` describing
+  that deployment contract. Enabled for NUbots Nugus with a 25-step (0.5 s)
+  window.
+
 Version 1.6.0 (August 8, 2026)
 ------------------------------
 
