@@ -94,6 +94,18 @@ Added
   only via ``NUGUS_MOTOR_JOINT_REGEX`` so the passive joints do not appear
   in the policy's view.
 
+Fixed
+^^^^^
+
+- Fixed the quintic walk engine re-parking the whole batch instead of only the
+  environments it was resetting. ``WalkGenerator.update`` re-parks its stopped
+  environments on every control step, and ``reset`` regenerated the standing
+  trajectories for every environment rather than for ``env_ids``, so a single
+  zero velocity command made every other environment in the batch march on the
+  spot. A batched command sweep -- which always contains a zero command --
+  therefore reported one speed for every command. Single-environment playback,
+  and any batch without a zero command, were unaffected.
+
 Changed
 ^^^^^^^
 

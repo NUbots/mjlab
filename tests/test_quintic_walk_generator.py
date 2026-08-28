@@ -226,3 +226,37 @@ def test_step_placement_is_clamped_to_the_limits(device):
   )
   limits = NUGUS_WALK_PARAMETERS.step_limits
   assert abs(float(swing[0, 0, 3])) <= limits[0] + 1e-9
+
+
+def test_a_stopped_env_does_not_flatten_its_neighbours(device):
+  """A zero command in the batch must not re-park the walking environments.
+
+  ``update`` re-parks the stopped environments on every control step. When that
+  re-park regenerated the whole batch's trajectories rather than only the ones
+  it was resetting, a single zero command made every other environment in the
+  batch march on the spot -- a batched sweep over commands then reported one
+  speed for every command.
+  """
+  walking = torch.tensor([[0.25, 0.0, 0.0]], device=device)
+  alone = WalkGenerator(1, device=device)
+  mixed = WalkGenerator(2, device=device)
+  mixed_command = torch.cat((walking, torch.zeros(1, 3, device=device)))
+
+  for _ in range(120):
+    alone.update(CONTROL_DT, walking)
+    mixed.update(CONTROL_DT, mixed_command)
+
+  def swing_x(generator: WalkGenerator) -> torch.Tensor:
+    period = torch.full(
+      (generator.num_envs,),
+      NUGUS_WALK_PARAMETERS.step_period,
+      dtype=generator.dtype,
+      device=device,
+    )
+    return generator.swing_foot_pose(period)[:, 0, 3]
+
+  # The walking environment is placing a real step, not standing on the spot.
+  assert abs(float(swing_x(alone)[0])) > 0.02
+  # And the neighbour's zero command changes nothing about it.
+  assert float(swing_x(mixed)[0]) == pytest.approx(float(swing_x(alone)[0]), abs=1e-9)
+  assert int(mixed.state[1]) == int(EngineState.STOPPED)

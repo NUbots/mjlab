@@ -285,9 +285,19 @@ class WalkGenerator:
       self._t[env_ids] = self._p.step_period[env_ids]
       self._state[env_ids] = int(EngineState.STOPPED)
 
-    # Standing still still needs trajectories, generated at zero velocity.
+    # Standing still still needs trajectories, generated at zero velocity --
+    # but only for the environments being reset. ``update`` re-parks the stopped
+    # environments on every control step, so regenerating the whole batch here
+    # would overwrite, once per step, the trajectories the *walking*
+    # environments had just built: one environment holding a zero command would
+    # make every other environment in the batch march on the spot.
+    select = None
+    if env_ids is not None:
+      select = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+      select[env_ids] = True
     self._generate_walking_trajectories(
-      torch.zeros(self.num_envs, 3, device=self.device, dtype=self.dtype)
+      torch.zeros(self.num_envs, 3, device=self.device, dtype=self.dtype),
+      select=select,
     )
 
   def update(
