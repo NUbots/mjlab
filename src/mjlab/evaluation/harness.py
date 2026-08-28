@@ -61,7 +61,7 @@ from mjlab.controllers.quintic_walk.walk_generator import (
   WalkParameters,
 )
 from mjlab.entity import Entity
-from mjlab.evaluation.metrics import EvalState, WalkMetrics
+from mjlab.evaluation.metrics import EvalState, VelocityTrace, WalkMetrics
 from mjlab.scene import Scene
 from mjlab.sim import Simulation
 from mjlab.utils.lab_api.math import matrix_from_quat
@@ -325,9 +325,15 @@ class WalkEvalHarness(Generic[ControllerT]):
     command: torch.Tensor,
     duration: float,
     on_step: Callable[[int], None] | None = None,
+    warmup_s: float = 0.0,
   ) -> WalkMetrics:
-    """Hold ``command`` for ``duration`` seconds, recording metrics."""
-    metrics = WalkMetrics(command_b=command, dt=self.control_dt)
+    """Hold ``command`` for ``duration`` seconds, recording metrics.
+
+    ``warmup_s`` is passed straight to
+    :class:`~mjlab.evaluation.metrics.WalkMetrics`, which keeps the run-up out
+    of the averages while still dating a fall from the first step.
+    """
+    metrics = WalkMetrics(command_b=command, dt=self.control_dt, warmup_s=warmup_s)
     metrics.start(self.state())
     for step in range(int(duration / self.control_dt)):
       self.step(command)
@@ -335,6 +341,31 @@ class WalkEvalHarness(Generic[ControllerT]):
       if on_step is not None:
         on_step(step)
     return metrics
+
+  def run_profile(
+    self,
+    schedule: torch.Tensor,
+    on_step: Callable[[int], None] | None = None,
+  ) -> VelocityTrace:
+    """Follow a time-varying command, recording every step.
+
+    Args:
+      schedule: Shape ``(T, N, 3)`` commands, one row per control step, as
+        produced by :meth:`mjlab.evaluation.profile.Profile.commands`.
+      on_step: Called with the step index after each control step.
+
+    Returns:
+      The commanded and measured velocity, step by step.
+    """
+    _check_schedule(schedule, self.num_envs)
+    schedule = schedule.to(self.device)
+    trace = VelocityTrace(dt=self.control_dt)
+    for step, command in enumerate(schedule):
+      self.step(command)
+      trace.record(command, self.state())
+      if on_step is not None:
+        on_step(step)
+    return trace
 
   @property
   def engine_state(self) -> torch.Tensor:
@@ -565,6 +596,23 @@ def prescribe_velocity_commands(env, command: torch.Tensor) -> None:
   _resample(torch.arange(env.num_envs, device=env.device))
 
 
+def velocity_command_writer(env) -> Callable[[torch.Tensor], None]:
+  """Return a function that pins the task's velocity command for one step.
+
+  ``env`` is untyped for the same reason it is in
+  :func:`prescribe_velocity_commands`: the command manager hands back the
+  abstract ``CommandTerm``, and the buffers the observation reads live on the
+  concrete velocity term.
+  """
+  term = env.command_manager.get_term("twist")
+
+  def write(command: torch.Tensor) -> None:
+    term.vel_command_b[:] = command
+    term.vel_command_w[:] = command
+
+  return write
+
+
 def build_rl_env(
   plant: EvalPlant,
   num_envs: int,
@@ -677,13 +725,14 @@ class RlEvalHarness:
     command: torch.Tensor,
     duration: float,
     on_step: Callable[[int], None] | None = None,
+    warmup_s: float = 0.0,
   ) -> WalkMetrics:
     """Hold ``command`` for ``duration`` seconds, recording metrics."""
     obs, _ = self.wrapped.reset()
     prescribe_velocity_commands(self.env, command)
     obs = self.wrapped.get_observations()
 
-    metrics = WalkMetrics(command_b=command, dt=self.control_dt)
+    metrics = WalkMetrics(command_b=command, dt=self.control_dt, warmup_s=warmup_s)
     metrics.start(self.state())
     with torch.inference_mode():
       for step in range(int(duration / self.control_dt)):
@@ -693,8 +742,50 @@ class RlEvalHarness:
           on_step(step)
     return metrics
 
+  def run_profile(
+    self,
+    schedule: torch.Tensor,
+    on_step: Callable[[int], None] | None = None,
+  ) -> VelocityTrace:
+    """Follow a time-varying command, recording every step.
+
+    The command is written into the task's command term at the top of each
+    control step, so the observation the policy acts on at step ``k + 1``
+    carries the command issued at step ``k``. That one-step lag is the same one
+    the robot has and is far shorter than the ramps a profile uses; rebuilding
+    the observation mid-step to remove it would push the environment's noise and
+    delay buffers twice per step, which would be a worse distortion.
+
+    Args:
+      schedule: Shape ``(T, N, 3)`` commands, one row per control step.
+      on_step: Called with the step index after each control step.
+    """
+    _check_schedule(schedule, self.num_envs)
+    schedule = schedule.to(self.device)
+    self.wrapped.reset()
+    prescribe_velocity_commands(self.env, schedule[0])
+    obs = self.wrapped.get_observations()
+
+    write_command = velocity_command_writer(self.env)
+    trace = VelocityTrace(dt=self.control_dt)
+    with torch.inference_mode():
+      for step, command in enumerate(schedule):
+        write_command(command)
+        obs, _, _, _ = self.wrapped.step(self.policy(obs))
+        trace.record(command, self.state())
+        if on_step is not None:
+          on_step(step)
+    return trace
+
   def close(self) -> None:
     self.env.close()
+
+
+def _check_schedule(schedule: torch.Tensor, num_envs: int) -> None:
+  if schedule.ndim != 3 or schedule.shape[1:] != (num_envs, 3):
+    raise ValueError(
+      f"schedule must have shape (T, {num_envs}, 3), got {tuple(schedule.shape)}"
+    )
 
 
 def phase_name(phase: torch.Tensor) -> str:

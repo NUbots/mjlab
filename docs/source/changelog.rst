@@ -8,6 +8,26 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added ``scripts/eval/eval_velocity_profile.py`` and
+  ``mjlab.evaluation.profile``, which drive any of the three controllers with a
+  *moving* velocity command -- forward, then sideways, then turning, then the
+  three combinations -- and record the commanded and measured base velocity at
+  every control step to ``trace.csv``. This is the tracking figure DeepWalk
+  (Rodriguez and Behnke, ICRA 2021, Fig. 3) uses; the command sweeps measure
+  steady state and say nothing about how the robot gets there. The six
+  schedules run in independent slices of the batch, so a controller that falls
+  under one command does not contaminate the rest of the sequence.
+- Added ``--warmup`` to the three ``scripts/eval`` entry points, discarding the
+  front of a run before the walking metrics start averaging. A robot starts from
+  standing, so a mean over the whole run reports the acceleration as well as the
+  tracking: the quintic engine averages 0.199 m/s over 10 s of a 0.3 m/s command
+  and 0.212 over 30 s, against a steady state of 0.219. Survival is not
+  windowed, and an environment that fell inside the warm-up reports NaN rather
+  than a zero it never walked.
+- Added ``scripts/eval/collect_comparison.sh`` and
+  ``scripts/eval/plot_comparison.py``: the fourteen runs behind a two-controller
+  velocity-tracking and stability comparison, and the figures drawn from them.
+
 - Added ``scripts/eval/eval_distilled_quintic_walk.py`` and
   ``mjlab.controllers.distilled_walk``, which run NUbots' distilled walk policy
   -- the MLP their ``module/skill/NeuralWalk`` deploys, trained to copy the

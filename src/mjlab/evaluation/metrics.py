@@ -158,6 +158,7 @@ class WalkMetrics:
     dt: float,
     fall_threshold: float = FALL_UPRIGHT_THRESHOLD,
     foot_dead_band: float = FOOT_HEIGHT_DEAD_BAND,
+    warmup_s: float = 0.0,
   ) -> None:
     """
     Args:
@@ -165,11 +166,24 @@ class WalkMetrics:
       dt: Seconds between :meth:`record` calls.
       fall_threshold: See :data:`FALL_UPRIGHT_THRESHOLD`.
       foot_dead_band: See :data:`FOOT_HEIGHT_DEAD_BAND`.
+      warmup_s: Seconds to discard from the front of the run before the walking
+        quality metrics start accumulating. See :attr:`warmup_steps`.
     """
     self.command_b = command_b
     self.dt = dt
     self.fall_threshold = fall_threshold
     self.foot_dead_band = foot_dead_band
+    self.warmup_steps = int(round(warmup_s / dt))
+    """Control steps excluded from the averages.
+
+    A robot starts from standing and takes a few seconds to reach the speed it
+    was asked for, so a mean over the whole run reports the acceleration as
+    well as the tracking: the quintic engine averages 0.179 m/s over 5 s of a
+    0.3 m/s command, 0.199 over 10 s and 0.212 over 30 s, against a steady
+    state of 0.219. Survival is *not* windowed -- ``fall_time``, ``survived``
+    and ``alive_time`` are measured from the first step, because a robot that
+    falls during the warm-up has not walked.
+    """
 
     num_envs = command_b.shape[0]
     device = command_b.device
@@ -178,6 +192,7 @@ class WalkMetrics:
     self._steps = 0
     self._alive = torch.ones(num_envs, dtype=torch.bool, device=device)
     self._alive_steps = torch.zeros(num_envs, dtype=torch.long, device=device)
+    self._sample_steps = torch.zeros(num_envs, dtype=torch.long, device=device)
     self._fall_step = torch.full((num_envs,), -1, dtype=torch.long, device=device)
     self._velocity_sum = torch.zeros(num_envs, 3, device=device)
     self._roll_sq_sum = zeros.clone()
@@ -216,8 +231,19 @@ class WalkMetrics:
       just_fell, torch.full_like(self._fall_step, self._steps), self._fall_step
     )
 
-    weight = counted.float()
     self._alive_steps = self._alive_steps + counted.long()
+
+    if self._steps == self.warmup_steps and self.warmup_steps > 0:
+      # Last sample of the warm-up: rebase the displacement and the foot-swap
+      # reference so both describe the measured window and not the run-up.
+      self._start_pos = state.position_w.clone()
+      self._last_pos = state.position_w.clone()
+      if state.foot_pos_w is not None and self._has_feet:
+        self._foot_sign = self._lower_foot(state.foot_pos_w)
+
+    sampled = counted & (self._steps > self.warmup_steps)
+    weight = sampled.float()
+    self._sample_steps = self._sample_steps + sampled.long()
     self._velocity_sum = self._velocity_sum + weight.unsqueeze(-1) * torch.cat(
       (state.lin_vel_b[:, :2], state.ang_vel_b[:, 2:3]), dim=-1
     )
@@ -228,16 +254,16 @@ class WalkMetrics:
     self._roll_sq_sum = self._roll_sq_sum + weight * roll * roll
     self._pitch_sq_sum = self._pitch_sq_sum + weight * pitch * pitch
     self._min_upright = torch.where(
-      counted, torch.minimum(self._min_upright, upright), self._min_upright
+      sampled, torch.minimum(self._min_upright, upright), self._min_upright
     )
     self._last_pos = torch.where(
-      counted.unsqueeze(-1), state.position_w, self._last_pos
+      sampled.unsqueeze(-1), state.position_w, self._last_pos
     )
 
     if state.foot_pos_w is not None and self._has_feet:
       sign = self._lower_foot(state.foot_pos_w)
       swapped = (
-        counted & (sign != 0) & (self._foot_sign != 0) & (sign != self._foot_sign)
+        sampled & (sign != 0) & (self._foot_sign != 0) & (sign != self._foot_sign)
       )
       self._swaps = self._swaps + swapped.long()
       self._foot_sign = torch.where(sign != 0, sign, self._foot_sign)
@@ -254,11 +280,25 @@ class WalkMetrics:
 
   def result(self) -> PerEnvMetrics:
     """Reduce the accumulated samples. Safe to call more than once."""
-    alive_steps = self._alive_steps.clamp(min=1).float()
+    sample_steps = self._sample_steps.clamp(min=1).float()
     alive_time = self._alive_steps.float() * self.dt
-    safe_time = alive_time.clamp(min=self.dt)
+    # The window the averages are taken over: the alive time less the warm-up,
+    # and zero for an environment that never got out of it.
+    safe_time = (self._sample_steps.float() * self.dt).clamp(min=self.dt)
 
-    achieved = self._velocity_sum / alive_steps.unsqueeze(-1)
+    # An environment that fell inside the warm-up contributed no samples, so
+    # its averages would be zeros rather than measurements. Say so instead.
+    measured = self._sample_steps > 0
+    nan = torch.full_like(alive_time, float("nan"))
+
+    def only_measured(values: torch.Tensor) -> torch.Tensor:
+      return torch.where(measured, values, nan)
+
+    achieved = torch.where(
+      measured.unsqueeze(-1),
+      self._velocity_sum / sample_steps.unsqueeze(-1),
+      nan.unsqueeze(-1),
+    )
     error = achieved - self.command_b
     displacement = self._last_pos - self._start_pos
 
@@ -268,11 +308,7 @@ class WalkMetrics:
       self._fall_step.float() * self.dt,
       torch.full_like(alive_time, float("nan")),
     )
-    cadence = (
-      self._swaps.float() / safe_time
-      if self._has_feet
-      else torch.full_like(alive_time, float("nan"))
-    )
+    cadence = only_measured(self._swaps.float() / safe_time) if self._has_feet else nan
     return PerEnvMetrics(
       command_vx=self.command_b[:, 0],
       command_vy=self.command_b[:, 1],
@@ -287,18 +323,114 @@ class WalkMetrics:
       error_vy=error[:, 1],
       error_wz=error[:, 2],
       tracking_error=torch.linalg.vector_norm(error[:, :2], dim=-1),
-      displacement_x=displacement[:, 0],
-      displacement_y=displacement[:, 1],
-      path_speed=torch.linalg.vector_norm(displacement[:, :2], dim=-1) / safe_time,
-      rms_roll=torch.sqrt(self._roll_sq_sum / alive_steps),
-      rms_pitch=torch.sqrt(self._pitch_sq_sum / alive_steps),
-      min_upright=torch.where(
-        self._min_upright.isinf(),
-        torch.full_like(alive_time, float("nan")),
-        self._min_upright,
+      displacement_x=only_measured(displacement[:, 0]),
+      displacement_y=only_measured(displacement[:, 1]),
+      path_speed=only_measured(
+        torch.linalg.vector_norm(displacement[:, :2], dim=-1) / safe_time
       ),
+      rms_roll=only_measured(torch.sqrt(self._roll_sq_sum / sample_steps)),
+      rms_pitch=only_measured(torch.sqrt(self._pitch_sq_sum / sample_steps)),
+      min_upright=torch.where(self._min_upright.isinf(), nan, self._min_upright),
       cadence_hz=cadence,
     )
+
+
+class VelocityTrace:
+  """Per-control-step commanded and measured base velocity.
+
+  :class:`WalkMetrics` reduces a run to one row per environment, which is the
+  right shape for a command sweep and the wrong one for a *profile* run, where
+  the command moves during the episode and the interesting quantity is how the
+  robot follows it. This records the two side by side, step by step, so a run
+  can be drawn as a time series.
+
+  It is a recorder and nothing else: no metric is computed here, and a profile
+  run also carries a :class:`WalkMetrics` so falls are dated the same way they
+  are everywhere else.
+  """
+
+  def __init__(self, dt: float) -> None:
+    """
+    Args:
+      dt: Seconds between :meth:`record` calls.
+    """
+    self.dt = dt
+    self._command: list[torch.Tensor] = []
+    self._achieved: list[torch.Tensor] = []
+    self._upright: list[torch.Tensor] = []
+
+  def record(self, command_b: torch.Tensor, state: EvalState) -> None:
+    """Append one control step.
+
+    Args:
+      command_b: Shape ``(N, 3)`` command in force for this step.
+      state: The robot state after the step.
+    """
+    self._command.append(command_b.detach().to("cpu", torch.float32).clone())
+    self._achieved.append(
+      torch.cat((state.lin_vel_b[:, :2], state.ang_vel_b[:, 2:3]), dim=-1)
+      .detach()
+      .to("cpu", torch.float32)
+    )
+    self._upright.append(upright_from_quat(state.quaternion_w).detach().cpu())
+
+  @property
+  def num_steps(self) -> int:
+    return len(self._command)
+
+  def result(self) -> dict[str, torch.Tensor]:
+    """Stacked traces.
+
+    Returns:
+      ``time`` shape ``(T,)``, ``command`` and ``achieved`` shape ``(T, N, 3)``
+      ordered ``(vx, vy, wz)``, and ``upright`` shape ``(T, N)``.
+    """
+    if not self._command:
+      raise RuntimeError("nothing recorded")
+    steps = torch.arange(1, self.num_steps + 1, dtype=torch.float32)
+    return {
+      "time": steps * self.dt,
+      "command": torch.stack(self._command),
+      "achieved": torch.stack(self._achieved),
+      "upright": torch.stack(self._upright),
+    }
+
+
+def write_trace_csv(path: Path, trace: VelocityTrace) -> None:
+  """Write a profile run's traces, one row per step per environment.
+
+  Long rather than wide: a profile run is a few tens of environments over a few
+  thousand steps, and one row per sample keeps the file readable by anything
+  without the column count depending on the batch size.
+  """
+  data = trace.result()
+  time = data["time"].tolist()
+  command = data["command"].tolist()
+  achieved = data["achieved"].tolist()
+  upright = data["upright"].tolist()
+
+  path.parent.mkdir(parents=True, exist_ok=True)
+  with path.open("w", newline="") as handle:
+    writer = csv.writer(handle)
+    writer.writerow(
+      [
+        "step",
+        "time",
+        "env",
+        "command_vx",
+        "command_vy",
+        "command_wz",
+        "achieved_vx",
+        "achieved_vy",
+        "achieved_wz",
+        "upright",
+      ]
+    )
+    for step, seconds in enumerate(time):
+      for env, (cmd, ach, up) in enumerate(
+        zip(command[step], achieved[step], upright[step], strict=True)
+      ):
+        writer.writerow([step, round(seconds, 6), env, *cmd, *ach, up])
 
 
 def _stat(values: torch.Tensor) -> dict[str, float]:

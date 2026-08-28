@@ -8,6 +8,9 @@ you** — everything below has only been smoke-tested at 64 environments.
 - `eval_distilled_quintic_walk.py` — NUbots' distilled copy of that engine, the
   policy their `module/skill/NeuralWalk` deploys.
 - `eval_rl_walk.py` — a trained RL policy, from an rsl-rl checkpoint.
+- `eval_velocity_profile.py` — any of the three, under a command that *moves*.
+- `collect_comparison.sh` and `plot_comparison.py` — a whole comparison, and its
+  figures.
 
 All three are thin entry points over `mjlab.evaluation`, which holds the plant
 construction, the harnesses, the metrics and the output format. No script
@@ -69,8 +72,75 @@ uv run python scripts/eval/eval_quintic_walk.py --num-envs 2048 \
   --sweep-vx "(0.1,0.3)" --sweep-wz "(-0.5,0.0,0.5)"
 ```
 
+### Warm-up
+
+`--warmup` discards the front of a run before the walking metrics start
+averaging. Without it a mean over the whole run reports the acceleration as well
+as the tracking: the quintic engine averages 0.179 m/s over 5 s of a 0.3 m/s
+command, 0.199 over 10 s and 0.212 over 30 s, against a steady state of 0.219.
+Eight seconds is enough for either controller.
+
+Survival is deliberately *not* windowed. `fall_time`, `survived` and
+`alive_time` are measured from the first step, because a robot that fell during
+the warm-up has not walked; its walking metrics come out NaN rather than as a
+zero it never achieved.
+
 mjlab runs tyro with flag conversion off, so boolean flags take an explicit
 value: `--balance False`, `--exact-ik True`, `--switch-when-planted True`.
+
+## A moving command
+
+A sweep holds one command for a whole episode and reports a mean, which measures
+steady-state tracking and says nothing about how the robot gets there.
+`eval_velocity_profile.py` moves the command during the episode instead, and
+writes `trace.csv`: one row per control step per environment, carrying the
+command that was in force and the base velocity that resulted. It is the figure
+DeepWalk (Rodriguez and Behnke, ICRA 2021, Fig. 3) uses to show a gait is
+omnidirectional.
+
+```sh
+uv run python scripts/eval/eval_velocity_profile.py --engine quintic
+uv run python scripts/eval/eval_velocity_profile.py --engine distilled
+uv run python scripts/eval/eval_velocity_profile.py --engine rl \
+  --checkpoint logs/rsl_rl/nugus_velocity/wandb_checkpoints/<run>/model_39997.pt
+```
+
+Six schedules run at once — the three axes on their own, then the three pairs of
+them — each in its own slice of the batch rather than end to end as one long
+sequence. A single sequence would be contaminated by its own history: the
+quintic engine falls over under a backwards command, and everything after that
+point would be a measurement of a robot on the floor. `--profile.replicas` sets
+how many robots run each schedule; the engine is deterministic so one is enough,
+while the policy sees noisy observations and a handful gives it a band.
+`--profile.vx`, `--profile.hold`, `--profile.ramp` and the rest set the
+amplitudes and the timing; the command slews between plateaus rather than
+stepping, because an operator's stick does.
+
+The raw trace swings by more than the command does within a single step — the
+torso sways sideways and counter-rotates every stride — so plot it against a
+moving average of about two gait cycles. `plot_comparison.py` does.
+
+## The whole comparison
+
+```sh
+scripts/eval/collect_comparison.sh \
+  logs/rsl_rl/nugus_velocity/wandb_checkpoints/<run>/model_39997.pt
+uv run python scripts/eval/plot_comparison.py --input-dir logs/eval/comparison
+```
+
+Fourteen runs for two controllers: a profile run each, three single-axis sweeps
+and three two-axis grids, all on the evaluation plant, 60 s a command with the
+first 8 s discarded. About twenty-five minutes on an RTX 3060. The grids carry
+both the combined-axis tracking and — through `fall_time` — the stability
+envelope, so nothing is collected twice. Figures land in
+`logs/eval/comparison/figures` as 300 dpi PNG and PDF.
+
+Every environment in a sweep is a distinct command rather than a replica: the
+plant is deterministic and the domain randomisation is off, so replicas of one
+command are replicas of one number. The exception is the learned policy, whose
+observations are noisy; the single-axis sweeps carry four replicas per point for
+both controllers so the same code draws a band for the policy and a line for the
+engine.
 
 ### Watching a run
 
@@ -184,6 +254,10 @@ logs/eval/quintic_eval_20260819_084037/
   summary.json   the aggregate, plus the run's configuration
 ```
 
+A profile run writes `trace.csv` and `run.json` instead: one row per control
+step per environment (`step`, `time`, `env`, the three commanded components, the
+three measured ones, and `upright`), and the schedule that produced them.
+
 `per_env.csv` has an `env` column followed by every field of `PerEnvMetrics`:
 
 | column | meaning |
@@ -202,7 +276,7 @@ CSV rather than parquet: a run is one row per environment, so even a large sweep
 is a few thousand rows, and CSV costs no dependency and opens anywhere.
 
 `summary.json` carries `run` (engine, plant, checkpoint or policy, batch size,
-duration, control rate, wall time), a `teacher_tracking` block if the distilled
+duration, warm-up, control rate, wall time), a `teacher_tracking` block if the distilled
 run was given `--track-teacher`, the fall statistics, and then two blocks of the same
 walking metrics: `survivors` and `all_envs`. Quote the survivor figures —
 averaging a fallen robot's slide into a mean speed describes neither population
@@ -255,8 +329,9 @@ is a little cheaper than the quintic side at the same rate — until
 does not walk backwards: at −0.1 m/s it falls after about 2.5 s on both the
 evaluation plant and NUbots' own dynamics, and its mean displacement is
 *forwards* under a backwards command. This is the tuning, not the plant or the
-port. Sweeping `--sweep-vx` through negative values will produce a wall of falls
-that says nothing new.
+port. Sweeping `--sweep-vx` through negative values produces a wall of falls; it
+is worth collecting once, to draw the envelope, and says nothing new after
+that.
 
 **`only_switch_when_planted` is off, deliberately.** `Walk.yaml` sets it true,
 but `Walk.cpp` calls `set_parameters` before assigning that one field, so the

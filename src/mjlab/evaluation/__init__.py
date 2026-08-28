@@ -9,18 +9,34 @@ from mjlab.evaluation.metrics import (
   FALL_UPRIGHT_THRESHOLD,
   EvalState,
   PerEnvMetrics,
+  VelocityTrace,
   WalkMetrics,
   format_summary,
   save_run,
   summarise,
+  write_trace_csv,
+)
+from mjlab.evaluation.profile import (
+  Lane,
+  Profile,
+  ProfileCfg,
+  Segment,
+  omnidirectional_profile,
 )
 
 __all__ = (
   "EvalState",
   "FALL_UPRIGHT_THRESHOLD",
+  "Lane",
   "PerEnvMetrics",
+  "Profile",
+  "ProfileCfg",
+  "Segment",
+  "VelocityTrace",
   "WalkMetrics",
   "format_summary",
+  "omnidirectional_profile",
   "save_run",
   "summarise",
+  "write_trace_csv",
 )

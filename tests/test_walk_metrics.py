@@ -219,3 +219,68 @@ def test_save_run_writes_a_row_per_env_and_a_summary(tmp_path):
   assert written["survival_rate"] == summary["survival_rate"]
   assert written["survivors"]["achieved_vx"] == summary["survivors"]["achieved_vx"]
   assert math.isnan(written["fall_time"]["mean"])
+
+
+def test_warmup_keeps_the_run_up_out_of_the_averages():
+  """The first second is a standing start; only the plateau is measured."""
+  command = torch.tensor([[0.3, 0.0, 0.0]])
+  metrics = WalkMetrics(command, dt=DT, warmup_s=1.0)
+  metrics.start(state())
+
+  position = 0.0
+  for step in range(200):
+    speed = 0.0 if step < 100 else 0.3
+    position += speed * DT
+    metrics.record(state(position=(position, 0.0, 0.5), lin_vel=(speed, 0.0, 0.0)))
+
+  result = metrics.result()
+
+  assert float(result.achieved_vx[0]) == pytest.approx(0.3, abs=1e-6)
+  assert float(result.error_vx[0]) == pytest.approx(0.0, abs=1e-6)
+  # Displacement is rebased onto the measured window, not the whole run.
+  assert float(result.displacement_x[0]) == pytest.approx(0.3, abs=1e-6)
+  assert float(result.path_speed[0]) == pytest.approx(0.3, abs=1e-3)
+  # Survival is not windowed.
+  assert float(result.alive_time[0]) == pytest.approx(2.0)
+  assert float(result.survived[0]) == 1.0
+
+
+def test_a_fall_inside_the_warmup_leaves_no_measurement():
+  command = torch.tensor([[0.3, 0.0, 0.0]])
+  metrics = WalkMetrics(command, dt=DT, warmup_s=1.0)
+  metrics.start(state())
+
+  for step in range(200):
+    fallen = step >= 50
+    metrics.record(
+      state(
+        quaternion=quat_pitched(2.0 if fallen else 0.0),
+        lin_vel=(0.0 if fallen else 0.3, 0.0, 0.0),
+      )
+    )
+
+  result = metrics.result()
+
+  assert float(result.survived[0]) == 0.0
+  assert float(result.fall_time[0]) == pytest.approx(0.51)
+  # Zeros here would read as "walked at 0 m/s", which it did not do.
+  assert math.isnan(float(result.achieved_vx[0]))
+  assert math.isnan(float(result.rms_roll[0]))
+  assert math.isnan(float(result.path_speed[0]))
+
+
+def test_zero_warmup_is_the_old_behaviour():
+  command = torch.tensor([[0.2, 0.0, 0.0]])
+  windowed = WalkMetrics(command, dt=DT, warmup_s=0.0)
+  plain = WalkMetrics(command, dt=DT)
+  for metrics in (windowed, plain):
+    metrics.start(state())
+    for step in range(50):
+      metrics.record(
+        state(position=(0.01 * step, 0.0, 0.5), lin_vel=(0.01 * step, 0.0, 0.0))
+      )
+
+  for name in ("achieved_vx", "path_speed", "rms_pitch", "alive_time"):
+    assert float(getattr(windowed.result(), name)[0]) == pytest.approx(
+      float(getattr(plain.result(), name)[0])
+    )

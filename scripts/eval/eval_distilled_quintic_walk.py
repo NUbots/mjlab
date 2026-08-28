@@ -86,6 +86,14 @@ class Args:
   """Run the walk engine alongside on the same commands and report how far the
   policy's joint targets ran from its own. Costs the engine's IK per step."""
 
+  warmup: float = 0.0
+  """Seconds discarded from the front of the run before the walking metrics
+  start averaging.
+
+  A robot starts from standing, so a mean over the whole run reports the
+  acceleration as well as the tracking. Survival is not windowed: a fall during
+  the warm-up is still a fall, dated from the first step."""
+
   output_dir: Path = Path("logs/eval")
   """Runs land in ``<output_dir>/<tag>/``."""
   tag: str | None = None
@@ -119,7 +127,10 @@ def main() -> None:
   started = time.time()
   try:
     metrics = harness.run(
-      command, args.duration, on_step=None if view is None else view.on_step
+      command,
+      args.duration,
+      on_step=None if view is None else view.on_step,
+      warmup_s=args.warmup,
     )
   finally:
     if view is not None:
@@ -134,6 +145,7 @@ def main() -> None:
     "policy": str(args.policy),
     "num_envs": args.num_envs,
     "duration_s": args.duration,
+    "warmup_s": args.warmup,
     "control_hz": round(1.0 / harness.control_dt, 3),
     "device": args.device,
     "history_init": args.history_init,
