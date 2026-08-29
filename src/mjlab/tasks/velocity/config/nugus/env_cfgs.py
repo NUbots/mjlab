@@ -1,5 +1,7 @@
 """NUbots Nugus velocity environment confiurations."""
 
+import copy
+
 from mjlab.asset_zoo.robots import (
   NUGUS_ACTION_SCALE,
   NUGUS_MOTOR_JOINT_REGEX,
@@ -9,7 +11,10 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.event_manager import EventTermCfg
-from mjlab.managers.observation_manager import ObservationTermCfg
+from mjlab.managers.observation_manager import (
+  ObservationGroupCfg,
+  ObservationTermCfg,
+)
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import (
   ContactMatch,
@@ -23,6 +28,11 @@ from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
+
+HISTORY_WINDOW = 25
+"""Length (in control steps) of the actor observation window fed to the
+policy's history encoder (``mjlab.rl.obs_history``). At the 50 Hz policy
+rate this is 0.5 s, roughly one gait cycle."""
 
 
 def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
@@ -336,3 +346,48 @@ def nubots_nugus_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     twist_cmd.ranges.ang_vel_z = (-0.0, 0.0)
 
   return cfg
+
+
+def add_actor_history(
+  cfg: ManagerBasedRlEnvCfg, window: int = HISTORY_WINDOW
+) -> ManagerBasedRlEnvCfg:
+  """Publish a ``"history"`` group: a window of the actor observation stream.
+
+  Shaped ``[num_envs, window, actor_dim]``, encoded by a TCN inside the actor
+  model and concatenated onto the current observation. See
+  :mod:`mjlab.rl.obs_history`.
+
+  Applied to a *finished* config, never part way through building one: the
+  window is built from deep copies of the actor terms, so it only clones the
+  final layout. That equality is the deployment contract -- one history frame
+  is byte-for-byte the actor observation vector, so the robot keeps a single
+  ring buffer of the vector it already builds.
+
+  Corruption follows the actor group, which is what puts noise on the window
+  during training and takes it off in play mode. The copies carry their own
+  noise and delay state, so in training the window draws an independent
+  corruption realization rather than replaying the exact frames the policy saw.
+  That is intended: the encoder should read the signal, not memorize one noise
+  draw.
+  """
+  cfg.observations["history"] = ObservationGroupCfg(
+    terms={
+      name: copy.deepcopy(term)
+      for name, term in cfg.observations["actor"].terms.items()
+    },
+    concatenate_terms=True,
+    enable_corruption=cfg.observations["actor"].enable_corruption,
+    history_length=window,
+    flatten_history_dim=False,
+  )
+  return cfg
+
+
+def nubots_nugus_rough_history_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Rough terrain, with the actor observation window published."""
+  return add_actor_history(nubots_nugus_rough_env_cfg(play=play))
+
+
+def nubots_nugus_flat_history_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Flat terrain, with the actor observation window published."""
+  return add_actor_history(nubots_nugus_flat_env_cfg(play=play))

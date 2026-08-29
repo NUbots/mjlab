@@ -7,14 +7,29 @@ that depends on the deployment-side joint mapping).
 """
 
 import pytest
+from conftest import get_test_device
 
 from mjlab.asset_zoo.robots.nugus.nugus_constants import (
   NUGUS_ARTICULATION,
   get_nugus_robot_cfg,
 )
 from mjlab.entity import Entity
-from mjlab.tasks.velocity.config.nugus.env_cfgs import nubots_nugus_flat_env_cfg
-
+from mjlab.envs import ManagerBasedRlEnv
+from mjlab.rl import RslRlVecEnvWrapper
+from mjlab.rl.obs_history import (
+  HistoryActor,
+  HistoryModelCfg,
+  OnnxHistoryPolicy,
+)
+from mjlab.tasks.velocity.config.nugus.env_cfgs import (
+  HISTORY_WINDOW,
+  nubots_nugus_flat_env_cfg,
+  nubots_nugus_flat_history_env_cfg,
+)
+from mjlab.tasks.velocity.config.nugus.rl_cfg import (
+  nubots_nugus_history_ppo_runner_cfg,
+  nubots_nugus_ppo_runner_cfg,
+)
 
 # Expected joint ordering for joint_pos / joint_vel / actions in the actor
 # observation vector. This is the MuJoCo joint order, dictated by body-tree
@@ -229,3 +244,96 @@ def test_actuator_declaration_order_differs_from_joint_order() -> None:
   assert ctrl_order != EXPECTED_JOINT_ORDER
   # Both must still cover the same set of joints.
   assert set(ctrl_order) == set(EXPECTED_JOINT_ORDER)
+
+
+# --- Actor observation history (mjlab.rl.obs_history) ---
+
+
+@pytest.fixture(scope="module")
+def nugus_flat_history_cfg():
+  return nubots_nugus_flat_history_env_cfg()
+
+
+def test_plain_task_has_no_history_group() -> None:
+  """The default task must stay as it was.
+
+  A checkpoint only loads against the task that builds its observation layout,
+  so the history group belongs on the variant. Adding it here would change the
+  actor's input and stop every existing policy from loading.
+  """
+  cfg = nubots_nugus_flat_env_cfg()
+  assert "history" not in cfg.observations
+  assert not isinstance(nubots_nugus_ppo_runner_cfg().actor, HistoryModelCfg)
+
+
+def test_history_group_clones_actor_terms(nugus_flat_history_cfg) -> None:
+  """One history frame must be layout-identical to the actor vector.
+
+  The deployed policy slices its current observation out of the last window
+  frame, so the two layouts have to agree term-for-term and in order.
+  """
+  history = nugus_flat_history_cfg.observations["history"]
+  assert history.history_length == HISTORY_WINDOW
+  assert history.flatten_history_dim is False
+  assert history.enable_corruption is True
+  assert list(history.terms.keys()) == list(
+    nugus_flat_history_cfg.observations["actor"].terms.keys()
+  )
+
+
+def test_history_corruption_disabled_in_play() -> None:
+  cfg = nubots_nugus_flat_history_env_cfg(play=True)
+  assert cfg.observations["actor"].enable_corruption is False
+  assert cfg.observations["history"].enable_corruption is False
+
+
+def test_history_actor_config() -> None:
+  rl_cfg = nubots_nugus_history_ppo_runner_cfg()
+  assert isinstance(rl_cfg.actor, HistoryModelCfg)
+  assert rl_cfg.obs_groups["actor"] == ("actor", "history")
+  assert rl_cfg.obs_groups["critic"] == ("critic",)
+  # Everything but the actor is shared with the plain run, so a retune of one
+  # is a retune of both.
+  plain = nubots_nugus_ppo_runner_cfg()
+  assert rl_cfg.algorithm == plain.algorithm
+  assert rl_cfg.critic == plain.critic
+
+
+def test_history_actor_builds_from_live_env() -> None:
+  """End-to-end: real env shapes -> history actor -> deployable ONNX graph."""
+  device = get_test_device()
+  cfg = nubots_nugus_flat_history_env_cfg()
+  cfg.scene.num_envs = 4
+  cfg.seed = 1
+  env = ManagerBasedRlEnv(cfg=cfg, device=device)
+  try:
+    env.reset(seed=1)
+    # Go through the RL wrapper so the observations reach the model exactly as
+    # the runner delivers them.
+    obs = RslRlVecEnvWrapper(env).get_observations()
+    actor_dim = obs["actor"].shape[-1]
+    assert obs["history"].shape == (4, HISTORY_WINDOW, actor_dim)
+
+    rl_cfg = nubots_nugus_history_ppo_runner_cfg()
+    actor_cfg = rl_cfg.actor
+    assert isinstance(actor_cfg, HistoryModelCfg)
+    num_actions = env.action_manager.total_action_dim
+    actor = HistoryActor(
+      obs,
+      {k: list(v) for k, v in rl_cfg.obs_groups.items()},
+      "actor",
+      num_actions,
+      history_cfg=dict(actor_cfg.history_cfg),
+      hidden_dims=actor_cfg.hidden_dims,
+      activation=actor_cfg.activation,
+      obs_normalization=actor_cfg.obs_normalization,
+      distribution_cfg=dict(actor_cfg.distribution_cfg or {}),
+    ).to(device)
+    assert actor(obs).shape == (4, num_actions)
+
+    # The export wrapper requires actor_dim == history frame dim.
+    onnx_policy = actor.as_onnx(verbose=False)
+    assert isinstance(onnx_policy, OnnxHistoryPolicy)
+    assert onnx_policy.input_size == HISTORY_WINDOW * actor_dim
+  finally:
+    env.close()

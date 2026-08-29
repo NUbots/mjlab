@@ -27,6 +27,26 @@ Added
 - Added ``scripts/eval/collect_comparison.sh`` and
   ``scripts/eval/plot_comparison.py``: the fourteen runs behind a two-controller
   velocity-tracking and stability comparison, and the figures drawn from them.
+- Added ``mjlab.rl.obs_history``: an end-to-end observation-history encoder for
+  the actor. The environment publishes a ``"history"`` observation group -- a
+  25-step window of the actor observation stream, shaped
+  ``[num_envs, T, obs_dim]`` -- and ``HistoryActor`` compresses it with a TCN
+  whose latent is concatenated onto the current observation before the policy
+  MLP. The encoder lives inside the model, so the latent never crosses the
+  observation boundary and plain PPO trains it end to end. It is stateless by
+  design, so deployment needs no cross-tick hidden state:
+  ``OnnxHistoryPolicy`` takes one flat ``[B, T*D]`` window (time-major, oldest
+  frame first), slices the current observation out of the last frame, and emits
+  actions from a single graph. ONNX metadata gains ``history_window``,
+  ``history_obs_dim`` and ``history_layout``.
+- Added ``Mjlab-Velocity-Flat-Nubots-Nugus-History`` and
+  ``Mjlab-Velocity-Rough-Nubots-Nugus-History``, the NUgus velocity tasks with
+  that window published and ``HistoryActor`` as the actor. They are registered
+  alongside the plain tasks rather than replacing them: a checkpoint only loads
+  against the task that builds its observation layout, so comparing a plain
+  policy with a history policy needs both. The actor's input to the policy MLP
+  goes from 71 to 87 floats (71 proprio plus a 16-dim latent), the history
+  group is ``[num_envs, 25, 71]``, and the exported ONNX input is 1775 floats.
 
 - Added ``scripts/eval/eval_distilled_quintic_walk.py`` and
   ``mjlab.controllers.distilled_walk``, which run NUbots' distilled walk policy
