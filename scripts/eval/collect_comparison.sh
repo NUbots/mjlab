@@ -24,24 +24,68 @@ OUT=${2:-logs/eval/comparison}
 DURATION=60
 WARMUP=8
 
-# Command axes. Forward reaches past what either controller can do; lateral and
-# yaw are symmetric so a one-sided gait shows as an asymmetry.
-VX_FINE="(-0.5,-0.475,-0.45,-0.425,-0.4,-0.375,-0.35,-0.325,-0.3,-0.275,-0.25,-0.225,-0.2,-0.175,-0.15,-0.125,-0.1,-0.075,-0.05,-0.025,0.0,0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25,0.275,0.3,0.325,0.35,0.375,0.4,0.425,0.45,0.475,0.5,0.525,0.55,0.575,0.6,0.625,0.65,0.675,0.7)"
-VY_FINE="(-0.4,-0.375,-0.35,-0.325,-0.3,-0.275,-0.25,-0.225,-0.2,-0.175,-0.15,-0.125,-0.1,-0.075,-0.05,-0.025,0.0,0.025,0.05,0.075,0.1,0.125,0.15,0.175,0.2,0.225,0.25,0.275,0.3,0.325,0.35,0.375,0.4)"
-WZ_FINE="(-1.5,-1.4375,-1.375,-1.3125,-1.25,-1.1875,-1.125,-1.0625,-1.0,-0.9375,-0.875,-0.8125,-0.75,-0.6875,-0.625,-0.5625,-0.5,-0.4375,-0.375,-0.3125,-0.25,-0.1875,-0.125,-0.0625,0.0,0.0625,0.125,0.1875,0.25,0.3125,0.375,0.4375,0.5,0.5625,0.625,0.6875,0.75,0.8125,0.875,0.9375,1.0,1.0625,1.125,1.1875,1.25,1.3125,1.375,1.4375,1.5)"
+# Commands (sent to sim environments)
+VX_MIN=-2.0
+VX_MAX=2.0
+VX_STEP=0.025
 
-VX_GRID="(-0.4,-0.35,-0.3,-0.25,-0.2,-0.15,-0.1,-0.05,0.0,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5,0.55,0.6)"
-VY_GRID="(-0.3,-0.25,-0.2,-0.15,-0.1,-0.05,0.0,0.05,0.1,0.15,0.2,0.25,0.3)"
-WZ_GRID="(-1.0,-0.9,-0.8,-0.7,-0.6,-0.5,-0.4,-0.3,-0.2,-0.1,0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0)"
+VY_MIN=-1.0
+VY_MAX=1.0
+VY_STEP=0.025
 
-# Points per axis, kept in step with the lists above.
-N_VX_FINE=49
-N_VY_FINE=33
-N_WZ_FINE=49
+WZ_MIN=-3.0
+WZ_MAX=3.0
+WZ_STEP=0.05
+
+# Grid axes (used for plotting)
+VX_GRID_MIN=-2.0
+VX_GRID_MAX=2.0
+VX_GRID_STEP=0.1
+
+VY_GRID_MIN=-1.0
+VY_GRID_MAX=1.0
+VY_GRID_STEP=0.1
+
+WZ_GRID_MIN=-3.0
+WZ_GRID_MAX=3.0
+WZ_GRID_STEP=0.2
+
+
+# Generate comma-separated lists from the above ranges and step sizes
+make_axis() {
+    local min=$1
+    local max=$2
+    local step=$3
+
+    seq "$min" "$step" "$max" |
+        awk 'BEGIN { printf "(" }
+             { if (NR > 1) printf ","; printf "%.10g", $0 }
+             END { printf ")" }'
+}
+
+VX_FINE=$(make_axis "$VX_MIN" "$VX_MAX" "$VX_STEP")
+VY_FINE=$(make_axis "$VY_MIN" "$VY_MAX" "$VY_STEP")
+WZ_FINE=$(make_axis "$WZ_MIN" "$WZ_MAX" "$WZ_STEP")
+
+VX_GRID=$(make_axis "$VX_GRID_MIN" "$VX_GRID_MAX" "$VX_GRID_STEP")
+VY_GRID=$(make_axis "$VY_GRID_MIN" "$VY_GRID_MAX" "$VY_GRID_STEP")
+WZ_GRID=$(make_axis "$WZ_GRID_MIN" "$WZ_GRID_MAX" "$WZ_GRID_STEP")
+
+
+# Number of points per axis
+N_VX_FINE=$(awk "BEGIN { print int(($VX_MAX - $VX_MIN) / $VX_STEP + 0.5) + 1 }")
+N_VY_FINE=$(awk "BEGIN { print int(($VY_MAX - $VY_MIN) / $VY_STEP + 0.5) + 1 }")
+N_WZ_FINE=$(awk "BEGIN { print int(($WZ_MAX - $WZ_MIN) / $WZ_STEP + 0.5) + 1 }")
+
+N_VX_GRID=$(awk "BEGIN { print int(($VX_GRID_MAX - $VX_GRID_MIN) / $VX_GRID_STEP + 0.5) + 1 }")
+N_VY_GRID=$(awk "BEGIN { print int(($VY_GRID_MAX - $VY_GRID_MIN) / $VY_GRID_STEP + 0.5) + 1 }")
+N_WZ_GRID=$(awk "BEGIN { print int(($WZ_GRID_MAX - $WZ_GRID_MIN) / $WZ_GRID_STEP + 0.5) + 1 }")
+
+# Cartesian-product sizes
 REPLICAS=4
-N_XY=273   # 21 x 13
-N_XW=441   # 21 x 21
-N_YW=273   # 13 x 21
+N_XY=$((N_VX_GRID * N_VY_GRID))
+N_XW=$((N_VX_GRID * N_WZ_GRID))
+N_YW=$((N_VY_GRID * N_WZ_GRID))
 
 run_engine() {
   local engine=$1
