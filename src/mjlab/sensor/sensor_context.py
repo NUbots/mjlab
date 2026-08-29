@@ -119,6 +119,11 @@ class SensorContext:
     """Post-graph: compute raycast hit positions."""
     for sensor in self.raycast_sensors:
       sensor.postprocess_rays()
+    # Fresh render results: drop camera data cached by a pre-sense read so
+    # observations serve this step's frames (mirrors the raycast
+    # invalidation in postprocess_rays).
+    for sensor in self.camera_sensors:
+      sensor._invalidate_cache()
 
   def get_rgb(self, cam_idx: int) -> torch.Tensor:
     """Get unpacked RGB data for a camera.
@@ -191,14 +196,14 @@ class SensorContext:
     return cam_data.view(nworld, h, w, 1)
 
   def get_segmentation(self, cam_idx: int) -> torch.Tensor:
-    """Get per-pixel geom ID data for a camera.
+    """Get per-pixel segmentation data for a camera.
 
     Args:
       cam_idx: MuJoCo camera ID.
 
     Returns:
-      Tensor of shape [num_envs, height, width, 1] (int32).
-      Values: >= 0 for geom IDs, -1 for background, -2 for flex.
+      Tensor of shape [num_envs, height, width, 2] (int32).
+      Channel 0 stores object IDs. Channel 1 stores MuJoCo object types.
     """
     if cam_idx not in self._cam_idx_to_list_idx:
       available = list(self._cam_idx_to_list_idx.keys())
@@ -222,8 +227,8 @@ class SensorContext:
     num_pixels = w * h
     nworld = self._data.nworld
 
-    cam_data = self._seg_torch[:, seg_adr : seg_adr + num_pixels]
-    return cam_data.view(nworld, h, w, 1)
+    cam_data = self._seg_torch[:, seg_adr : seg_adr + num_pixels, :]
+    return cam_data.view(nworld, h, w, 2)
 
   # Private methods.
 
@@ -325,6 +330,8 @@ class SensorContext:
         cam_active=cam_active,
         use_precomputed_rays=not self._disable_precomputed_rays,
         render_seg=render_seg,
+        render_skybox=True,
+        background_color=(0.0, 0.0, 0.0, 1.0),
       )
 
     # Cache address arrays from the render context. An adr value of -1 means that data

@@ -125,7 +125,38 @@ def test_dr_fields_registered_in_event_manager(device):
   assert "actuator_gainprm" in manager.domain_randomization_fields
   assert "actuator_biasprm" in manager.domain_randomization_fields
   assert "actuator_forcerange" in manager.domain_randomization_fields
-  assert len(manager.domain_randomization_fields) == 5
+  assert "jnt_actfrcrange" in manager.domain_randomization_fields
+  assert "tendon_actfrcrange" in manager.domain_randomization_fields
+  assert len(manager.domain_randomization_fields) == 7
+
+
+def test_recompute_fields_registered_in_event_manager(device):
+  """Recomputed model fields are expanded per environment."""
+  env = Mock()
+  env.num_envs = 4
+  env.device = device
+  env.scene = {}
+  env.sim = Mock()
+
+  cfg = {
+    "body_com": EventTermCfg(
+      mode="startup",
+      func=dr.body_com_offset,
+      params={"ranges": (-0.01, 0.01)},
+    ),
+  }
+
+  manager = EventManager(cfg, env)
+
+  assert manager.domain_randomization_fields == (
+    "body_ipos",
+    "body_subtreemass",
+    "dof_invweight0",
+    "body_invweight0",
+    "tendon_length0",
+    "tendon_invweight0",
+    "actuator_acc0",
+  )
 
 
 def test_recompute_level_ordering():
@@ -418,6 +449,62 @@ def test_effort_limits_scale_no_accumulation(device):
   assert abs(actual_upper - 200.0) < 1e-5
 
 
+def test_pd_gains_accepts_operation_object(device):
+  """dr.scale / dr.abs Operation objects produce the same result as strings."""
+  env_str, ideal_str = _make_pd_env(device)
+  env_obj, ideal_obj = _make_pd_env(device)
+
+  ids = torch.tensor([0], device=device)
+  kwargs = dict(
+    kp_range=(1.5, 1.5), kd_range=(2.0, 2.0), asset_cfg=SceneEntityCfg("robot")
+  )
+
+  torch.manual_seed(0)
+  dr.pd_gains(env_str, ids, operation="scale", **kwargs)
+  torch.manual_seed(0)
+  dr.pd_gains(env_obj, ids, operation=dr.scale, **kwargs)
+
+  assert torch.allclose(
+    env_str.sim.model.actuator_gainprm[0], env_obj.sim.model.actuator_gainprm[0]
+  )
+  assert torch.allclose(ideal_str.stiffness, ideal_obj.stiffness)
+
+
+def test_effort_limits_accepts_operation_object(device):
+  """dr.abs Operation object produces the same result as the string."""
+  env_str, ideal_str = _make_effort_env(device)
+  env_obj, ideal_obj = _make_effort_env(device)
+
+  ids = torch.tensor([0], device=device)
+  kwargs = dict(effort_limit_range=(150.0, 150.0), asset_cfg=SceneEntityCfg("robot"))
+
+  dr.effort_limits(env_str, ids, operation="abs", **kwargs)
+  dr.effort_limits(env_obj, ids, operation=dr.abs, **kwargs)
+
+  assert torch.allclose(
+    env_str.sim.model.actuator_forcerange[0], env_obj.sim.model.actuator_forcerange[0]
+  )
+  assert torch.allclose(ideal_str.force_limit, ideal_obj.force_limit)
+
+
+def test_pd_gains_rejects_unsupported_operation(device):
+  """Operations other than scale/abs raise ValueError."""
+  env, _ = _make_pd_env(device)
+  ids = torch.tensor([0], device=device)
+
+  with pytest.raises(ValueError, match="only supports 'scale' and 'abs'"):
+    dr.pd_gains(env, ids, kp_range=(1.0, 1.0), kd_range=(1.0, 1.0), operation=dr.add)
+
+
+def test_effort_limits_rejects_unsupported_operation(device):
+  """Operations other than scale/abs raise ValueError."""
+  env, _ = _make_effort_env(device)
+  ids = torch.tensor([0], device=device)
+
+  with pytest.raises(ValueError, match="only supports 'scale' and 'abs'"):
+    dr.effort_limits(env, ids, effort_limit_range=(1.0, 1.0), operation=dr.add)
+
+
 # ===========================================================================
 # Section 3: Other events
 # ===========================================================================
@@ -503,7 +590,9 @@ def test_step_mode_fires_every_call(device):
   assert call_count[0] == 5
 
 
-def _make_impulse_env(device, num_envs=2, num_bodies=1, body_ids=None):
+def _make_impulse_env(
+  device, num_envs=2, num_bodies=1, body_ids=None, cooldown_s=(0.0, 0.0)
+):
   """Create a mock env for apply_body_impulse tests."""
   if body_ids is None:
     body_ids = [0]
@@ -523,7 +612,7 @@ def _make_impulse_env(device, num_envs=2, num_bodies=1, body_ids=None):
 
   asset_cfg = SceneEntityCfg("robot", body_ids=body_ids)
   term_cfg = Mock()
-  term_cfg.params = {"asset_cfg": asset_cfg}
+  term_cfg.params = {"asset_cfg": asset_cfg, "cooldown_s": cooldown_s}
   impulse = events.apply_body_impulse(cfg=term_cfg, env=env)
   return env, mock_entity, asset_cfg, impulse
 
@@ -531,11 +620,13 @@ def _make_impulse_env(device, num_envs=2, num_bodies=1, body_ids=None):
 def test_apply_body_impulse_basic(device):
   """Impulse is applied and cleared after duration expires."""
   env, mock_entity, asset_cfg, impulse = _make_impulse_env(
-    device, num_envs=2, num_bodies=3, body_ids=[1]
+    device, num_envs=2, num_bodies=3, body_ids=[1], cooldown_s=(10.0, 10.0)
   )
 
-  # First call: cooldown_s starts at 0 and gets decremented by dt,
-  # so it becomes <= 0 and triggers.
+  # Skip the initial cooldown so the first call triggers immediately;
+  # the trigger/sustain/expire cycle is what's under test here.
+  impulse._interval_time_left[:] = 0.0
+
   impulse(
     env,
     None,
@@ -641,6 +732,43 @@ def test_apply_body_impulse_reset_clears(device):
   env_ids_arg = call_args[1]["env_ids"]
   assert len(env_ids_arg) == 1
   assert env_ids_arg[0].item() == 0
+
+
+def test_apply_body_impulse_initial_cooldown(device):
+  """The first call after init/reset enters cooldown, not an immediate impulse.
+
+  Regression test for #973.
+  """
+  env, mock_entity, asset_cfg, impulse = _make_impulse_env(
+    device, num_envs=1, num_bodies=1, body_ids=[0], cooldown_s=(0.05, 0.05)
+  )
+
+  def step():
+    impulse(
+      env,
+      None,
+      force_range=(10.0, 10.0),
+      torque_range=(0.0, 0.0),
+      duration_s=(1.0, 1.0),
+      cooldown_s=(0.05, 0.05),  # ~2.5 steps at dt=0.02
+      asset_cfg=asset_cfg,
+    )
+
+  # First two steps consume the sampled cooldown; impulse must not fire yet.
+  step()
+  assert not impulse._active.any()
+  step()
+  assert not impulse._active.any()
+
+  # Third step crosses the cooldown boundary and triggers.
+  step()
+  assert impulse._active.all()
+
+  # Reset re-enters cooldown: next step should not immediately re-trigger.
+  impulse.reset(env_ids=torch.tensor([0], device=device))
+  assert not impulse._active.any()
+  step()
+  assert not impulse._active.any()
 
 
 # ===========================================================================
@@ -835,3 +963,101 @@ def test_dof_armature_recompute_matches_recompile(device):
   gpu_dof_invweight = sim.model.dof_invweight0[0].cpu()
   ref_dof_invweight = torch.tensor(recompiled_model.dof_invweight0, dtype=torch.float32)
   torch.testing.assert_close(gpu_dof_invweight, ref_dof_invweight, atol=1e-4, rtol=1e-4)
+
+
+# ===========================================================================
+# Section: interval timer reset (issue: reset iterated the class-only list)
+# ===========================================================================
+
+
+def _noop_interval_event(env, env_ids):
+  del env, env_ids
+
+
+class _ClassIntervalEvent:
+  """Class-based interval event with a reset hook."""
+
+  def __init__(self, cfg, env):
+    del cfg, env
+
+  def reset(self, env_ids=None):
+    del env_ids
+
+  def __call__(self, env, env_ids):
+    del env, env_ids
+
+
+def _make_mock_env(device, num_envs=4):
+  env = Mock()
+  env.num_envs = num_envs
+  env.device = device
+  env.scene = {}
+  env.sim = Mock()
+  return env
+
+
+def test_interval_timer_resets_for_function_terms(device):
+  """Function-based interval terms get their per-env timer resampled on reset."""
+  env = _make_mock_env(device)
+  cfg = {
+    "push": EventTermCfg(
+      mode="interval", func=_noop_interval_event, interval_range_s=(5.0, 10.0)
+    ),
+  }
+  manager = EventManager(cfg, env)
+
+  timer = manager._interval_term_time_left[0]
+  # Zero the reset env's timer so the in-range assertion below can only pass
+  # if reset actually resampled it (deterministic, not clone-and-compare).
+  timer[1] = 0.0
+  before = timer.clone()
+  reset_ids = torch.tensor([1], dtype=torch.int64, device=device)
+  manager.reset(env_ids=reset_ids)
+
+  assert 5.0 <= timer[1].item() <= 10.0
+  untouched = torch.tensor([0, 2, 3], device=device)
+  assert torch.equal(timer[untouched], before[untouched])
+
+
+def test_interval_timer_reset_with_mixed_terms(device):
+  """Mixed function and class interval terms reset the right timer slots."""
+  env = _make_mock_env(device)
+  cfg = {
+    "push": EventTermCfg(
+      mode="interval", func=_noop_interval_event, interval_range_s=(5.0, 10.0)
+    ),
+    "impulse": EventTermCfg(
+      mode="interval", func=_ClassIntervalEvent, interval_range_s=(100.0, 200.0)
+    ),
+  }
+  manager = EventManager(cfg, env)
+
+  push_timer = manager._interval_term_time_left[0]
+  impulse_timer = manager._interval_term_time_left[1]
+  # Zero both timers for the reset env so the in-range assertions can only
+  # pass if reset resampled each slot (the init draw is from the same range,
+  # so comparing against it would be vacuous).
+  push_timer[1] = 0.0
+  impulse_timer[1] = 0.0
+  reset_ids = torch.tensor([1], dtype=torch.int64, device=device)
+  manager.reset(env_ids=reset_ids)
+
+  # Each timer slot is resampled from its own term's range.
+  assert 5.0 <= push_timer[1].item() <= 10.0
+  assert 100.0 <= impulse_timer[1].item() <= 200.0
+
+
+def test_interval_timer_reset_all_envs(device):
+  """reset(env_ids=None) resamples every env's timer."""
+  env = _make_mock_env(device)
+  cfg = {
+    "push": EventTermCfg(
+      mode="interval", func=_noop_interval_event, interval_range_s=(5.0, 10.0)
+    ),
+  }
+  manager = EventManager(cfg, env)
+
+  timer = manager._interval_term_time_left[0]
+  timer[:] = 0.0
+  manager.reset(env_ids=None)
+  assert ((timer >= 5.0) & (timer <= 10.0)).all()

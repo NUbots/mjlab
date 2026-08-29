@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import TYPE_CHECKING, Callable, Sequence
 
 import mujoco
 import mujoco_warp as mjwarp
@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from mjlab import actuator
-from mjlab.actuator import BuiltinActuatorGroup
+from mjlab.actuator import BuiltinActuatorGroup, FusedActuatorGroup
 from mjlab.actuator.actuator import TransmissionType
 from mjlab.actuator.xml_actuator import XmlActuator
 from mjlab.entity.data import EntityData
@@ -21,6 +21,9 @@ from mjlab.utils.mujoco import dof_width, qpos_width
 from mjlab.utils.spec import auto_wrap_fixed_base_mocap
 from mjlab.utils.string import resolve_expr
 from mjlab.utils.xml import fix_spec_xml, strip_buffer_textures
+
+if TYPE_CHECKING:
+  from mjlab.entity.variants import VariantMetadata
 
 
 @dataclass(frozen=False)
@@ -36,6 +39,7 @@ class EntityIndexing:
   cameras: tuple[mujoco.MjsCamera, ...]
   lights: tuple[mujoco.MjsLight, ...]
   materials: tuple[mujoco.MjsMaterial, ...]
+  textures: tuple[mujoco.MjsTexture, ...]
   pairs: tuple[mujoco.MjsPair, ...]
   actuators: tuple[mujoco.MjsActuator, ...] | None
 
@@ -47,6 +51,7 @@ class EntityIndexing:
   cam_ids: torch.Tensor
   light_ids: torch.Tensor
   mat_ids: torch.Tensor
+  tex_ids: torch.Tensor
   pair_ids: torch.Tensor
   ctrl_ids: torch.Tensor
   joint_ids: torch.Tensor
@@ -61,6 +66,19 @@ class EntityIndexing:
   @property
   def root_body_id(self) -> int:
     return self.bodies[0].id
+
+
+def _outer_index(
+  env_ids: torch.Tensor | slice, ids: torch.Tensor | slice
+) -> tuple[torch.Tensor | slice, torch.Tensor | slice]:
+  """Make [env_ids, ids] select the outer product when both are tensors.
+
+  Plain [tensor, tensor] indexing pairs the ids elementwise, which silently
+  writes a diagonal whenever the shapes happen to broadcast.
+  """
+  if isinstance(env_ids, torch.Tensor) and isinstance(ids, torch.Tensor):
+    return env_ids[:, None], ids
+  return env_ids, ids
 
 
 @dataclass
@@ -80,7 +98,7 @@ class EntityCfg:
 
   init_state: InitialStateCfg = field(default_factory=InitialStateCfg)
   spec_fn: Callable[[], mujoco.MjSpec] = field(
-    default_factory=lambda: (lambda: mujoco.MjSpec())
+    default_factory=lambda: lambda: mujoco.MjSpec()
   )
   articulation: EntityArticulationInfoCfg | None = None
   sort_actuators: bool = False
@@ -94,6 +112,8 @@ class EntityCfg:
   cameras: tuple[spec_cfg.CameraCfg, ...] = field(default_factory=tuple)
   textures: tuple[spec_cfg.TextureCfg, ...] = field(default_factory=tuple)
   materials: tuple[spec_cfg.MaterialCfg, ...] = field(default_factory=tuple)
+  meshes: tuple[spec_cfg.MeshCfg, ...] = field(default_factory=tuple)
+  geoms: tuple[spec_cfg.GeomCfg, ...] = field(default_factory=tuple)
   collisions: tuple[spec_cfg.CollisionCfg, ...] = field(default_factory=tuple)
 
   def build(self) -> Entity:
@@ -143,6 +163,7 @@ class Entity:
   def __init__(self, cfg: EntityCfg) -> None:
     self.cfg = cfg
     self._actuators: list[actuator.Actuator] = []
+    self._variant_metadata: VariantMetadata | None = None
     self._build_spec()
     self._identify_joints()
     self._apply_spec_editors()
@@ -150,12 +171,31 @@ class Entity:
     self._add_initial_state_keyframe()
 
   def _build_spec(self) -> None:
-    self._spec = auto_wrap_fixed_base_mocap(self.cfg.spec_fn)()
+    from mjlab.entity.variants import VariantEntityCfg, build_merged_variant_spec
+
+    if isinstance(self.cfg, VariantEntityCfg):
+      self._spec, self._variant_metadata = build_merged_variant_spec(self.cfg)
+    else:
+      self._spec = auto_wrap_fixed_base_mocap(self.cfg.spec_fn)()
+
+  @property
+  def variant_metadata(self) -> VariantMetadata | None:
+    return self._variant_metadata
 
   def _identify_joints(self) -> None:
     self._all_joints = self._spec.joints
     self._free_joint = None
     self._non_free_joints = tuple(self._all_joints)
+
+    free_joints = [j for j in self._all_joints if j.type == mujoco.mjtJoint.mjJNT_FREE]
+    if len(free_joints) > 1:
+      raise ValueError(
+        f"Entity spec has {len(free_joints)} freejoints. An Entity models a "
+        "single rigid- or articulated-body system with at most one freejoint, "
+        "which serves as its root. Model each detached floating body as its own "
+        "entry in SceneCfg.entities instead."
+      )
+
     if self._all_joints and self._all_joints[0].type == mujoco.mjtJoint.mjJNT_FREE:
       self._free_joint = self._all_joints[0]
       if not self._free_joint.name:
@@ -163,11 +203,16 @@ class Entity:
       self._non_free_joints = tuple(self._all_joints[1:])
 
   def _apply_spec_editors(self) -> None:
+    spec_cfg.warn_overlapping_geom_edits(
+      self.cfg.geoms, self.cfg.collisions, self._spec
+    )
     for cfg_list in [
       self.cfg.lights,
       self.cfg.cameras,
       self.cfg.textures,
       self.cfg.materials,
+      self.cfg.meshes,
+      self.cfg.geoms,
       self.cfg.collisions,
     ]:
       for cfg in cfg_list:
@@ -429,6 +474,10 @@ class Entity:
     return tuple(m.name.split("/")[-1] for m in self.spec.materials)
 
   @property
+  def texture_names(self) -> tuple[str, ...]:
+    return tuple(t.name.split("/")[-1] for t in self.spec.textures)
+
+  @property
   def pair_names(self) -> tuple[str, ...]:
     return tuple(p.name.split("/")[-1] for p in self.spec.pairs)
 
@@ -469,6 +518,10 @@ class Entity:
   @property
   def num_materials(self) -> int:
     return len(self.material_names)
+
+  @property
+  def num_textures(self) -> int:
+    return len(self.texture_names)
 
   @property
   def num_pairs(self) -> int:
@@ -583,6 +636,16 @@ class Entity:
       material_subset = self.material_names
     return resolve_matching_names(name_keys, material_subset, preserve_order)
 
+  def find_textures(
+    self,
+    name_keys: str | Sequence[str],
+    texture_subset: Sequence[str] | None = None,
+    preserve_order: bool = False,
+  ) -> tuple[list[int], list[str]]:
+    if texture_subset is None:
+      texture_subset = self.texture_names
+    return resolve_matching_names(name_keys, texture_subset, preserve_order)
+
   def find_pairs(
     self,
     name_keys: str | Sequence[str],
@@ -641,23 +704,20 @@ class Entity:
     for act in self._actuators:
       act.initialize(mj_model, model, data, device)
 
-    # Vectorize built-in actuators; we'll loop through custom ones.
+    # Vectorize built-in actuators, then fuse ideal PD actuators; we'll loop
+    # through whatever custom actuators remain.
     builtin_group, custom_actuators = BuiltinActuatorGroup.process(self._actuators)
     builtin_group.initialize(nworld, device)
     self._builtin_group = builtin_group
+    fused_actuator_group, custom_actuators = FusedActuatorGroup.process(
+      custom_actuators
+    )
+    fused_actuator_group.initialize(nworld, device)
+    self._fused_actuator_group = fused_actuator_group
     self._custom_actuators = custom_actuators
 
     # Root state.
-    root_state_components = [self.cfg.init_state.pos, self.cfg.init_state.rot]
-    if not self.is_fixed_base:
-      root_state_components.extend(
-        [self.cfg.init_state.lin_vel, self.cfg.init_state.ang_vel]
-      )
-    default_root_state = torch.tensor(
-      sum((tuple(c) for c in root_state_components), ()),
-      dtype=torch.float,
-      device=device,
-    ).repeat(nworld, 1)
+    default_root_state = self._build_default_root_state(nworld, device)
 
     # Joint state.
     if self.is_articulated:
@@ -899,6 +959,24 @@ class Entity:
     """
     self._data.write_root_velocity(root_velocity, env_ids)
 
+  def write_root_link_velocity_b_to_sim(
+    self,
+    root_velocity_b: torch.Tensor,
+    env_ids: torch.Tensor | slice | None = None,
+  ):
+    """Like `write_root_link_velocity_to_sim()` but the velocity is expressed
+    in the root link's body frame. Reads the orientation from qpos, so it is
+    safe to call during a reset before forward() runs.
+
+    Args:
+      root_velocity_b: Tensor of shape (N, 6) where N is the number of
+        environments. Contains linear velocity (3) at body origin and angular
+        velocity (3), both in the root link's body frame.
+      env_ids: Optional tensor or slice specifying which environments to set. If
+        None, all environments are set.
+    """
+    self._data.write_root_velocity_b(root_velocity_b, env_ids)
+
   def write_root_com_velocity_to_sim(
     self,
     root_velocity: torch.Tensor,
@@ -990,6 +1068,7 @@ class Entity:
       env_ids = slice(None)
     if joint_ids is None:
       joint_ids = slice(None)
+    env_ids, joint_ids = _outer_index(env_ids, joint_ids)
     self._data.joint_pos_target[env_ids, joint_ids] = position
 
   def set_joint_velocity_target(
@@ -1009,6 +1088,7 @@ class Entity:
       env_ids = slice(None)
     if joint_ids is None:
       joint_ids = slice(None)
+    env_ids, joint_ids = _outer_index(env_ids, joint_ids)
     self._data.joint_vel_target[env_ids, joint_ids] = velocity
 
   def set_joint_effort_target(
@@ -1028,6 +1108,7 @@ class Entity:
       env_ids = slice(None)
     if joint_ids is None:
       joint_ids = slice(None)
+    env_ids, joint_ids = _outer_index(env_ids, joint_ids)
     self._data.joint_effort_target[env_ids, joint_ids] = effort
 
   def set_tendon_len_target(
@@ -1047,6 +1128,7 @@ class Entity:
       env_ids = slice(None)
     if tendon_ids is None:
       tendon_ids = slice(None)
+    env_ids, tendon_ids = _outer_index(env_ids, tendon_ids)
     self._data.tendon_len_target[env_ids, tendon_ids] = length
 
   def set_tendon_vel_target(
@@ -1066,6 +1148,7 @@ class Entity:
       env_ids = slice(None)
     if tendon_ids is None:
       tendon_ids = slice(None)
+    env_ids, tendon_ids = _outer_index(env_ids, tendon_ids)
     self._data.tendon_vel_target[env_ids, tendon_ids] = velocity
 
   def set_tendon_effort_target(
@@ -1085,6 +1168,7 @@ class Entity:
       env_ids = slice(None)
     if tendon_ids is None:
       tendon_ids = slice(None)
+    env_ids, tendon_ids = _outer_index(env_ids, tendon_ids)
     self._data.tendon_effort_target[env_ids, tendon_ids] = effort
 
   def set_site_effort_target(
@@ -1104,6 +1188,7 @@ class Entity:
       env_ids = slice(None)
     if site_ids is None:
       site_ids = slice(None)
+    env_ids, site_ids = _outer_index(env_ids, site_ids)
     self._data.site_effort_target[env_ids, site_ids] = effort
 
   def write_external_wrench_to_sim(
@@ -1150,6 +1235,18 @@ class Entity:
   # Private methods.
   ##
 
+  def _build_default_root_state(self, nworld: int, device: str) -> torch.Tensor:
+    """Build default root state tensor, uniform across all worlds."""
+    base = self.cfg.init_state
+    components: list[tuple[float, ...]] = [base.pos, base.rot]
+    if not self.is_fixed_base:
+      components.extend([base.lin_vel, base.ang_vel])
+    return torch.tensor(
+      sum((tuple(c) for c in components), ()),
+      dtype=torch.float,
+      device=device,
+    ).repeat(nworld, 1)
+
   def _compute_indexing(self, model: mujoco.MjModel, device: str) -> EntityIndexing:
     bodies = tuple([b for b in self.spec.bodies[1:]])
     joints = self._non_free_joints
@@ -1159,6 +1256,7 @@ class Entity:
     cameras = tuple(self.spec.cameras)
     lights = tuple(self.spec.lights)
     materials = tuple(self.spec.materials)
+    textures = tuple(self.spec.textures)
     pairs = tuple(self.spec.pairs)
 
     body_ids = torch.tensor([b.id for b in bodies], dtype=torch.int, device=device)
@@ -1168,6 +1266,7 @@ class Entity:
     cam_ids = torch.tensor([c.id for c in cameras], dtype=torch.int, device=device)
     light_ids = torch.tensor([lt.id for lt in lights], dtype=torch.int, device=device)
     mat_ids = torch.tensor([m.id for m in materials], dtype=torch.int, device=device)
+    tex_ids = torch.tensor([t.id for t in textures], dtype=torch.int, device=device)
     pair_ids = torch.tensor([p.id for p in pairs], dtype=torch.int, device=device)
     joint_ids = torch.tensor([j.id for j in joints], dtype=torch.int, device=device)
 
@@ -1212,6 +1311,7 @@ class Entity:
       cameras=cameras,
       lights=lights,
       materials=materials,
+      textures=textures,
       pairs=pairs,
       actuators=actuators,
       body_ids=body_ids,
@@ -1221,6 +1321,7 @@ class Entity:
       cam_ids=cam_ids,
       light_ids=light_ids,
       mat_ids=mat_ids,
+      tex_ids=tex_ids,
       pair_ids=pair_ids,
       ctrl_ids=ctrl_ids,
       joint_ids=joint_ids,
@@ -1233,6 +1334,7 @@ class Entity:
 
   def _apply_actuator_controls(self) -> None:
     self._builtin_group.apply_controls(self._data)
+    self._fused_actuator_group.apply_controls(self._data)
     for act in self._custom_actuators:
       command = act.get_command(self._data)
       command = act.apply_delay(command)

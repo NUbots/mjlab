@@ -103,6 +103,8 @@ class ViserPlayViewer(BaseViewer):
       server=self._server,
       mj_model=sim.mj_model,
       num_envs=self.env.num_envs,
+      sim_model=sim.model,
+      expanded_fields=sim.expanded_fields,
     )
 
     self._scene.env_idx = self.cfg.env_idx
@@ -202,7 +204,11 @@ class ViserPlayViewer(BaseViewer):
       self._scene.create_overlay_gui()
 
     self._term_overlays = ViserTermOverlays(
-      self._server, self.env, self._scene, self.frame_time
+      self._server,
+      self.env,
+      self._scene,
+      self.frame_time,
+      reward_bar_max_terms=self.cfg.reward_bar_max_terms,
     )
     self._term_overlays.setup_tabs(tabs)
     self._debug_overlays = ViserDebugOverlays(self.env, self._scene)
