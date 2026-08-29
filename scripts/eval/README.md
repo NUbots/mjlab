@@ -132,12 +132,21 @@ Seven runs per controller: a profile run, three single-axis sweeps and three
 two-axis grids, all on the evaluation plant, 60 s a command with the first 8 s
 discarded. About twelve minutes a controller on an RTX 3060.
 
-The RL controllers run first. Their checkpoints are checked for existence
-before anything starts, but a checkpoint that exists can still fail to load,
-and putting a quintic run first would hide that failure behind twenty minutes
-of work. The grids carry both the combined-axis tracking and — through
-`fall_time` — the stability envelope, so nothing is collected twice. Figures
-land in `logs/eval/comparison/figures` as 300 dpi PNG and PDF.
+The command envelope lives in two places in that script, deliberately. The
+`*_MIN` / `*_MAX` / `*_STEP` variables set the sweep and grid axes, which feed
+figures 03 to 07; the `PROFILE_*` variables set the amplitudes of the profile
+lanes, which are figures 01 and 02 and nothing else. Widening the sweeps does
+not widen the profile, and it should not: a sweep is meant to overshoot what a
+controller can do so the stability envelope has an outside, while a profile is
+meant to show a controller tracking a moving command, which it cannot do at a
+speed it falls over at.
+
+The RL half runs first. The checkpoint is checked for existence before anything
+starts, but a checkpoint that exists can still fail to load, and putting the
+quintic half first would hide that failure behind twenty minutes of work. The grids carry
+both the combined-axis tracking and — through `fall_time` — the stability
+envelope, so nothing is collected twice. Figures land in
+`logs/eval/comparison/figures` as 300 dpi PNG and PDF.
 
 Every environment in a sweep is a distinct command rather than a replica: the
 plant is deterministic and the domain randomisation is off, so replicas of one

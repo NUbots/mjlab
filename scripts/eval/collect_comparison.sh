@@ -247,6 +247,16 @@ WZ_MIN=${WZ_MIN:--3.0}
 WZ_MAX=${WZ_MAX:-3.0}
 WZ_STEP=${WZ_STEP:-0.05}
 
+# Command amplitudes for the profile runs -- figures 01 and 02.
+PROFILE_VX=0.35
+PROFILE_VY=0.20
+PROFILE_WZ=0.60
+# The combined lanes hold one axis while another moves, so each component is
+# lower than the single-axis amplitude above it.
+PROFILE_COMBINED_VX=0.25
+PROFILE_COMBINED_VY=0.15
+PROFILE_COMBINED_WZ=0.40
+
 # Grid axes (used for plotting)
 VX_GRID_MIN=${VX_GRID_MIN:--2.0}
 VX_GRID_MAX=${VX_GRID_MAX:-2.0}
@@ -315,6 +325,12 @@ run_controller() {
   echo "=== ${name} (${engine}): velocity profile ==="
   uv run python scripts/eval/eval_velocity_profile.py \
     --engine "${engine}" "${extra[@]}" \
+    --profile.vx "${PROFILE_VX}" \
+    --profile.vy "${PROFILE_VY}" \
+    --profile.wz "${PROFILE_WZ}" \
+    --profile.combined-vx "${PROFILE_COMBINED_VX}" \
+    --profile.combined-vy "${PROFILE_COMBINED_VY}" \
+    --profile.combined-wz "${PROFILE_COMBINED_WZ}" \
     --profile.hold 6.0 --profile.ramp 1.5 --profile.replicas 4 \
     --output-dir "${OUT}" --tag "profile_${name}"
 
