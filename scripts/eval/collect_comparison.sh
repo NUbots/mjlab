@@ -257,6 +257,15 @@ PROFILE_COMBINED_VX=0.25
 PROFILE_COMBINED_VY=0.15
 PROFILE_COMBINED_WZ=0.40
 
+# Profile timing. A commanded plateau is the measurement and is held long
+# enough to reach steady state; the rest between two of them only has to
+# separate them and let the robot come back to a stand, so it is shorter.
+# Holding both for the same time spends a third of the run standing still.
+PROFILE_HOLD=6.0
+PROFILE_RAMP=1.5
+PROFILE_REST=2.0
+PROFILE_REPLICAS=4
+
 # Grid axes (used for plotting)
 VX_GRID_MIN=${VX_GRID_MIN:--2.0}
 VX_GRID_MAX=${VX_GRID_MAX:-2.0}
@@ -331,7 +340,10 @@ run_controller() {
     --profile.combined-vx "${PROFILE_COMBINED_VX}" \
     --profile.combined-vy "${PROFILE_COMBINED_VY}" \
     --profile.combined-wz "${PROFILE_COMBINED_WZ}" \
-    --profile.hold 6.0 --profile.ramp 1.5 --profile.replicas 4 \
+    --profile.hold "${PROFILE_HOLD}" \
+    --profile.ramp "${PROFILE_RAMP}" \
+    --profile.rest "${PROFILE_REST}" \
+    --profile.replicas "${PROFILE_REPLICAS}" \
     --output-dir "${OUT}" --tag "profile_${name}"
 
   echo "=== ${name} (${engine}): single-axis sweeps ==="

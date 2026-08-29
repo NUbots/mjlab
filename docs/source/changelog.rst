@@ -56,6 +56,21 @@ Added
   policy with a history policy needs both. The actor's input to the policy MLP
   goes from 71 to 87 floats (71 proprio plus a 16-dim latent), the history
   group is ``[num_envs, 25, 71]``, and the exported ONNX input is 1775 floats.
+- Added ``--profile.rest`` to ``scripts/eval/eval_velocity_profile.py``,
+  setting how long a lane rests at zero between two commanded plateaus
+  separately from ``--profile.hold``, which now only sets how long a *commanded*
+  plateau is held. The rest exists to separate one command from the next and to
+  let the robot come back to a stand, not to be measured, so holding it as long
+  as a commanded plateau spent a third of the run standing still. At the
+  comparison's timing a lane goes from 36 s to 24 s with every commanded
+  plateau untouched.
+- Changed ``fig1`` of ``scripts/eval/plot_comparison.py`` from six panels to a
+  single continuous trace, the six schedules laid end to end on one time axis
+  with each block named and washed alternately. The schedules ran in parallel
+  slices of the batch, so a boundary is a change of robot rather than a change
+  of command, and each lane is drawn over its own schedule only -- the tail a
+  short lane spends held at rest while the others finish is padding, not
+  measurement.
 - Added ``--task-id`` to ``scripts/eval/eval_rl_walk.py`` and
   ``scripts/eval/eval_velocity_profile.py``, naming the registered task whose
   observation, action and command pipeline a checkpoint is played back against.

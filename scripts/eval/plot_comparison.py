@@ -314,42 +314,83 @@ def moving_average(values: np.ndarray, window: int) -> np.ndarray:
 
 
 def figure_profile(trace: Trace, path: Path) -> None:
-  """DeepWalk Fig. 3, one panel per command schedule.
+  """DeepWalk Fig. 3, as one continuous trace.
 
-  Six schedules run in parallel slices of the batch rather than end to end, so
-  a fall under one command does not contaminate the next.
+  The six schedules ran in parallel slices of the batch, not end to end -- a
+  fall under one command must not contaminate the next -- so this lays their
+  recorded windows side by side on one time axis. A boundary between two
+  schedules is a change of robot, not a change of command: nothing carries
+  across it, which is why each schedule opens and closes at rest.
+
+  Only each lane's own schedule is drawn. A lane that finishes before the
+  longest one is held at rest for the remainder of the run, and that tail is
+  padding rather than measurement.
   """
-  lanes = trace.lanes
-  fig, axes = plt.subplots(3, 2, figsize=(11, 8.4), sharex=True)
+  fig, ax = plt.subplots(figsize=(16, 4.6))
+  despine(ax)
   window = max(1, int(round(SMOOTH_S / trace.dt)))
   axis_index = {"vx": 0, "vy": 1, "wz": 2}
 
-  # One y-scale for every panel, set by the command rather than by the response.
-  # Within a single step the torso sways and counter-rotates by several times
-  # what the command asks for; scaling to that would flatten the tracking into a
-  # band across the middle, and it would also make the scale depend on the
-  # controller, which is the thing being compared. The raw trace is clipped to
-  # the frame instead.
+  # One y-scale for the whole strip, set by the command rather than by the
+  # response. Within a single step the torso sways and counter-rotates by
+  # several times what the command asks for; scaling to that would flatten the
+  # tracking into a band across the middle, and it would also make the scale
+  # depend on the controller, which is the thing being compared. The raw trace
+  # is clipped to the frame instead.
   span = max(0.5, 1.7 * float(np.abs(trace.command).max()))
 
-  for ax, lane in zip(axes.T.flatten(), lanes, strict=False):
-    despine(ax)
+  offset = 0.0
+  boundaries: list[float] = []
+  for order, lane in enumerate(trace.lanes):
     envs = trace.lane_envs(lane["name"])
+    # Half a step of slack: the schedule's length is a sum of floats and the
+    # sample times are multiples of dt, so an exact comparison drops the last
+    # sample of most lanes.
+    keep = trace.time <= float(lane["duration_s"]) + trace.dt / 2
+    time = trace.time[keep] + offset
+    width = float(lane["duration_s"])
+
+    # Alternate blocks carry a wash, so six schedules on one axis stay
+    # separable without six frames around them.
+    if order % 2:
+      ax.axvspan(offset, offset + width, color=GRID, alpha=0.28, zorder=0)
+
     fell_at = None
     for env in envs:
-      below = np.flatnonzero(trace.upright[:, env] < 0.5)
+      below = np.flatnonzero(trace.upright[keep][:, env] < 0.5)
       if below.size:
-        step = float(trace.time[below[0]])
+        step = float(time[below[0]])
         fell_at = step if fell_at is None else min(fell_at, step)
 
-    for order, name in enumerate(lane["axes"]):
+    # Worked out before anything is drawn: in a combined schedule both axes
+    # move together, so placing one label above its trace and the other below
+    # by their order in the lane stacks them wherever the two traces are close.
+    # Placing by value instead pushes them apart -- the higher trace's label
+    # goes above it, the lower trace's below.
+    series = []
+    for name in lane["axes"]:
       column = axis_index[name]
+      raw = trace.achieved[keep][:, envs, column]
+      smoothed = moving_average(raw.mean(axis=1), window)
+      command = trace.command[keep][:, envs[0], column]
+      # The middle of the first commanded plateau. The first half of a lane
+      # holds exactly one, and the end of the block is no good: there two axes
+      # of a combined schedule both return to zero. The *middle* rather than
+      # the first sample of it, because the measurement lags the command --
+      # anchoring to where the command first reaches its plateau puts the label
+      # on a response that is still climbing, and often overshooting.
+      magnitude = np.abs(command[: command.size // 2])
+      at_peak = np.flatnonzero(magnitude >= magnitude.max() - 1e-6)
+      plateau = int(at_peak[at_peak.size // 2])
+      series.append((name, raw, smoothed, command, plateau))
+    highest = max(range(len(series)), key=lambda i: series[i][2][series[i][4]])
+
+    for depth, (name, raw, smoothed, command, plateau) in enumerate(series):
       colour = AXIS_COLOUR[name]
-      raw = trace.achieved[:, envs, column]
       # Replicas of a schedule differ only where the controller does: the
       # engine is deterministic, the policy sees noisy observations.
       ax.plot(
-        trace.time,
+        time,
         np.clip(raw.mean(axis=1), -span, span),
         color=colour,
         linewidth=0.5,
@@ -358,7 +399,7 @@ def figure_profile(trace: Trace, path: Path) -> None:
       )
       if raw.shape[1] > 1:
         ax.fill_between(
-          trace.time,
+          time,
           np.clip(raw.min(axis=1), -span, span),
           np.clip(raw.max(axis=1), -span, span),
           color=colour,
@@ -367,64 +408,75 @@ def figure_profile(trace: Trace, path: Path) -> None:
           zorder=1,
         )
       ax.plot(
-        trace.time,
-        moving_average(raw.mean(axis=1), window),
+        time,
+        smoothed,
         color=colour,
-        linewidth=2.2,
+        linewidth=2.0,
         zorder=4,
         solid_capstyle="round",
       )
       ax.plot(
-        trace.time,
-        trace.command[:, envs[0], column],
+        time,
+        command,
         color=colour,
-        linewidth=1.4,
+        linewidth=1.3,
         linestyle=(0, (5, 3)),
         alpha=0.95,
         zorder=3,
       )
-      # Direct label, so identity never rests on colour alone. It sits over the
-      # first plateau rather than at the right edge, where two axes of a
-      # combined schedule both return to zero and the labels would collide.
-      smoothed = moving_average(raw.mean(axis=1), window)
-      command = trace.command[:, envs[0], column]
-      plateau = int(np.argmax(np.abs(command[: command.size // 2])))
-      above = order == 0
+      # Direct label, so identity never rests on colour alone.
+      above = depth == highest
       ax.annotate(
         AXIS_LABEL[name],
-        xy=(trace.time[plateau], smoothed[plateau]),
-        xytext=(0, 13 if above else -14),
+        xy=(float(time[plateau]), float(smoothed[plateau])),
+        xytext=(0, 11 if above else -12),
         textcoords="offset points",
         color=colour,
-        fontsize=10,
+        fontsize=9,
         fontweight="bold",
         ha="center",
         va="bottom" if above else "top",
       )
 
     if fell_at is not None:
-      ax.axvspan(fell_at, trace.time[-1], color=RED, alpha=0.07, zorder=0)
+      ax.axvspan(fell_at, offset + width, color=RED, alpha=0.09, zorder=1)
       ax.axvline(fell_at, color=RED, linewidth=1.2, linestyle=":", zorder=5)
       ax.annotate(
-        f"fell at {fell_at:.1f} s",
-        xy=(fell_at, 1.0),
+        f"fell at {fell_at - offset:.1f} s",
+        xy=(fell_at, 0.02),
         xycoords=("data", "axes fraction"),
-        xytext=(6, -12),
+        xytext=(4, 0),
         textcoords="offset points",
         color=RED,
         fontsize=7.5,
         fontweight="bold",
       )
 
-    ax.axhline(0.0, color=BASELINE, linewidth=0.8, zorder=1)
-    ax.set_title(lane["name"].replace("+", " + "), loc="left", pad=6)
-    ax.set_ylim(-span, span)
-    ax.margins(x=0.01)
+    # The schedule's name, centred over its block.
+    ax.annotate(
+      lane["name"].replace("+", " + "),
+      xy=(offset + width / 2, 1.0),
+      xycoords=("data", "axes fraction"),
+      xytext=(0, 5),
+      textcoords="offset points",
+      ha="center",
+      va="bottom",
+      fontsize=9,
+      fontweight="semibold",
+      color=INK,
+    )
 
-  for ax in axes[-1]:
-    ax.set_xlabel("time (s)")
-  for ax in axes[:, 0]:
-    ax.set_ylabel("velocity (m/s) · yaw rate (rad/s)")
+    offset += width
+    boundaries.append(offset)
+
+  for edge in boundaries[:-1]:
+    ax.axvline(edge, color=BASELINE, linewidth=1.0, zorder=5)
+  ax.axhline(0.0, color=BASELINE, linewidth=0.8, zorder=1)
+  ax.set_ylim(-span, span)
+  ax.set_xlim(0.0, offset)
+  ax.margins(x=0)
+  ax.set_xlabel("time (s), the six schedules laid end to end")
+  ax.set_ylabel("velocity (m/s) · yaw rate (rad/s)")
 
   handles = [
     Line2D([], [], color=INK_2, linewidth=2.0, label="measured (0.6 s mean)"),
@@ -439,14 +491,14 @@ def figure_profile(trace: Trace, path: Path) -> None:
   ]
   fig.legend(
     handles=handles,
-    loc="upper center",
-    bbox_to_anchor=(0.5, 0.985),
+    loc="upper right",
+    bbox_to_anchor=(0.995, 0.995),
     ncol=6,
     columnspacing=1.6,
   )
   fig.suptitle(
     f"Velocity tracking under a moving command — {trace.controller.label}",
-    x=0.008,
+    x=0.006,
     y=0.995,
     ha="left",
     fontsize=12,
@@ -454,14 +506,15 @@ def figure_profile(trace: Trace, path: Path) -> None:
     color=INK,
   )
   fig.text(
-    0.008,
+    0.006,
     0.012,
-    "Each panel is an independent robot on the evaluation plant. Single axes first, "
-    "then pairs; every schedule visits both signs.",
+    "Each block is an independent robot on the evaluation plant, so nothing "
+    "carries across a boundary. Single axes first, then pairs; every schedule "
+    "visits both signs.",
     fontsize=7.5,
     color=MUTED,
   )
-  fig.tight_layout(rect=(0, 0.03, 1, 0.94))
+  fig.tight_layout(rect=(0, 0.05, 1, 0.90))
   save(fig, path)
 
 

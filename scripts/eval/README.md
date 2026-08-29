@@ -112,13 +112,22 @@ quintic engine falls over under a backwards command, and everything after that
 point would be a measurement of a robot on the floor. `--profile.replicas` sets
 how many robots run each schedule; the engine is deterministic so one is enough,
 while the policy sees noisy observations and a handful gives it a band.
-`--profile.vx`, `--profile.hold`, `--profile.ramp` and the rest set the
-amplitudes and the timing; the command slews between plateaus rather than
-stepping, because an operator's stick does.
+`--profile.vx` and its siblings set the amplitudes, and `--profile.hold`,
+`--profile.ramp` and `--profile.rest` the timing; the command slews between
+plateaus rather than stepping, because an operator's stick does.
+
+`--profile.rest` is separate from `--profile.hold` because the two plateaus are
+not worth the same. A commanded plateau is the measurement and wants to be long
+enough to reach steady state; the rest between two of them only has to separate
+them and let the robot come back to a stand. Holding both for the same time
+spends a third of the run watching a robot do nothing, and a third of the trace
+figure drawing flat lines.
 
 The raw trace swings by more than the command does within a single step — the
 torso sways sideways and counter-rotates every stride — so plot it against a
-moving average of about two gait cycles. `plot_comparison.py` does.
+moving average of about two gait cycles. `plot_comparison.py` does, and it lays
+the six schedules end to end on one time axis: they ran in parallel, so a
+boundary between two blocks is a change of robot, not a change of command.
 
 ## The whole comparison
 

@@ -31,7 +31,16 @@ discontinuity that never happens.
 """
 
 HOLD_S = 4.0
-"""Seconds a command is held at a plateau, after the ramp onto it."""
+"""Seconds a commanded plateau is held, after the ramp onto it."""
+
+REST_S = 2.0
+"""Seconds a lane rests at zero between two commanded plateaus.
+
+Shorter than :data:`HOLD_S`: the rest is there to separate one command from the
+next and to let the robot come back to a stand, not to be measured. Keeping it
+as long as a commanded plateau spends a third of the run watching a robot do
+nothing, which is a third of the trace figure spent on flat lines.
+"""
 
 
 @dataclass(frozen=True)
@@ -156,13 +165,18 @@ class Profile:
 
 
 def _sweep(
-  axis: str, amplitude: float, hold: float, ramp: float
+  axis: str, amplitude: float, hold: float, ramp: float, rest: float
 ) -> tuple[Segment, ...]:
-  """Rest, positive, rest, negative, rest, on one axis."""
-  rest = Segment(hold=hold, ramp=ramp)
+  """Rest, positive, rest, negative, rest, on one axis.
+
+  The rest plateaus are held for ``rest`` rather than ``hold``, but they are
+  still ramped onto over ``ramp``: the slew back to zero is the controller
+  decelerating, which is part of the measurement.
+  """
+  pause = Segment(hold=rest, ramp=ramp)
   positive = Segment(**{axis: amplitude}, hold=hold, ramp=ramp)
   negative = Segment(**{axis: -amplitude}, hold=hold, ramp=ramp)
-  return (Segment(hold=hold, ramp=0.0), positive, rest, negative, rest)
+  return (Segment(hold=rest, ramp=0.0), positive, pause, negative, pause)
 
 
 def _pair(
@@ -170,13 +184,14 @@ def _pair(
   second: tuple[str, float],
   hold: float,
   ramp: float,
+  rest: float,
 ) -> tuple[Segment, ...]:
   """Rest, both positive, rest, one sign flipped, rest."""
   (axis_a, value_a), (axis_b, value_b) = first, second
-  rest = Segment(hold=hold, ramp=ramp)
+  pause = Segment(hold=rest, ramp=ramp)
   same = Segment(**{axis_a: value_a, axis_b: value_b}, hold=hold, ramp=ramp)
   opposed = Segment(**{axis_a: value_a, axis_b: -value_b}, hold=hold, ramp=ramp)
-  return (Segment(hold=hold, ramp=0.0), same, rest, opposed, rest)
+  return (Segment(hold=rest, ramp=0.0), same, pause, opposed, pause)
 
 
 @dataclass(frozen=True)
@@ -194,7 +209,11 @@ class ProfileCfg:
   combined_vy: float = 0.15
   combined_wz: float = 0.40
   hold: float = HOLD_S
+  """Seconds a commanded plateau is held, after the ramp onto it."""
   ramp: float = RAMP_S
+  """Seconds a command takes to slew between two plateaus."""
+  rest: float = REST_S
+  """Seconds a lane rests at zero between two commanded plateaus."""
   replicas: int = 4
 
 
@@ -209,26 +228,26 @@ def omnidirectional_profile(cfg: ProfileCfg = DEFAULT_PROFILE_CFG) -> Profile:
   both signs of the axis it is exercising, so a controller that walks forwards
   but not backwards shows the asymmetry rather than averaging it away.
   """
-  hold, ramp = cfg.hold, cfg.ramp
+  hold, ramp, rest = cfg.hold, cfg.ramp, cfg.rest
   return Profile(
     lanes=(
-      Lane("sagittal", ("vx",), _sweep("vx", cfg.vx, hold, ramp)),
-      Lane("lateral", ("vy",), _sweep("vy", cfg.vy, hold, ramp)),
-      Lane("turning", ("wz",), _sweep("wz", cfg.wz, hold, ramp)),
+      Lane("sagittal", ("vx",), _sweep("vx", cfg.vx, hold, ramp, rest)),
+      Lane("lateral", ("vy",), _sweep("vy", cfg.vy, hold, ramp, rest)),
+      Lane("turning", ("wz",), _sweep("wz", cfg.wz, hold, ramp, rest)),
       Lane(
         "sagittal+lateral",
         ("vx", "vy"),
-        _pair(("vx", cfg.combined_vx), ("vy", cfg.combined_vy), hold, ramp),
+        _pair(("vx", cfg.combined_vx), ("vy", cfg.combined_vy), hold, ramp, rest),
       ),
       Lane(
         "sagittal+turning",
         ("vx", "wz"),
-        _pair(("vx", cfg.combined_vx), ("wz", cfg.combined_wz), hold, ramp),
+        _pair(("vx", cfg.combined_vx), ("wz", cfg.combined_wz), hold, ramp, rest),
       ),
       Lane(
         "lateral+turning",
         ("vy", "wz"),
-        _pair(("vy", cfg.combined_vy), ("wz", cfg.combined_wz), hold, ramp),
+        _pair(("vy", cfg.combined_vy), ("wz", cfg.combined_wz), hold, ramp, rest),
       ),
     ),
     replicas=cfg.replicas,
