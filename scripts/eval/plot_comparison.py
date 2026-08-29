@@ -7,6 +7,13 @@ next to what.
 
   uv run python scripts/eval/plot_comparison.py --input-dir logs/eval/comparison
 
+Any number of controllers is drawn, in the order they were collected. Which
+ones are in a directory, what to call them and what colour to give them come
+from the ``controllers.json`` the collection wrote; a directory collected
+before that manifest existed is read from the runs it holds instead.
+``--controllers a,b`` narrows and reorders the set, keeping each
+controller's colour from the full comparison.
+
 Figures land in ``<input-dir>/figures`` as PNG (300 dpi) and PDF.
 """
 
@@ -28,12 +35,14 @@ import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap, Normalize  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 
-# Palette. Two engines take categorical slots 1 and 2; where a panel is split by
-# command axis instead, the three axes take slots 1 to 3. Chart chrome is the
-# ink scale, never a series colour.
+# Palette. Controllers take categorical slots in the order they were collected;
+# where a panel is split by command axis instead, the three axes take slots 1 to
+# 3. Chart chrome is the ink scale, never a series colour.
 BLUE = "#2a78d6"
 ORANGE = "#eb6834"
 AQUA = "#1baf7a"
+PURPLE = "#7b5bd6"
+GOLD = "#b8860b"
 RED = "#d03b3b"
 
 SURFACE = "#fcfcfb"
@@ -43,8 +52,13 @@ MUTED = "#898781"
 GRID = "#e1e0d9"
 BASELINE = "#c3c2b7"
 
-ENGINE_COLOUR = {"quintic": BLUE, "rl": ORANGE}
-ENGINE_LABEL = {"quintic": "Quintic walk engine", "rl": "RL policy (best small)"}
+PALETTE = (BLUE, ORANGE, AQUA, PURPLE, GOLD, RED)
+"""Series colours, handed out in collection order.
+
+Red is last on purpose: it marks a fall everywhere else on these figures, so it
+is only spent on a controller once five others have taken a slot.
+"""
+
 AXIS_COLOUR = {"vx": BLUE, "vy": ORANGE, "wz": AQUA}
 AXIS_LABEL = {"vx": "$v_x$", "vy": "$v_y$", "wz": r"$\omega_z$"}
 AXIS_UNIT = {"vx": "m/s", "vy": "m/s", "wz": "rad/s"}
@@ -132,11 +146,87 @@ def read_csv(path: Path) -> dict[str, np.ndarray]:
   return dict(zip(header, columns, strict=True))
 
 
+@dataclass(frozen=True)
+class Controller:
+  """One controller in a comparison: what to load, and what to call it."""
+
+  name: str
+  """Slug the collection tagged its runs with, e.g. ``sweep_vx_<name>``."""
+  engine: str
+  """``quintic`` or ``rl``."""
+  label: str
+  """Name shown on the figures."""
+  colour: str
+  """Series colour."""
+
+
+def default_label(name: str, engine: str) -> str:
+  """The label ``collect_comparison.sh`` would have derived from a name."""
+  base = "Quintic walk engine" if engine == "quintic" else "RL policy"
+  return base if name == engine else f"{base} ({name})"
+
+
+def load_controllers(input_dir: Path, only: str | None) -> list[Controller]:
+  """The controllers in a collection, in the order they were given to it.
+
+  ``collect_comparison.sh`` writes ``controllers.json`` naming them. A
+  directory collected before that manifest existed is read instead from the
+  runs it holds, which carry the engine in their own ``summary.json``; the walk
+  engine leads, so a two-controller comparison keeps the colours it always had.
+  """
+  manifest = input_dir / "controllers.json"
+  if manifest.is_file():
+    with manifest.open() as handle:
+      entries = json.load(handle)["controllers"]
+  else:
+    entries = []
+    for directory in sorted(input_dir.glob("sweep_vx_*")):
+      summary = directory / "summary.json"
+      if not summary.is_file():
+        continue
+      with summary.open() as handle:
+        engine = json.load(handle)["run"]["engine"]
+      entries.append({"name": directory.name[len("sweep_vx_") :], "engine": engine})
+    entries.sort(key=lambda entry: (entry["engine"] != "quintic", entry["name"]))
+
+  if not entries:
+    raise SystemExit(
+      f"no controllers found in {input_dir}: it holds neither controllers.json "
+      f"nor any sweep_vx_<name>/summary.json. Point --input-dir at a directory "
+      f"collect_comparison.sh wrote into."
+    )
+
+  # Colours are handed out over the whole directory before any narrowing, so a
+  # controller keeps the colour it has in the full comparison however the set is
+  # cut down.
+  controllers = [
+    Controller(
+      name=entry["name"],
+      engine=entry["engine"],
+      label=entry.get("label") or default_label(entry["name"], entry["engine"]),
+      colour=entry.get("colour") or PALETTE[index % len(PALETTE)],
+    )
+    for index, entry in enumerate(entries)
+  ]
+  if only is None:
+    return controllers
+
+  wanted = [name.strip() for name in only.split(",") if name.strip()]
+  by_name = {controller.name: controller for controller in controllers}
+  unknown = [name for name in wanted if name not in by_name]
+  if unknown:
+    raise SystemExit(
+      f"no such controller(s) in {input_dir}: {', '.join(unknown)}. "
+      f"It holds: {', '.join(sorted(by_name))}."
+    )
+  return [by_name[name] for name in wanted]
+
+
 @dataclass
 class Sweep:
   """One command sweep or grid, per environment."""
 
-  engine: str
+  controller: Controller
   data: dict[str, np.ndarray]
   summary: dict
 
@@ -155,17 +245,17 @@ class Sweep:
     return values, [np.flatnonzero(command == value) for value in values]
 
 
-def load_sweep(directory: Path, engine: str) -> Sweep:
+def load_sweep(directory: Path, controller: Controller) -> Sweep:
   with (directory / "summary.json").open() as handle:
     summary = json.load(handle)
-  return Sweep(engine, read_csv(directory / "per_env.csv"), summary)
+  return Sweep(controller, read_csv(directory / "per_env.csv"), summary)
 
 
 @dataclass
 class Trace:
   """One profile run: the schedule that was issued and the response to it."""
 
-  engine: str
+  controller: Controller
   run: dict
   time: np.ndarray
   command: np.ndarray  # (T, N, 3)
@@ -186,7 +276,7 @@ class Trace:
     return 1.0 / float(self.run["control_hz"])
 
 
-def load_trace(directory: Path, engine: str) -> Trace:
+def load_trace(directory: Path, controller: Controller) -> Trace:
   with (directory / "run.json").open() as handle:
     run = json.load(handle)
   flat = read_csv(directory / "trace.csv")
@@ -200,7 +290,7 @@ def load_trace(directory: Path, engine: str) -> Trace:
     )
 
   return Trace(
-    engine=engine,
+    controller=controller,
     run=run,
     time=flat["time"].reshape(num_steps, num_envs)[:, 0],
     command=reshape("command_vx", "command_vy", "command_wz"),
@@ -355,7 +445,7 @@ def figure_profile(trace: Trace, path: Path) -> None:
     columnspacing=1.6,
   )
   fig.suptitle(
-    f"Velocity tracking under a moving command — {ENGINE_LABEL[trace.engine]}",
+    f"Velocity tracking under a moving command — {trace.controller.label}",
     x=0.008,
     y=0.995,
     ha="left",
@@ -380,7 +470,9 @@ def figure_profile(trace: Trace, path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-def figure_tracking(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
+def figure_tracking(
+  controllers: list[Controller], sweeps: dict[str, dict[str, Sweep]], path: Path
+) -> None:
   """Achieved against commanded on each axis, and the error underneath.
 
   The identity line is what perfect tracking would draw. Points where the robot
@@ -396,8 +488,9 @@ def figure_tracking(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
     despine(bottom)
     limits: list[float] = []
 
-    for engine, colour in ENGINE_COLOUR.items():
-      sweep = sweeps[engine][f"sweep_{axis}"]
+    for controller in controllers:
+      colour = controller.colour
+      sweep = sweeps[controller.name][f"sweep_{axis}"]
       values, groups = sweep.grouped(axis)
       achieved = np.array(
         [np.nanmean(sweep.data[f"achieved_{axis}"][g]) for g in groups]
@@ -436,7 +529,7 @@ def figure_tracking(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
         markeredgecolor=SURFACE,
         markeredgewidth=1.0,
         zorder=4,
-        label=ENGINE_LABEL[engine],
+        label=controller.label,
       )
       top.plot(
         values[~whole],
@@ -495,14 +588,14 @@ def figure_tracking(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
     Line2D(
       [],
       [],
-      color=ENGINE_COLOUR[e],
+      color=controller.colour,
       linewidth=2.4,
       marker="o",
       markersize=5,
       markeredgecolor=SURFACE,
-      label=ENGINE_LABEL[e],
+      label=controller.label,
     )
-    for e in ENGINE_COLOUR
+    for controller in controllers
   ]
   handles.append(
     Line2D(
@@ -520,7 +613,7 @@ def figure_tracking(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
     handles=handles,
     loc="upper center",
     bbox_to_anchor=(0.5, 0.975),
-    ncol=3,
+    ncol=min(len(handles), 4),
     columnspacing=2.0,
   )
   fig.suptitle(
@@ -532,13 +625,15 @@ def figure_tracking(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
     fontweight="bold",
     color=INK,
   )
-  reference = sweeps["quintic"]["sweep_vx"]
+  reference = sweeps[controllers[0].name]["sweep_vx"]
+  band = "Band spans the replicas of a command"
+  if any(controller.engine == "quintic" for controller in controllers):
+    band += "; the engine is deterministic, so its band is a line"
   fig.text(
     0.008,
     0.012,
     f"Evaluation plant, {reference.duration:.0f} s per command with the first "
-    f"{reference.warmup:.0f} s discarded. Band spans the replicas of a command; "
-    "the engine is deterministic, so its band is a line.",
+    f"{reference.warmup:.0f} s discarded. {band}.",
     fontsize=7.5,
     color=MUTED,
   )
@@ -550,6 +645,14 @@ def figure_tracking(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
 # Figures 3 and 4: the command plane
 # --------------------------------------------------------------------------
 
+
+# Fixed vertical margins of the command-plane figure, in inches: the title and
+# the legend-height above the panels, the caption below them, and the height one
+# controller's row of panels gets. Kept in inches rather than figure fractions so
+# adding a controller adds a row instead of shrinking every row.
+HEADER_IN = 1.12
+FOOTER_IN = 0.61
+ROW_IN = 2.74
 
 GRID_PAIRS = (
   ("vx", "vy", "grid_vx_vy"),
@@ -588,43 +691,59 @@ def _edges(values: np.ndarray) -> np.ndarray:
 
 
 def figure_command_plane(
-  sweeps: dict[str, dict[str, Sweep]], path: Path, field: str, title: str, subtitle: str
+  controllers: list[Controller],
+  sweeps: dict[str, dict[str, Sweep]],
+  path: Path,
+  field: str,
+  title: str,
+  subtitle: str,
 ) -> None:
-  """One metric over three command planes, both controllers."""
-  fig, axes = plt.subplots(2, 3, figsize=(12.2, 7.2))
+  """One metric over three command planes, one row per controller."""
+  rows = len(controllers)
   # Placed by hand rather than by tight_layout: the row labels and the colour
   # bar sit at figure coordinates, so the panels have to be somewhere known.
+  # The margins are fixed in inches and the panels take what is left, so a
+  # three-controller figure is a taller version of a two-controller one rather
+  # than the same figure with the panels squeezed.
+  height = HEADER_IN + FOOTER_IN + ROW_IN * rows
+  fig, axes = plt.subplots(rows, 3, figsize=(12.2, height), squeeze=False)
+  top = 1.0 - HEADER_IN / height
+  bottom = FOOTER_IN / height
   fig.subplots_adjust(
-    left=0.072, right=0.895, top=0.845, bottom=0.085, wspace=0.40, hspace=0.50
+    left=0.072, right=0.895, top=top, bottom=bottom, wspace=0.40, hspace=0.50
   )
   if field == "tracking_error":
     vmax = 0.0
-    for engine in ENGINE_COLOUR:
+    for controller in controllers:
       for _, _, key in GRID_PAIRS:
-        vmax = max(vmax, float(np.nanpercentile(sweeps[engine][key].data[field], 98)))
+        vmax = max(
+          vmax, float(np.nanpercentile(sweeps[controller.name][key].data[field], 98))
+        )
     norm = Normalize(vmin=0.0, vmax=vmax)
     cmap = SEQUENTIAL
     label = "planar velocity error (m/s)"
   else:
-    duration = sweeps["quintic"][GRID_PAIRS[0][2]].duration
+    duration = sweeps[controllers[0].name][GRID_PAIRS[0][2]].duration
     norm = Normalize(vmin=0.0, vmax=duration)
     cmap = SEQUENTIAL
     label = "time upright (s)"
 
   mesh = None
-  for row, engine in enumerate(ENGINE_COLOUR):
+  for row, controller in enumerate(controllers):
     for column, (x, y, key) in enumerate(GRID_PAIRS):
       ax = axes[row, column]
       despine(ax)
       ax.grid(False)
-      sweep = sweeps[engine][key]
+      sweep = sweeps[controller.name][key]
       if field == "time_upright":
         values = np.where(
           np.isnan(sweep.data["fall_time"]),
           sweep.duration,
           sweep.data["fall_time"],
         )
-        source = Sweep(engine, {**sweep.data, "time_upright": values}, sweep.summary)
+        source = Sweep(
+          controller, {**sweep.data, "time_upright": values}, sweep.summary
+        )
       else:
         source = sweep
       xs, ys, field_values = grid_field(source, x, y, field)
@@ -656,24 +775,32 @@ def figure_command_plane(
       ax.set_xlabel(f"commanded {AXIS_LABEL[x]} ({AXIS_UNIT[x]})")
       ax.set_ylabel(f"commanded {AXIS_LABEL[y]} ({AXIS_UNIT[y]})")
       ax.set_title(f"{AXIS_LABEL[x]} × {AXIS_LABEL[y]}", loc="left", pad=6, color=INK)
+    # Read off the row's own panels rather than from a table of positions, so
+    # the label follows the panels however many rows there are.
     fig.text(
       0.072,
-      (0.885, 0.465)[row],
-      ENGINE_LABEL[engine],
+      axes[row, 0].get_position().y1 + 0.28 / height,
+      controller.label,
       fontsize=11,
       fontweight="bold",
-      color=ENGINE_COLOUR[engine],
+      color=controller.colour,
     )
 
   assert mesh is not None
-  bar = fig.colorbar(mesh, cax=fig.add_axes((0.918, 0.085, 0.014, 0.76)))
+  bar = fig.colorbar(mesh, cax=fig.add_axes((0.918, bottom, 0.014, top - bottom)))
   bar.set_label(label, color=INK_2, fontsize=8.5)
   hide(bar.outline)
   bar.ax.tick_params(colors=MUTED, labelsize=8)
   fig.suptitle(
-    title, x=0.008, y=0.975, ha="left", fontsize=12, fontweight="bold", color=INK
+    title,
+    x=0.008,
+    y=1.0 - 0.18 / height,
+    ha="left",
+    fontsize=12,
+    fontweight="bold",
+    color=INK,
   )
-  fig.text(0.008, 0.018, subtitle, fontsize=7.5, color=MUTED)
+  fig.text(0.008, 0.13 / height, subtitle, fontsize=7.5, color=MUTED)
   save(fig, path, tight=False)
 
 
@@ -694,7 +821,9 @@ def survival_curve(
   return times, still_up
 
 
-def figure_stability(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
+def figure_stability(
+  controllers: list[Controller], sweeps: dict[str, dict[str, Sweep]], path: Path
+) -> None:
   """Three views of stability: over time, over the envelope, and by speed."""
   fig = plt.figure(figsize=(11.5, 7.4))
   spec = fig.add_gridspec(2, 3, height_ratios=(1.0, 1.0), hspace=0.42, wspace=0.30)
@@ -704,23 +833,27 @@ def figure_stability(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
   for ax in (top_left, top_right, *bottom):
     despine(ax)
 
-  horizon = sweeps["quintic"]["grid_vx_wz"].duration
+  horizon = sweeps[controllers[0].name]["grid_vx_wz"].duration
 
   # (a) Survival over the whole commanded envelope.
-  for engine, colour in ENGINE_COLOUR.items():
+  for controller in controllers:
     fall = np.concatenate(
-      [sweeps[engine][key].data["fall_time"] for _, _, key in GRID_PAIRS]
+      [sweeps[controller.name][key].data["fall_time"] for _, _, key in GRID_PAIRS]
     )
     times, alive = survival_curve(fall, horizon)
     top_left.plot(
-      times, 100 * alive, color=colour, linewidth=2.2, label=ENGINE_LABEL[engine]
+      times,
+      100 * alive,
+      color=controller.colour,
+      linewidth=2.2,
+      label=controller.label,
     )
     top_left.annotate(
       f"{100 * alive[-1]:.0f}%",
       xy=(times[-1], 100 * alive[-1]),
       xytext=(5, 0),
       textcoords="offset points",
-      color=colour,
+      color=controller.colour,
       fontsize=9,
       fontweight="bold",
       va="center",
@@ -737,15 +870,19 @@ def figure_stability(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
 
   # (b) Survival at the horizon, by controller.
   labels, values, colours = [], [], []
-  for engine, colour in ENGINE_COLOUR.items():
+  for controller in controllers:
     survived = np.concatenate(
-      [sweeps[engine][key].data["survived"] for _, _, key in GRID_PAIRS]
+      [sweeps[controller.name][key].data["survived"] for _, _, key in GRID_PAIRS]
     )
-    labels.append(ENGINE_LABEL[engine].split(" (")[0])
+    # The full label, not its head: two policies of one comparison usually
+    # differ only in the parenthesis, and trimming it would give the panel two
+    # bars called the same thing.
+    labels.append(controller.label)
     values.append(100 * float(survived.mean()))
-    colours.append(colour)
-  bars = top_right.barh(labels, values, color=colours, height=0.5)
-  for bar, value in zip(bars, values, strict=True):
+    colours.append(controller.colour)
+  # Drawn bottom-up so the bars read in the same order as the legend above.
+  bars = top_right.barh(labels[::-1], values[::-1], color=colours[::-1], height=0.5)
+  for bar, value in zip(bars, values[::-1], strict=True):
     top_right.annotate(
       f"{value:.0f}%",
       xy=(bar.get_width(), bar.get_y() + bar.get_height() / 2),
@@ -760,29 +897,29 @@ def figure_stability(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
   top_right.set_xlabel(f"commands upright at {horizon:.0f} s (%)")
   top_right.grid(axis="y", visible=False)
   top_right.set_title("b · At the horizon", loc="left", pad=6)
-  top_right.tick_params(axis="y", labelsize=8.5)
+  top_right.tick_params(axis="y", labelsize=8.5 if len(controllers) < 4 else 7.5)
 
   # (c) Survival split by how fast the robot was asked to go.
   bands = ((0.0, 0.15), (0.15, 0.30), (0.30, 0.65))
   for ax, (low, high) in zip(bottom, bands, strict=True):
-    for engine, colour in ENGINE_COLOUR.items():
+    for controller in controllers:
       command = np.concatenate(
         [
           np.hypot(
-            sweeps[engine][key].data["command_vx"],
-            sweeps[engine][key].data["command_vy"],
+            sweeps[controller.name][key].data["command_vx"],
+            sweeps[controller.name][key].data["command_vy"],
           )
           for _, _, key in GRID_PAIRS
         ]
       )
       fall = np.concatenate(
-        [sweeps[engine][key].data["fall_time"] for _, _, key in GRID_PAIRS]
+        [sweeps[controller.name][key].data["fall_time"] for _, _, key in GRID_PAIRS]
       )
       selected = (command >= low) & (command < high)
       if not selected.any():
         continue
       times, alive = survival_curve(fall[selected], horizon)
-      ax.plot(times, 100 * alive, color=colour, linewidth=2.0)
+      ax.plot(times, 100 * alive, color=controller.colour, linewidth=2.0)
     ax.set_ylim(0, 103)
     ax.set_xlim(0, horizon)
     ax.set_xlabel("time walking (s)")
@@ -811,7 +948,7 @@ def figure_stability(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
     color=INK,
   )
   population = sum(
-    sweeps["quintic"][key].data["survived"].size for _, _, key in GRID_PAIRS
+    sweeps[controllers[0].name][key].data["survived"].size for _, _, key in GRID_PAIRS
   )
   fig.text(
     0.008,
@@ -831,7 +968,9 @@ def figure_stability(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-def figure_gait_quality(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None:
+def figure_gait_quality(
+  controllers: list[Controller], sweeps: dict[str, dict[str, Sweep]], path: Path
+) -> None:
   """Attitude and cadence against forward speed, survivors only."""
   panels = (
     ("rms_roll", "torso roll, RMS (rad)", "a"),
@@ -842,8 +981,8 @@ def figure_gait_quality(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None
   fig, axes = plt.subplots(1, 4, figsize=(13, 3.6))
   for ax, (field, label, tag) in zip(axes, panels, strict=True):
     despine(ax)
-    for engine, colour in ENGINE_COLOUR.items():
-      sweep = sweeps[engine]["sweep_vx"]
+    for controller in controllers:
+      sweep = sweeps[controller.name]["sweep_vx"]
       values, groups = sweep.grouped("vx")
       means, keep = [], []
       for value, group in zip(values, groups, strict=True):
@@ -861,25 +1000,25 @@ def figure_gait_quality(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None
       ax.plot(
         keep,
         means,
-        color=colour,
+        color=controller.colour,
         linewidth=2.0,
         marker="o",
         markersize=3.2,
         markeredgecolor=SURFACE,
         markeredgewidth=0.8,
-        label=ENGINE_LABEL[engine],
+        label=controller.label,
       )
     ax.set_xlabel("commanded $v_x$ (m/s)")
     ax.set_title(f"{tag} · {label}", loc="left", pad=6, fontsize=9)
   handles = [
-    Line2D([], [], color=ENGINE_COLOUR[e], linewidth=2.4, label=ENGINE_LABEL[e])
-    for e in ENGINE_COLOUR
+    Line2D([], [], color=controller.colour, linewidth=2.4, label=controller.label)
+    for controller in controllers
   ]
   fig.legend(
     handles=handles,
     loc="upper left",
     bbox_to_anchor=(0.006, 0.955),
-    ncol=2,
+    ncol=min(len(handles), 3),
     columnspacing=2.0,
   )
   fig.suptitle(
@@ -891,15 +1030,15 @@ def figure_gait_quality(sweeps: dict[str, dict[str, Sweep]], path: Path) -> None
     fontweight="bold",
     color=INK,
   )
-  fig.text(
-    0.006,
-    0.015,
-    "A command with no survivors is absent rather than plotted at zero. The "
-    "notch at the origin in (a) and (d) is the policy standing still: below "
-    "about 0.05 m/s it stops stepping, where the engine keeps marching.",
-    fontsize=7.5,
-    color=MUTED,
-  )
+  note = "A command with no survivors is absent rather than plotted at zero."
+  engines = {controller.engine for controller in controllers}
+  if "rl" in engines:
+    note += (
+      " A notch at the origin in (a) and (d) is a policy standing still: below "
+      "about 0.05 m/s it stops stepping"
+    )
+    note += ", where the walk engine keeps marching." if "quintic" in engines else "."
+  fig.text(0.006, 0.015, note, fontsize=7.5, color=MUTED)
   fig.tight_layout(rect=(0, 0.05, 1, 0.86))
   save(fig, path)
 
@@ -919,6 +1058,12 @@ class Args:
   """Directory ``collect_comparison.sh`` wrote into."""
   output_dir: Path | None = None
   """Where the figures go. Defaults to ``<input-dir>/figures``."""
+  controllers: str | None = None
+  """Draw only these controllers, in this order: a comma-separated list of
+  names, e.g. ``--controllers quintic,history``. The names are the ``name=``
+  fields the collection was given, and are listed in its ``controllers.json``.
+  Defaults to every controller in the directory, in the order it collected
+  them."""
 
 
 SWEEP_KEYS = (
@@ -931,36 +1076,43 @@ SWEEP_KEYS = (
 )
 
 
-def check_inputs(input_dir: Path) -> None:
+def check_inputs(input_dir: Path, controllers: list[Controller]) -> None:
   """Fail before drawing anything, naming what is missing.
 
-  Every figure but the first puts the two controllers side by side, so a
-  directory holding only one of them cannot be plotted. Checked up front
-  because the alternative is half a set of figures and a bare path in a
-  traceback: the usual cause is a collection whose second half never ran.
+  Every figure but the first puts the controllers side by side, so a directory
+  missing any controller's runs cannot be plotted. Checked up front because the
+  alternative is half a set of figures and a bare path in a traceback: the usual
+  cause is a collection that stopped part way through.
   """
   missing: list[str] = []
-  for engine in ENGINE_COLOUR:
-    for name, wanted in (
-      (f"profile_{engine}", "trace.csv"),
-      *((f"{key}_{engine}", "per_env.csv") for key in SWEEP_KEYS),
-    ):
-      if not (input_dir / name / wanted).is_file():
-        missing.append(f"{name}/{wanted}")
+  incomplete: list[Controller] = []
+  for controller in controllers:
+    absent = [
+      f"{name}/{wanted}"
+      for name, wanted in (
+        (f"profile_{controller.name}", "trace.csv"),
+        *((f"{key}_{controller.name}", "per_env.csv") for key in SWEEP_KEYS),
+      )
+      if not (input_dir / name / wanted).is_file()
+    ]
+    missing += absent
+    if absent:
+      incomplete.append(controller)
   if not missing:
     return
 
-  engines = {e for e in ENGINE_COLOUR if any(f"_{e}/" in m for m in missing)}
   lines = [f"{len(missing)} run(s) missing from {input_dir}:"]
   lines += [f"  {name}" for name in missing]
-  if len(engines) == 1:
-    absent = engines.pop()
-    lines.append(
-      f"\nEvery figure but the first compares the two controllers, so the "
-      f"{absent!r} half has to be collected too. If collect_comparison.sh "
-      f"stopped early, check that its checkpoint argument is the path to a "
-      f".pt file rather than a wandb run id."
-    )
+  names = ", ".join(repr(controller.name) for controller in incomplete)
+  verb = "has" if len(incomplete) == 1 else "have"
+  lines.append(
+    f"\nEvery figure but the first compares the controllers side by side, so "
+    f"{names} {verb} to be collected too. If collect_comparison.sh stopped "
+    f"early, "
+    f"check that each engine=rl controller's checkpoint= is the path to a .pt "
+    f"file rather than a wandb run id. To plot what is here instead, name the "
+    f"complete controllers with --controllers."
+  )
   raise SystemExit("\n".join(lines))
 
 
@@ -968,19 +1120,22 @@ def main() -> None:
   args = tyro.cli(Args, config=mjlab.TYRO_FLAGS)
   use_house_style()
   out = args.output_dir or (args.input_dir / "figures")
-  check_inputs(args.input_dir)
+  controllers = load_controllers(args.input_dir, args.controllers)
+  check_inputs(args.input_dir, controllers)
 
   sweeps: dict[str, dict[str, Sweep]] = {}
-  for engine in ENGINE_COLOUR:
-    sweeps[engine] = {
-      key: load_sweep(args.input_dir / f"{key}_{engine}", engine) for key in SWEEP_KEYS
+  for controller in controllers:
+    sweeps[controller.name] = {
+      key: load_sweep(args.input_dir / f"{key}_{controller.name}", controller)
+      for key in SWEEP_KEYS
     }
-    trace = load_trace(args.input_dir / f"profile_{engine}", engine)
-    figure_profile(trace, out / f"fig1_profile_{engine}")
+    trace = load_trace(args.input_dir / f"profile_{controller.name}", controller)
+    figure_profile(trace, out / f"fig1_profile_{controller.name}")
 
-  horizon = sweeps["quintic"]["grid_vx_wz"].duration
-  figure_tracking(sweeps, out / "fig2_tracking_axes")
+  horizon = sweeps[controllers[0].name]["grid_vx_wz"].duration
+  figure_tracking(controllers, sweeps, out / "fig2_tracking_axes")
   figure_command_plane(
+    controllers,
     sweeps,
     out / "fig3_tracking_plane",
     field="tracking_error",
@@ -993,6 +1148,7 @@ def main() -> None:
     ),
   )
   figure_command_plane(
+    controllers,
     sweeps,
     out / "fig4_stability_plane",
     field="time_upright",
@@ -1002,8 +1158,8 @@ def main() -> None:
       "the controller held for the whole run."
     ),
   )
-  figure_stability(sweeps, out / "fig5_stability_time")
-  figure_gait_quality(sweeps, out / "fig6_gait_quality")
+  figure_stability(controllers, sweeps, out / "fig5_stability_time")
+  figure_gait_quality(controllers, sweeps, out / "fig6_gait_quality")
 
 
 if __name__ == "__main__":

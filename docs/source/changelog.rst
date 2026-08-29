@@ -25,8 +25,17 @@ Added
   windowed, and an environment that fell inside the warm-up reports NaN rather
   than a zero it never walked.
 - Added ``scripts/eval/collect_comparison.sh`` and
-  ``scripts/eval/plot_comparison.py``: the fourteen runs behind a two-controller
+  ``scripts/eval/plot_comparison.py``: the seven runs a controller needs for a
   velocity-tracking and stability comparison, and the figures drawn from them.
+  Any number of controllers can be compared -- two policies against each other,
+  or both against the walk engine -- each named on the command line as a
+  ``engine=...,name=...,checkpoint=...`` list rather than being fixed by the
+  script. ``task=`` selects the registered task supplying a policy's
+  observation pipeline, which is what lets policies with different observation
+  vectors sit in one comparison; the collection records what it collected in
+  ``controllers.json``, and ``plot_comparison.py`` draws whatever it finds
+  there. The run length, command ranges and replica count are read from the
+  environment.
 - Added ``mjlab.rl.obs_history``: an end-to-end observation-history encoder for
   the actor. The environment publishes a ``"history"`` observation group -- a
   25-step window of the actor observation stream, shaped
@@ -47,6 +56,11 @@ Added
   policy with a history policy needs both. The actor's input to the policy MLP
   goes from 71 to 87 floats (71 proprio plus a 16-dim latent), the history
   group is ``[num_envs, 25, 71]``, and the exported ONNX input is 1775 floats.
+- Added ``--task-id`` to ``scripts/eval/eval_rl_walk.py`` and
+  ``scripts/eval/eval_velocity_profile.py``, naming the registered task whose
+  observation, action and command pipeline a checkpoint is played back against.
+  A checkpoint only loads against the task it was trained on, so a policy with a
+  non-default observation layout could not be evaluated before.
 
 - Added ``scripts/eval/eval_distilled_quintic_walk.py`` and
   ``mjlab.controllers.distilled_walk``, which run NUbots' distilled walk policy

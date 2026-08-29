@@ -128,23 +128,78 @@ scripts/eval/collect_comparison.sh \
 uv run python scripts/eval/plot_comparison.py --input-dir logs/eval/comparison
 ```
 
-Fourteen runs for two controllers: a profile run each, three single-axis sweeps
-and three two-axis grids, all on the evaluation plant, 60 s a command with the
-first 8 s discarded. About twenty-five minutes on an RTX 3060.
+Seven runs per controller: a profile run, three single-axis sweeps and three
+two-axis grids, all on the evaluation plant, 60 s a command with the first 8 s
+discarded. About twelve minutes a controller on an RTX 3060.
 
-The RL half runs first. The checkpoint is checked for existence before anything
-starts, but a checkpoint that exists can still fail to load, and putting the
-quintic half first would hide that failure behind twenty minutes of work. The grids carry
-both the combined-axis tracking and — through `fall_time` — the stability
-envelope, so nothing is collected twice. Figures land in
-`logs/eval/comparison/figures` as 300 dpi PNG and PDF.
+The RL controllers run first. Their checkpoints are checked for existence
+before anything starts, but a checkpoint that exists can still fail to load,
+and putting a quintic run first would hide that failure behind twenty minutes
+of work. The grids carry both the combined-axis tracking and — through
+`fall_time` — the stability envelope, so nothing is collected twice. Figures
+land in `logs/eval/comparison/figures` as 300 dpi PNG and PDF.
 
 Every environment in a sweep is a distinct command rather than a replica: the
 plant is deterministic and the domain randomisation is off, so replicas of one
-command are replicas of one number. The exception is the learned policy, whose
+command are replicas of one number. The exception is a learned policy, whose
 observations are noisy; the single-axis sweeps carry four replicas per point for
-both controllers so the same code draws a band for the policy and a line for the
+every controller so the same code draws a band for a policy and a line for the
 engine.
+
+### Choosing what to compare
+
+The form above is shorthand for one policy against the walk engine. Any number
+of controllers can be compared instead, each given as a comma-separated
+`key=value` list:
+
+| field | meaning |
+| --- | --- |
+| `engine=` | `quintic` or `rl`. Required. |
+| `name=` | Slug for this controller's runs and figures. Defaults to the engine, so two policies need one each. |
+| `label=` | What the figures call it. Defaults to something built from the name. |
+| `checkpoint=` | Path to the `.pt`. Required for `engine=rl`. |
+| `task=` | Registered task id supplying the observation pipeline. `engine=rl` only. |
+| `colour=` | `#rrggbb` for this controller's series. Defaults to the plotter's palette, in collection order. |
+
+```sh
+scripts/eval/collect_comparison.sh --out logs/eval/three_way \
+  engine=rl,name=small,label='RL (small)',checkpoint=.../small/model_39997.pt \
+  engine=rl,name=history,label='RL (obs history)',checkpoint=.../hist/model_39997.pt,task=Mjlab-Velocity-Flat-Nubots-Nugus-History \
+  engine=quintic
+```
+
+`task=` is what makes a policy with a different observation vector comparable.
+A checkpoint only loads against the task it was trained on — the observation
+layout, and the actor that reads it, both come from the task config — so a
+policy that reads a window of past observations needs the task that builds that
+window named here, and a policy trained against the default task needs nothing.
+`--task-id` on `eval_rl_walk.py` and `eval_velocity_profile.py` is the same knob
+for a single run.
+
+Two flat tasks are registered, and both plants work for either:
+
+| task id | actor input |
+| --- | --- |
+| `Mjlab-Velocity-Flat-Nubots-Nugus` | the 71-float observation vector. The default. |
+| `Mjlab-Velocity-Flat-Nubots-Nugus-History` | the same vector plus a 25-step window of it, compressed to a 16-float latent by a TCN inside the actor. See `mjlab.rl.obs_history`. |
+
+There are `Rough` counterparts of both for training. Naming the wrong one is not
+a silent failure: the checkpoint's shapes will not match and the load raises,
+which is why `collect_comparison.sh` runs its RL controllers first.
+
+The collection writes `controllers.json` naming what it collected, so
+`plot_comparison.py` needs nothing but the directory. It draws every controller
+in the directory, in collection order; `--controllers small,quintic` narrows and
+reorders the set, keeping each controller's colour from the full comparison. A
+directory collected before that manifest existed still plots — the controllers
+are read off the run directories instead.
+
+The run length, the command ranges and the replica count come from the
+environment, so a quick coarse pass needs no edit to the script:
+
+```sh
+DURATION=20 VX_STEP=0.1 VX_GRID_STEP=0.25 scripts/eval/collect_comparison.sh ...
+```
 
 ### Watching a run
 
