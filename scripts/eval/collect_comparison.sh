@@ -55,12 +55,6 @@ WZ_MAX=3.0
 WZ_STEP=0.05
 
 # Command amplitudes for the profile runs -- figures 01 and 02.
-#
-# Separate from the sweep ranges above, and deliberately smaller. A sweep is
-# meant to overshoot what a controller can do, so that the stability envelope
-# has an outside to it; a profile run is meant to show a controller *tracking* a
-# command that moves, and an amplitude past its envelope only produces six lanes
-# that fall over. Set these to speeds you expect the controller to hold.
 PROFILE_VX=0.35
 PROFILE_VY=0.20
 PROFILE_WZ=0.60
