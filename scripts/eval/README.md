@@ -130,7 +130,11 @@ uv run python scripts/eval/plot_comparison.py --input-dir logs/eval/comparison
 
 Fourteen runs for two controllers: a profile run each, three single-axis sweeps
 and three two-axis grids, all on the evaluation plant, 60 s a command with the
-first 8 s discarded. About twenty-five minutes on an RTX 3060. The grids carry
+first 8 s discarded. About twenty-five minutes on an RTX 3060.
+
+The RL half runs first. The checkpoint is checked for existence before anything
+starts, but a checkpoint that exists can still fail to load, and putting the
+quintic half first would hide that failure behind twenty minutes of work. The grids carry
 both the combined-axis tracking and — through `fall_time` — the stability
 envelope, so nothing is collected twice. Figures land in
 `logs/eval/comparison/figures` as 300 dpi PNG and PDF.

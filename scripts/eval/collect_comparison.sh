@@ -19,10 +19,11 @@ set -euo pipefail
 CHECKPOINT=${1:?usage: collect_comparison.sh <rl-checkpoint> [output-dir]}
 OUT=${2:-logs/eval/comparison}
 
-# Checked here rather than where it is used: the RL half runs second, so a bad
-# checkpoint would otherwise surface twenty minutes in, after the whole quintic
-# half had already been collected. A wandb run id on its own is the easy
-# mistake -- the argument is the path to the .pt inside that run's directory.
+# Checked before anything runs. The RL half also goes first (see the bottom of
+# this file), which catches the checkpoints that exist but will not load; this
+# check is the cheap one, and it can say something useful about the path. A
+# wandb run id on its own is the easy mistake -- the argument wants the path to
+# the .pt inside that run's directory.
 if [[ ! -f ${CHECKPOINT} ]]; then
   echo "not a checkpoint file: ${CHECKPOINT}" >&2
   echo "expected a path such as" >&2
@@ -146,8 +147,12 @@ run_engine() {
 }
 
 mkdir -p "${OUT}"
-run_engine quintic
+# RL first, deliberately. A checkpoint can pass the file check above and still
+# fail to load -- a shape mismatch against an older observation layout is the
+# usual way -- and that failure takes seconds. Collecting the quintic half
+# first would put twenty minutes of work in front of it.
 run_engine rl --checkpoint "${CHECKPOINT}"
+run_engine quintic
 
 echo
 echo "collected into ${OUT}"
