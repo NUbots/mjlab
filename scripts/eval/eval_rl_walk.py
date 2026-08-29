@@ -32,7 +32,7 @@ import torch
 import tyro
 
 import mjlab
-from mjlab.evaluation.harness import RlEvalHarness, command_grid
+from mjlab.evaluation.harness import TASK_ID, RlEvalHarness, command_grid
 from mjlab.evaluation.live_view import (
   LIVE_VIEW_FLAGS,
   LiveViewCfg,
@@ -51,6 +51,13 @@ class Args:
   Must have been trained against the current task config: a checkpoint from an
   older observation layout either fails to load or loads and stands still. Smoke
   test a new checkpoint with a short run before trusting a long one."""
+  task_id: str = TASK_ID
+  """Registered task supplying the observation, action and command pipeline.
+
+  A checkpoint only loads against the task it was trained on, so a policy with
+  a different observation layout -- one reading a window of past observations,
+  say -- needs the task that builds that layout named here. The default is the
+  task the plain policies train against."""
   plant: Literal["eval", "training"] = "eval"
   """Robot model. The NUbots MJCFs are quintic-only -- they do not carry the
   sensors and sites the policy's observations read."""
@@ -99,6 +106,7 @@ def main() -> None:
     plant=args.plant,
     num_envs=args.num_envs,
     device=args.device,
+    task_id=args.task_id,
   )
   command = command_grid(
     vx=args.sweep_vx or (args.vx,),
@@ -127,6 +135,7 @@ def main() -> None:
   run = {
     "engine": "rl",
     "plant": args.plant,
+    "task_id": args.task_id,
     "checkpoint": str(args.checkpoint),
     "num_envs": args.num_envs,
     "duration_s": args.duration,

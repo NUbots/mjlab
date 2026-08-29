@@ -5,6 +5,7 @@ from mjlab.rl import (
   RslRlOnPolicyRunnerCfg,
   RslRlPpoAlgorithmCfg,
 )
+from mjlab.rl.obs_history import HistoryModelCfg
 
 
 def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
@@ -44,3 +45,34 @@ def nubots_nugus_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     num_steps_per_env=24,
     max_iterations=20_000,
   )
+
+
+def nubots_nugus_history_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+  """The same run, with an observation-history encoder inside the actor.
+
+  Differs from :func:`nubots_nugus_ppo_runner_cfg` in the actor only: it also
+  reads the ``"history"`` observation group (a window of the actor stream, see
+  ``add_actor_history``) and compresses it with a TCN whose latent is
+  concatenated onto the current observation before the policy MLP. The encoder
+  lives inside the model, so the latent never crosses the observation boundary
+  and plain PPO trains it end to end. See :mod:`mjlab.rl.obs_history`.
+
+  Every other hyperparameter is taken from the plain config rather than
+  restated, so retuning the run retunes both.
+  """
+  cfg = nubots_nugus_ppo_runner_cfg()
+  base = cfg.actor
+  cfg.actor = HistoryModelCfg(
+    hidden_dims=base.hidden_dims,
+    activation=base.activation,
+    obs_normalization=base.obs_normalization,
+    distribution_cfg=dict(base.distribution_cfg or {}),
+    history_cfg={
+      "z_dim": 16,
+      "tcn_channels": (32, 32),
+      "tcn_kernel": 5,
+      "tcn_stride": 2,
+    },
+  )
+  cfg.obs_groups = {"actor": ("actor", "history"), "critic": ("critic",)}
+  return cfg

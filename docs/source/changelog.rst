@@ -25,8 +25,42 @@ Added
   windowed, and an environment that fell inside the warm-up reports NaN rather
   than a zero it never walked.
 - Added ``scripts/eval/collect_comparison.sh`` and
-  ``scripts/eval/plot_comparison.py``: the fourteen runs behind a two-controller
+  ``scripts/eval/plot_comparison.py``: the seven runs a controller needs for a
   velocity-tracking and stability comparison, and the figures drawn from them.
+  Any number of controllers can be compared -- two policies against each other,
+  or both against the walk engine -- each named on the command line as a
+  ``engine=...,name=...,checkpoint=...`` list rather than being fixed by the
+  script. ``task=`` selects the registered task supplying a policy's
+  observation pipeline, which is what lets policies with different observation
+  vectors sit in one comparison; the collection records what it collected in
+  ``controllers.json``, and ``plot_comparison.py`` draws whatever it finds
+  there. The run length, command ranges and replica count are read from the
+  environment.
+- Added ``mjlab.rl.obs_history``: an end-to-end observation-history encoder for
+  the actor. The environment publishes a ``"history"`` observation group -- a
+  25-step window of the actor observation stream, shaped
+  ``[num_envs, T, obs_dim]`` -- and ``HistoryActor`` compresses it with a TCN
+  whose latent is concatenated onto the current observation before the policy
+  MLP. The encoder lives inside the model, so the latent never crosses the
+  observation boundary and plain PPO trains it end to end. It is stateless by
+  design, so deployment needs no cross-tick hidden state:
+  ``OnnxHistoryPolicy`` takes one flat ``[B, T*D]`` window (time-major, oldest
+  frame first), slices the current observation out of the last frame, and emits
+  actions from a single graph. ONNX metadata gains ``history_window``,
+  ``history_obs_dim`` and ``history_layout``.
+- Added ``Mjlab-Velocity-Flat-Nubots-Nugus-History`` and
+  ``Mjlab-Velocity-Rough-Nubots-Nugus-History``, the NUgus velocity tasks with
+  that window published and ``HistoryActor`` as the actor. They are registered
+  alongside the plain tasks rather than replacing them: a checkpoint only loads
+  against the task that builds its observation layout, so comparing a plain
+  policy with a history policy needs both. The actor's input to the policy MLP
+  goes from 71 to 87 floats (71 proprio plus a 16-dim latent), the history
+  group is ``[num_envs, 25, 71]``, and the exported ONNX input is 1775 floats.
+- Added ``--task-id`` to ``scripts/eval/eval_rl_walk.py`` and
+  ``scripts/eval/eval_velocity_profile.py``, naming the registered task whose
+  observation, action and command pipeline a checkpoint is played back against.
+  A checkpoint only loads against the task it was trained on, so a policy with a
+  non-default observation layout could not be evaluated before.
 
 - Added ``scripts/eval/eval_distilled_quintic_walk.py`` and
   ``mjlab.controllers.distilled_walk``, which run NUbots' distilled walk policy

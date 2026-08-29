@@ -33,6 +33,7 @@ import tyro
 
 import mjlab
 from mjlab.evaluation.harness import (
+  TASK_ID,
   DistilledEvalHarness,
   EvalPlant,
   QuinticEvalHarness,
@@ -56,6 +57,13 @@ class Args:
   """Which controller to drive."""
   checkpoint: Path | None = None
   """rsl-rl checkpoint. Required for ``--engine rl``, ignored otherwise."""
+  task_id: str = TASK_ID
+  """Registered task supplying the policy's observation, action and command
+  pipeline. ``--engine rl`` only.
+
+  A checkpoint only loads against the task it was trained on, so a policy with
+  a different observation layout -- one reading a window of past observations,
+  say -- needs the task that builds that layout named here."""
   plant: EvalPlant = "eval"
   """Robot model. The RL policy runs only on ``eval`` and ``training``."""
   device: str = "cuda:0"
@@ -86,6 +94,7 @@ def build_harness(args: Args, num_envs: int):
       plant=args.plant,
       num_envs=num_envs,
       device=args.device,
+      task_id=args.task_id,
     )
   if args.engine == "distilled":
     return DistilledEvalHarness(plant=args.plant, num_envs=num_envs, device=args.device)
@@ -128,6 +137,7 @@ def main() -> None:
   run = {
     "engine": args.engine,
     "plant": args.plant,
+    "task_id": args.task_id if args.engine == "rl" else None,
     "checkpoint": None if args.checkpoint is None else str(args.checkpoint),
     "num_envs": profile.num_envs,
     "duration_s": round(profile.duration, 3),
