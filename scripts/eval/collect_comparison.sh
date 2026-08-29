@@ -19,6 +19,22 @@ set -euo pipefail
 CHECKPOINT=${1:?usage: collect_comparison.sh <rl-checkpoint> [output-dir]}
 OUT=${2:-logs/eval/comparison}
 
+# Checked here rather than where it is used: the RL half runs second, so a bad
+# checkpoint would otherwise surface twenty minutes in, after the whole quintic
+# half had already been collected. A wandb run id on its own is the easy
+# mistake -- the argument is the path to the .pt inside that run's directory.
+if [[ ! -f ${CHECKPOINT} ]]; then
+  echo "not a checkpoint file: ${CHECKPOINT}" >&2
+  echo "expected a path such as" >&2
+  echo "  logs/rsl_rl/nugus_velocity/wandb_checkpoints/<run-id>/model_39997.pt" >&2
+  if [[ -d logs/rsl_rl/nugus_velocity/wandb_checkpoints/${CHECKPOINT} ]]; then
+    echo "that looks like a run id; did you mean one of:" >&2
+    ls -1 "logs/rsl_rl/nugus_velocity/wandb_checkpoints/${CHECKPOINT}" \
+      | sed "s|^|  logs/rsl_rl/nugus_velocity/wandb_checkpoints/${CHECKPOINT}/|" >&2
+  fi
+  exit 1
+fi
+
 # Long enough that the run-up is a small part of it, and long enough for a
 # stability horizon worth plotting.
 DURATION=60

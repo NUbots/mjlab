@@ -921,23 +921,59 @@ class Args:
   """Where the figures go. Defaults to ``<input-dir>/figures``."""
 
 
+SWEEP_KEYS = (
+  "sweep_vx",
+  "sweep_vy",
+  "sweep_wz",
+  "grid_vx_vy",
+  "grid_vx_wz",
+  "grid_vy_wz",
+)
+
+
+def check_inputs(input_dir: Path) -> None:
+  """Fail before drawing anything, naming what is missing.
+
+  Every figure but the first puts the two controllers side by side, so a
+  directory holding only one of them cannot be plotted. Checked up front
+  because the alternative is half a set of figures and a bare path in a
+  traceback: the usual cause is a collection whose second half never ran.
+  """
+  missing: list[str] = []
+  for engine in ENGINE_COLOUR:
+    for name, wanted in (
+      (f"profile_{engine}", "trace.csv"),
+      *((f"{key}_{engine}", "per_env.csv") for key in SWEEP_KEYS),
+    ):
+      if not (input_dir / name / wanted).is_file():
+        missing.append(f"{name}/{wanted}")
+  if not missing:
+    return
+
+  engines = {e for e in ENGINE_COLOUR if any(f"_{e}/" in m for m in missing)}
+  lines = [f"{len(missing)} run(s) missing from {input_dir}:"]
+  lines += [f"  {name}" for name in missing]
+  if len(engines) == 1:
+    absent = engines.pop()
+    lines.append(
+      f"\nEvery figure but the first compares the two controllers, so the "
+      f"{absent!r} half has to be collected too. If collect_comparison.sh "
+      f"stopped early, check that its checkpoint argument is the path to a "
+      f".pt file rather than a wandb run id."
+    )
+  raise SystemExit("\n".join(lines))
+
+
 def main() -> None:
   args = tyro.cli(Args, config=mjlab.TYRO_FLAGS)
   use_house_style()
   out = args.output_dir or (args.input_dir / "figures")
+  check_inputs(args.input_dir)
 
   sweeps: dict[str, dict[str, Sweep]] = {}
   for engine in ENGINE_COLOUR:
     sweeps[engine] = {
-      key: load_sweep(args.input_dir / f"{key}_{engine}", engine)
-      for key in (
-        "sweep_vx",
-        "sweep_vy",
-        "sweep_wz",
-        "grid_vx_vy",
-        "grid_vx_wz",
-        "grid_vy_wz",
-      )
+      key: load_sweep(args.input_dir / f"{key}_{engine}", engine) for key in SWEEP_KEYS
     }
     trace = load_trace(args.input_dir / f"profile_{engine}", engine)
     figure_profile(trace, out / f"fig1_profile_{engine}")
