@@ -273,6 +273,31 @@ def test_attainment_true_fraction_at_small_commands(tracked_env: MagicMock) -> N
   assert tracker2._attain_weight.sum().item() == 0.0
 
 
+def test_core_band_attainment_ignores_commands_past_the_frontier(
+  tracked_env: MagicMock,
+) -> None:
+  """The gate's attainment must not be diluted by commands the curriculum
+  issues precisely because they are out of reach. Env 0 is commanded inside
+  the core band, env 1 well past it; both deliver half. The full-box mean
+  sees both, the gate's core-band mean sees only env 0."""
+  env = tracked_env
+  command_term = env.command_manager.get_term.return_value
+  command_term.vel_command_b = torch.tensor([[0.5, 0.0, 0.0], [1.4, 0.0, 0.0]])
+  command_term.robot.data.root_link_lin_vel_b = torch.tensor([[0.25, 0.0], [0.7, 0.0]])
+  tracker = CompetenceTracker(env)
+
+  tracker.record_step(env)
+
+  torch.testing.assert_close(tracker._attain_weight, torch.tensor([1.0, 1.0]))
+  torch.testing.assert_close(tracker._attain_core_weight, torch.tensor([1.0, 0.0]))
+  torch.testing.assert_close(tracker._attain_core_sum, torch.tensor([0.5, 0.0]))
+
+  tracker.finalize_episodes(env, torch.tensor([0, 1]))
+  stats = tracker.population_means()
+  # Only the in-band env moves the gate's signal off its pessimistic init.
+  assert stats["attain_core"] == pytest.approx(0.5 * tracker.ema_alpha / 2)
+
+
 def test_per_axis_attainment_separates_directions(tracked_env: MagicMock) -> None:
   """A robot that delivers x but not y must read high attain_x, low
   attain_y."""
@@ -756,7 +781,11 @@ def test_staged_on_competence_promotes_demotes_and_freezes(
   def healthy_run(iteration: int) -> dict[str, torch.Tensor]:
     tracker.fell_ema[:] = 0.1
     tracker.ep_len_frac_ema[:] = 0.95
-    tracker.attain_ema[:] = 0.9
+    # Core-band attainment is what the gate reads. The full-box mean is
+    # held BELOW every bar throughout: a limit-pushing command curriculum
+    # keeps it there permanently, and the gate must not stall on it.
+    tracker.attain_core_ema[:] = 0.9
+    tracker.attain_ema[:] = 0.35
     tracker.wobble_ema[:] = 0.02
     return run(iteration)
 
@@ -769,7 +798,7 @@ def test_staged_on_competence_promotes_demotes_and_freezes(
   # shows up as sandbagging (attainment collapse), because the policy
   # prefers a stable stand over risking falls.
   tracker.fell_ema[:] = 0.2
-  tracker.attain_ema[:] = 0.25
+  tracker.attain_core_ema[:] = 0.25
   tracker.ep_len_frac_ema[:] = 0.9
   snap = run(600)
   assert snap["stage_idx"].item() == 1
@@ -777,7 +806,7 @@ def test_staged_on_competence_promotes_demotes_and_freezes(
 
   # Freeze band (between thresholds): holds, no further demote.
   tracker.fell_ema[:] = 0.2
-  tracker.attain_ema[:] = 0.55
+  tracker.attain_core_ema[:] = 0.55
   tracker.wobble_ema[:] = 0.08
   snap = run(800)
   assert snap["stage_idx"].item() == 1
@@ -798,7 +827,7 @@ def test_staged_on_competence_respects_cooldown(tracked_env: MagicMock) -> None:
   tracker.fast_fall_rate = 0.05
   tracker.fell_ema[:] = 0.1
   tracker.ep_len_frac_ema[:] = 0.95
-  tracker.attain_ema[:] = 0.9
+  tracker.attain_core_ema[:] = 0.9
   tracker.wobble_ema[:] = 0.02
 
   def run(iteration: int) -> dict[str, torch.Tensor]:

@@ -53,6 +53,17 @@ PUSH_OBS_WINDOW_S = 6.0
 # Attainment bar for the capability curve's interpolated crossing.
 ATTAINED_FRONTIER_BAR = 0.60
 
+# Upper commanded speed of the "core band" the gate's attainment reads. A
+# gate that reads attainment over the WHOLE command box is confounded with
+# how ambitious the box is: a limit-pushing curriculum commands speeds
+# beyond the frontier on purpose, and every such command drags the mean
+# down no matter how well the policy walks, so the gate never promotes.
+# Restricting the gate's view to commands comfortably inside any plausible
+# frontier separates "is the policy actually trying" from "how far past the
+# frontier are we commanding". Low enough to be reachable, high enough to
+# require a real gait rather than a shuffle.
+CORE_CMD_SPEED = 0.6
+
 
 class CompetenceControllerState(TypedDict):
   level: int
@@ -71,6 +82,11 @@ class CompetenceThresholds:
   / commanded speed) is the LEADING indicator — sandbagging reads ~0 while
   never falling — and wobble fraction (steps with tilt > ~25 deg) is the
   graded near-fall precursor. Falls remain as the safety net only.
+
+  The attainment bars are read against ``attain_core_ema`` (commands up to
+  ``CORE_CMD_SPEED``), not the full-box mean: the full-box mean is capped by
+  however far past the frontier the command curriculum reaches, so bars set
+  against it are really bars on the command range.
   """
 
   promote_track_err: float = 0.25  # legacy, no longer in the predicate
@@ -213,6 +229,11 @@ class CompetenceTracker:
     self._attain_x_weight = torch.zeros(n, device=self.device)
     self._attain_y_sum = torch.zeros(n, device=self.device)
     self._attain_y_weight = torch.zeros(n, device=self.device)
+    # Sandbag detector for the gate: attainment over the core command band
+    # only (see CORE_CMD_SPEED). The full-box ``attain_ema`` stays the
+    # headline number and the degradation signal.
+    self._attain_core_sum = torch.zeros(n, device=self.device)
+    self._attain_core_weight = torch.zeros(n, device=self.device)
     self._wobble_sum = torch.zeros(n, device=self.device)
     self._step_count = torch.zeros(n, device=self.device)
     # Pessimistic init: a fresh policy must EARN competence. Zero-init would
@@ -224,6 +245,7 @@ class CompetenceTracker:
     self.attain_ema = torch.zeros(n, device=self.device)
     self.attain_x_ema = torch.zeros(n, device=self.device)
     self.attain_y_ema = torch.zeros(n, device=self.device)
+    self.attain_core_ema = torch.zeros(n, device=self.device)
     self.wobble_ema = torch.ones(n, device=self.device)
     self._finalized_step = -1
     # Fast population fall-rate channel: falls / episode-ends accumulated
@@ -397,6 +419,7 @@ class CompetenceTracker:
       "fell_ema": self.fell_ema.cpu(),
       "ep_len_frac_ema": self.ep_len_frac_ema.cpu(),
       "attain_ema": self.attain_ema.cpu(),
+      "attain_core_ema": self.attain_core_ema.cpu(),
       "wobble_ema": self.wobble_ema.cpu(),
       "fast_fall_rate": self.fast_fall_rate,
     }
@@ -408,6 +431,8 @@ class CompetenceTracker:
     if "attain_ema" in state:
       self.attain_ema = state["attain_ema"].to(self.device)
       self.wobble_ema = state["wobble_ema"].to(self.device)
+    if "attain_core_ema" in state:
+      self.attain_core_ema = state["attain_core_ema"].to(self.device)
     if "fast_fall_rate" in state:
       self.fast_fall_rate = float(state["fast_fall_rate"])
 
@@ -446,6 +471,9 @@ class CompetenceTracker:
     attain = (vel_xy * cmd_xy).sum(dim=-1) / cmd_sq.clamp(min=1e-6)
     self._attain_sum[meaningful] += attain[meaningful]
     self._attain_weight[meaningful] += 1.0
+    core = meaningful & (cmd_sq <= CORE_CMD_SPEED * CORE_CMD_SPEED)
+    self._attain_core_sum[core] += attain[core]
+    self._attain_core_weight[core] += 1.0
 
     # Per-axis attainment: achieved/commanded per direction, each sample
     # weighted by that axis's share of command energy, so "when commands
@@ -584,6 +612,7 @@ class CompetenceTracker:
     for sums, weights, ema in (
       (self._attain_x_sum, self._attain_x_weight, self.attain_x_ema),
       (self._attain_y_sum, self._attain_y_weight, self.attain_y_ema),
+      (self._attain_core_sum, self._attain_core_weight, self.attain_core_ema),
     ):
       val = torch.zeros(len(ids), device=self.device)
       has = weights[ids] > 0
@@ -609,6 +638,8 @@ class CompetenceTracker:
     self._attain_x_weight[ids] = 0.0
     self._attain_y_sum[ids] = 0.0
     self._attain_y_weight[ids] = 0.0
+    self._attain_core_sum[ids] = 0.0
+    self._attain_core_weight[ids] = 0.0
     self._wobble_sum[ids] = 0.0
     self._step_count[ids] = 0.0
 
@@ -779,6 +810,7 @@ class CompetenceTracker:
       "fell_ema": self.fell_ema.mean().item(),
       "ep_len_frac": self.ep_len_frac_ema.mean().item(),
       "attain": self.attain_ema.mean().item(),
+      "attain_core": self.attain_core_ema.mean().item(),
       "wobble": self.wobble_ema.mean().item(),
       "fast_fall_rate": self.fast_fall_rate,
     }
@@ -794,6 +826,7 @@ class CompetenceTracker:
     out: dict[str, float] = {}
     for name, ema in (
       ("attain", self.attain_ema),
+      ("attain_core", self.attain_core_ema),
       ("attain_x", self.attain_x_ema),
       ("attain_y", self.attain_y_ema),
       ("wobble", self.wobble_ema),
@@ -1202,12 +1235,12 @@ class staged_on_competence:
     stable = self._controller.stability_ok(
       fell_ema=stats["fell_ema"],
       ep_len_frac=stats["ep_len_frac"],
-      attain_ema=stats["attain"],
+      attain_ema=stats["attain_core"],
     )
     t = self._controller.thresholds
     badly_lost = (
       stats["fell_ema"] > t.demote_fell
-      or stats["attain"] < t.demote_attain
+      or stats["attain_core"] < t.demote_attain
       or stats["wobble"] > t.demote_wobble
       or stats["fast_fall_rate"] > t.demote_fast_fell
     )
@@ -1225,4 +1258,5 @@ class staged_on_competence:
     snapshot["stage_idx"] = torch.tensor(self._stage_idx)
     snapshot["competence_fell_ema"] = torch.tensor(stats["fell_ema"])
     snapshot["competence_ep_len_frac"] = torch.tensor(stats["ep_len_frac"])
+    snapshot["competence_attain_core"] = torch.tensor(stats["attain_core"])
     return snapshot

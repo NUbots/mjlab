@@ -355,6 +355,82 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["feet_distance"].weight = -0.1
   cfg.rewards["foot_flat"].weight = -0.5  # Encourage flat-footed, level swing.
 
+  # Reach vs. accuracy in the velocity tracking reward.
+  #
+  # The exponential kernels alone produced a policy that is extremely stable
+  # but refuses to try: measured over a full 35k-iteration run it held a
+  # 0.0005 fall EMA and full-length episodes while delivering only 40% of
+  # the commanded velocity (21% laterally). That is the kernel's shape, not
+  # a tuning accident -- exp(-e^2/std^2) with std^2 = 0.05 is numerically
+  # zero AND flat once the error passes ~0.5 m/s, so for any command the
+  # robot cannot already meet, standing still and a genuine best effort earn
+  # the same nothing, while the best effort still pays the movement
+  # penalties and gives up part of the posture reward. Standing wins.
+  #
+  # Two changes, aimed at the shape rather than the weights:
+  #   * rel_std lets the kernel's tolerance grow with the commanded speed
+  #     (max(std, 0.3 * |cmd|)), so a fast command stops being a reward
+  #     desert relative to a slow one. Below ~0.75 m/s the fixed std still
+  #     governs, so slow-command precision is untouched.
+  #   * the attainment terms pay linearly in the fraction of the command
+  #     actually delivered, so closing the last of an unreachable command
+  #     pays the same as closing the first of an easy one. This is the
+  #     gradient that makes "get as close as stability allows" beat "stand
+  #     still", and it is the same quantity the competence curriculum reads,
+  #     so the reward and the sandbagging detector cannot disagree.
+  # The linear weight matches the kernel's, so tracking is half reach, half
+  # accuracy. Yaw gets less: its kernel is 10x wider (std^2 = 0.5) and was
+  # already tracking, so it needs less help.
+  cfg.rewards["track_linear_velocity"].params["rel_std"] = 0.3
+  cfg.rewards["track_linear_velocity_attainment"].weight = 2.0
+  cfg.rewards["track_angular_velocity_attainment"].weight = 1.0
+
+  # Command curriculum: a real ramp, replacing three identical stages that
+  # made the term a no-op. Start inside the robot's reach so the attainment
+  # gradient has something to bite on and the competence gate can promote,
+  # then open up just past it.
+  #
+  # "Just past it" is load-bearing, and was measured the hard way. An
+  # earlier version of this ramp ended at 1.5 m/s forward, reasoning from
+  # the Froude walk/run boundary for a 0.47 m standing height. The robot's
+  # actual sustained ceiling is ~0.85 m/s, and the over-reach did not push
+  # it up -- it destroyed the graceful-saturation behavior this whole file
+  # is tuned for. At the exact iteration the range widened to 1.5, the
+  # measured ``attained_frontier`` broke a steady climb (1.18) and decayed
+  # to ~1.02, and the policy went from saturating at its ceiling under ANY
+  # command (a 2.0 m/s command still drew 0.85 m/s out of it) to giving up
+  # above ~1.1 m/s and nearly standing still. It never recovered over the
+  # remaining 22k iterations.
+  #
+  # The lesson is that the top of the command range has to stay close
+  # enough to the frontier that best-effort still looks like tracking. A
+  # command at ~1.3x the demonstrated ceiling teaches saturation; one at
+  # ~1.75x teaches surrender. Raising the ceiling itself is a gait problem
+  # (the swing clock's fixed GAIT_PERIOD caps cadence), not a command-range
+  # problem. Lateral stays much tighter than forward throughout: a humanoid
+  # cannot side-step at its forward speed, and commanding what is
+  # unreachable in principle only dilutes the sample budget.
+  cfg.curriculum["command_vel"].params["velocity_stages"] = [
+    {
+      "step": 0,
+      "lin_vel_x": (-0.6, 0.8),
+      "lin_vel_y": (-0.4, 0.4),
+      "ang_vel_z": (-1.5, 1.5),
+    },
+    {
+      "step": 5000 * 24,
+      "lin_vel_x": (-0.8, 1.1),
+      "lin_vel_y": (-0.5, 0.5),
+      "ang_vel_z": (-2.0, 2.0),
+    },
+    {
+      "step": 12000 * 24,
+      "lin_vel_x": (-0.9, 1.25),
+      "lin_vel_y": (-0.55, 0.55),
+      "ang_vel_z": (-2.5, 2.5),
+    },
+  ]
+
   # Competence-gated movement penalties plus the frontier diagnostics that
   # explain them. Always on.
   _add_competence_tracker_event(cfg)

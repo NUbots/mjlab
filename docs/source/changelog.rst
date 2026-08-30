@@ -31,6 +31,35 @@ Added
   actuator torque changes, and registered ``joint_acc_l2``, ``joule_heating``
   and ``torque_rate`` penalty terms (weight ``0.0`` by default) on the base
   velocity task config.
+- Added ``track_linear_velocity_attainment`` and
+  ``track_angular_velocity_attainment`` velocity rewards, paying linearly in
+  the fraction of the commanded velocity actually delivered along the command
+  direction. The exponential tracking kernels go numerically zero *and* flat
+  more than about two ``std`` from the command, so a policy handed a command
+  beyond its capability sees no gradient toward closing it -- standing still
+  and a genuine best effort score the same, and standing still is cheaper.
+  These terms restore that gradient. Registered at weight ``0.0`` by default
+  and enabled for NUbots Nugus.
+- Added a ``rel_std`` parameter to ``track_linear_velocity`` that scales the
+  kernel's tolerance with the commanded speed (``max(std, rel_std * |cmd|)``),
+  so a fast command is no longer a reward desert relative to a slow one.
+  Defaults to ``0.0`` (fixed ``std``, unchanged behavior).
+
+Changed
+^^^^^^^
+
+- The competence curriculum's attainment gate now reads attainment over a
+  core band of commanded speeds (up to ``CORE_CMD_SPEED``) rather than over
+  the whole command box, exposed as ``attain_core``. Attainment averaged over
+  the full box is confounded with how far past the frontier the command
+  curriculum reaches, so a limit-pushing command range would hold the gate
+  below its promote bar permanently no matter how well the policy walked. The
+  full-box ``attain`` remains the headline metric and the degradation signal.
+- NUbots Nugus velocity now ramps its command ranges over three real stages
+  (forward to 1.25 m/s, lateral to 0.55 m/s, yaw to 2.5 rad/s) instead of three
+  identical ones that made the ``command_vel`` curriculum a no-op. The top of
+  the range is held near the robot's measured frontier on purpose: commanding
+  far beyond it teaches the policy to give up rather than to saturate.
 
 Version 1.6.0 (August 8, 2026)
 ------------------------------

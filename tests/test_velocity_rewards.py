@@ -15,6 +15,9 @@ from mjlab.tasks.velocity.mdp.observations import gait_clock
 from mjlab.tasks.velocity.mdp.rewards import (
   _swing_height_profile,
   feet_swing_height_clock,
+  track_angular_velocity_attainment,
+  track_linear_velocity,
+  track_linear_velocity_attainment,
   upright,
 )
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
@@ -298,3 +301,93 @@ def test_gait_clock_ungated_without_command_name():
   clock = gait_clock(_make_clock_obs_env(2, still), period=0.8)
   assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
   assert math.isclose(clock[0, 1].item(), 0.0, abs_tol=1e-6)
+
+
+##
+# Velocity attainment: the gradient the exponential kernel does not have.
+##
+
+
+def _twist_env(command: torch.Tensor, achieved: torch.Tensor) -> MagicMock:
+  """Env exposing a ``twist`` command and a measured base velocity.
+
+  Both tensors are [B, 3]; ``achieved`` doubles as linear and angular
+  velocity so one env serves both attainment terms.
+  """
+  asset = MagicMock()
+  asset.data.root_link_lin_vel_b = achieved
+  asset.data.root_link_ang_vel_b = achieved
+  env = MagicMock()
+  env.scene = {"robot": asset}
+  env.command_manager.get_command.return_value = command
+  return env
+
+
+def test_attainment_has_gradient_where_the_kernel_is_a_flat_zero():
+  """The failure this term exists to fix: at a command well beyond reach,
+  the exponential kernel is numerically zero AND flat, so trying harder
+  pays nothing. Attainment must stay linear across the same range."""
+  command = torch.tensor([[1.2, 0.0, 0.0]]).repeat(3, 1)
+  # 0%, 20% and 40% of the commanded speed.
+  achieved = torch.tensor([[0.0, 0.0, 0.0], [0.24, 0.0, 0.0], [0.48, 0.0, 0.0]])
+  env = _twist_env(command, achieved)
+
+  kernel = track_linear_velocity(env, std=math.sqrt(0.05), command_name="twist")
+  attain = track_linear_velocity_attainment(env, command_name="twist")
+
+  assert kernel.max().item() < 1e-4  # The desert: no payoff anywhere.
+  torch.testing.assert_close(attain, torch.tensor([0.0, 0.2, 0.4]))
+  # Equal effort buys equal reward regardless of distance from the command.
+  steps = attain[1:] - attain[:-1]
+  torch.testing.assert_close(steps, torch.full_like(steps, 0.2))
+
+
+def test_attainment_caps_overshoot_floors_reversal_and_ignores_tiny_commands():
+  command = torch.tensor(
+    [
+      [0.5, 0.0, 0.0],  # Overshoot: 3x the command.
+      [0.5, 0.0, 0.0],  # Reversed: -1x the command.
+      [0.5, 0.0, 0.0],  # Purely orthogonal motion.
+      [0.1, 0.0, 0.0],  # Below command_threshold.
+    ]
+  )
+  achieved = torch.tensor(
+    [
+      [1.5, 0.0, 0.0],
+      [-0.5, 0.0, 0.0],
+      [0.0, 0.5, 0.0],
+      [0.1, 0.0, 0.0],
+    ]
+  )
+  env = _twist_env(command, achieved)
+
+  attain = track_linear_velocity_attainment(
+    env, command_name="twist", command_threshold=0.15, min_credit=-0.5
+  )
+  torch.testing.assert_close(attain, torch.tensor([1.0, -0.5, 0.0, 0.0]))
+
+
+def test_angular_attainment_reads_the_yaw_channel():
+  command = torch.tensor([[0.0, 0.0, 2.0], [0.0, 0.0, 2.0]])
+  achieved = torch.tensor([[0.0, 0.0, 1.0], [3.0, 0.0, 0.0]])
+  env = _twist_env(command, achieved)
+
+  attain = track_angular_velocity_attainment(env, command_name="twist")
+  # Half the commanded yaw scores 0.5; linear motion alone scores nothing.
+  torch.testing.assert_close(attain, torch.tensor([0.5, 0.0]))
+
+
+def test_rel_std_widens_the_kernel_only_for_fast_commands():
+  """A command-proportional tolerance must leave slow-command precision
+  alone while giving fast commands a reachable payoff."""
+  command = torch.tensor([[0.3, 0.0, 0.0], [1.2, 0.0, 0.0]])
+  achieved = torch.tensor([[0.1, 0.0, 0.0], [1.0, 0.0, 0.0]])
+  env = _twist_env(command, achieved)
+
+  std = math.sqrt(0.05)
+  fixed = track_linear_velocity(env, std=std, command_name="twist")
+  scaled = track_linear_velocity(env, std=std, command_name="twist", rel_std=0.3)
+
+  # 0.3 * 0.3 < std, so the slow command still uses the fixed std.
+  torch.testing.assert_close(scaled[0], fixed[0])
+  assert scaled[1].item() > fixed[1].item()

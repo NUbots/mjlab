@@ -91,7 +91,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "joint_pos": ObservationTermCfg(
       func=mdp.joint_pos_rel,
       params={"biased": True},
-      noise=Unoise(n_min=-0.01, n_max=0.01), # Override for nugus
+      noise=Unoise(n_min=-0.01, n_max=0.01),  # Override for nugus
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
@@ -291,16 +291,37 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     "track_linear_velocity": RewardTermCfg(
       func=mdp.track_linear_velocity,
       weight=2.0,
-      params={"command_name": "twist", "std": math.sqrt(0.05)},
+      params={
+        "command_name": "twist",
+        "std": math.sqrt(0.05),
+        # Command-proportional tolerance; 0.0 keeps the fixed std.
+        "rel_std": 0.0,  # Override per-robot.
+      },
     ),
     "track_angular_velocity": RewardTermCfg(
       func=mdp.track_angular_velocity,
       weight=2.0,
       params={"command_name": "twist", "std": math.sqrt(0.5)},
     ),
+    # Linear-in-attainment companions to the exponential tracking kernels.
+    # The kernels go flat-zero more than ~2 std from the command, which
+    # leaves a policy no gradient toward closing an unreachable command --
+    # standing still scores the same as a best effort, and costs less. These
+    # pay in proportion to the fraction of the command actually delivered,
+    # so effort always pays. Disabled by default; set per-robot.
+    "track_linear_velocity_attainment": RewardTermCfg(
+      func=mdp.track_linear_velocity_attainment,
+      weight=0.0,  # Override per-robot.
+      params={"command_name": "twist", "command_threshold": 0.15},
+    ),
+    "track_angular_velocity_attainment": RewardTermCfg(
+      func=mdp.track_angular_velocity_attainment,
+      weight=0.0,  # Override per-robot.
+      params={"command_name": "twist", "command_threshold": 0.3},
+    ),
     "upright": RewardTermCfg(
       func=mdp.upright,
-      weight=0.0, # Disable
+      weight=0.0,  # Disable
       params={
         "std": math.sqrt(0.2),
         "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
@@ -553,7 +574,9 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     decimation=4,
     episode_length_s=20.0,
   )
+
+
 # warp-lang 1.16 tightened if/elif/else symbol scoping in its kernel codegen,
-  # which trips a latent bug in the pinned mujoco-warp rev: the UNKNOWN branch of
-  # _frame_axis (sensor.py) reads `xmat` without ever assigning it on that path.
-  # Any model with a framexaxis/framezaxis sensor then fails to compile.
+# which trips a latent bug in the pinned mujoco-warp rev: the UNKNOWN branch of
+# _frame_axis (sensor.py) reads `xmat` without ever assigning it on that path.
+# Any model with a framexaxis/framezaxis sensor then fails to compile.

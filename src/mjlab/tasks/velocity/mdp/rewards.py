@@ -30,11 +30,20 @@ def track_linear_velocity(
   env: ManagerBasedRlEnv,
   std: float,
   command_name: str,
+  rel_std: float = 0.0,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """Reward for tracking the commanded base linear velocity.
 
   The commanded z velocity is assumed to be zero.
+
+  ``rel_std`` widens the kernel in proportion to the commanded speed, using
+  ``max(std, rel_std * |cmd_xy|)`` as the effective std. With a fixed std a
+  fast command is a reward desert: the absolute error that reads as a
+  near-miss at 0.3 m/s reads as total failure at 1.2 m/s, so the policy
+  learns to harvest the slow commands and ignore the fast ones. A
+  command-proportional tolerance keeps the kernel's payoff comparable
+  across the command range. ``0.0`` (the default) keeps the fixed ``std``.
   """
   asset: Entity = env.scene[asset_cfg.name]
   command = env.command_manager.get_command(command_name)
@@ -43,7 +52,90 @@ def track_linear_velocity(
   xy_error = torch.sum(torch.square(command[:, :2] - actual[:, :2]), dim=1)
   z_error = torch.square(actual[:, 2])
   lin_vel_error = xy_error + z_error
-  return torch.exp(-lin_vel_error / std**2)
+  if rel_std <= 0.0:
+    return torch.exp(-lin_vel_error / std**2)
+  std_eff = torch.clamp(rel_std * torch.norm(command[:, :2], dim=1), min=std)
+  return torch.exp(-lin_vel_error / std_eff**2)
+
+
+def _command_attainment(
+  achieved: torch.Tensor,
+  command: torch.Tensor,
+  command_threshold: float,
+  min_credit: float,
+) -> torch.Tensor:
+  """Signed fraction of ``command`` delivered along the command's direction.
+
+  ``achieved`` and ``command`` are [B, D]; the result is [B]. Motion
+  orthogonal to the command drops out, so this measures effort spent on
+  the task rather than motion in general. Commands shorter than
+  ``command_threshold`` score zero -- the projection's ``1/|c|`` blows up
+  there, and near-zero commands are the exponential kernel's job anyway.
+  """
+  cmd_sq = torch.sum(command * command, dim=-1)
+  attain = torch.sum(achieved * command, dim=-1) / cmd_sq.clamp(min=1e-6)
+  attain = attain.clamp(min=min_credit, max=1.0)
+  return torch.where(cmd_sq >= command_threshold**2, attain, torch.zeros_like(attain))
+
+
+def track_linear_velocity_attainment(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  command_threshold: float = 0.15,
+  min_credit: float = -0.5,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward the fraction of the commanded linear velocity actually achieved.
+
+  The exponential tracking kernel is a precision reward: past roughly two
+  ``std`` of error it is numerically zero AND flat, so a policy handed a
+  command beyond its capability sees no gradient toward trying harder --
+  every attainable fraction of that command pays the same nothing. Since
+  moving does cost the movement penalties and forfeits some of the posture
+  reward, the optimum for an unreachable command is to stand still.
+
+  This term restores the missing gradient. It is linear in attainment, so
+  0.4 -> 0.6 of the command pays exactly what 0.6 -> 0.8 pays no matter how
+  far the command sits beyond the frontier, and it is normalized by the
+  commanded speed, so effort at the frontier pays like effort well inside
+  it. Credit is capped at 1.0 (overshoot earns nothing extra; the
+  exponential kernel remains the only thing rewarding precision) and floored
+  at ``min_credit`` so a backwards lunge under a small command cannot
+  dominate the return.
+
+  Pair it with :func:`track_linear_velocity` rather than replacing it: the
+  linear term supplies reach, the kernel supplies accuracy. This is the
+  same quantity the competence tracker reports as ``attain``, so the reward
+  and the curriculum's sandbagging detector agree by construction.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  command = env.command_manager.get_command(command_name)
+  assert command is not None, f"Command '{command_name}' not found."
+  return _command_attainment(
+    asset.data.root_link_lin_vel_b[:, :2],
+    command[:, :2],
+    command_threshold,
+    min_credit,
+  )
+
+
+def track_angular_velocity_attainment(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  command_threshold: float = 0.3,
+  min_credit: float = -0.5,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Yaw-rate counterpart of :func:`track_linear_velocity_attainment`."""
+  asset: Entity = env.scene[asset_cfg.name]
+  command = env.command_manager.get_command(command_name)
+  assert command is not None, f"Command '{command_name}' not found."
+  return _command_attainment(
+    asset.data.root_link_ang_vel_b[:, 2:3],
+    command[:, 2:3],
+    command_threshold,
+    min_credit,
+  )
 
 
 def track_angular_velocity(
