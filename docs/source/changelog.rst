@@ -56,7 +56,7 @@ Changed
   below its promote bar permanently no matter how well the policy walked. The
   full-box ``attain`` remains the headline metric and the degradation signal.
 - NUbots Nugus velocity now ramps its command ranges over three real stages
-  (forward to 1.25 m/s, lateral to 0.55 m/s, yaw to 2.5 rad/s) instead of three
+  (forward to 1.35 m/s, lateral to 0.6 m/s, yaw to 2.5 rad/s) instead of three
   identical ones that made the ``command_vel`` curriculum a no-op. The top of
   the range is held near the robot's measured frontier on purpose: commanding
   far beyond it teaches the policy to give up rather than to saturate.

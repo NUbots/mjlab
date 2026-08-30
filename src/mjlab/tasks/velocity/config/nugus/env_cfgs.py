@@ -410,6 +410,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # problem. Lateral stays much tighter than forward throughout: a humanoid
   # cannot side-step at its forward speed, and commanding what is
   # unreachable in principle only dilutes the sample budget.
+  #
+  # The ramp reaches a little past the last known-good top (1.1) in two
+  # small steps rather than one large one. The stage that broke the policy
+  # widened the forward range by 0.40 at a stroke; the stage before it
+  # widened by 0.30 and was harmless, and exploration is already collapsed
+  # (mean_std ~0.05 from iteration 2000 on) so a policy cannot re-explore
+  # its way out of a jump it cannot follow. 1.25 and then 1.35 keep every
+  # step at or under 0.15 and leave the last 17k iterations to consolidate
+  # at the top of the range.
   cfg.curriculum["command_vel"].params["velocity_stages"] = [
     {
       "step": 0,
@@ -424,9 +433,15 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "ang_vel_z": (-2.0, 2.0),
     },
     {
-      "step": 12000 * 24,
+      "step": 11000 * 24,
       "lin_vel_x": (-0.9, 1.25),
       "lin_vel_y": (-0.55, 0.55),
+      "ang_vel_z": (-2.5, 2.5),
+    },
+    {
+      "step": 18000 * 24,
+      "lin_vel_x": (-1.0, 1.35),
+      "lin_vel_y": (-0.6, 0.6),
       "ang_vel_z": (-2.5, 2.5),
     },
   ]
