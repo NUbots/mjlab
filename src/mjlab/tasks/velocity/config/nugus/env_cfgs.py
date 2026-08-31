@@ -233,6 +233,16 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # - Ankle roll is very tight for balance; ankle pitch looser for foot clearance.
   # - Shoulders/elbows get moderate freedom for natural arm swing during walking.
   # Running values are ~1.5-2x walking values to accommodate larger motion range.
+  # Posture tolerance must reach the loose "running" regime at speeds this
+  # robot can actually be commanded to. The threshold is on
+  # |v_xy| + |w_z|, and at 1.5 a pure-forward command could never reach it
+  # (the command range tops out at 1.25 and the robot's ceiling is 0.85),
+  # so for straight-line running std_running was dead code and posture was
+  # scored against the tight walking tolerance no matter how fast the
+  # command. That is what lets pose pay a stalled policy more than a
+  # working one. 0.8 puts fast forward commands in the loose regime where
+  # they belong.
+  cfg.rewards["pose"].params["running_threshold"] = 0.8
   cfg.rewards["pose"].params["std_standing"] = {".*": 0.15}
   cfg.rewards["pose"].params["std_walking"] = {
     # Lower body.
@@ -382,8 +392,23 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # accuracy. Yaw gets less: its kernel is 10x wider (std^2 = 0.5) and was
   # already tracking, so it needs less help.
   cfg.rewards["track_linear_velocity"].params["rel_std"] = 0.3
-  cfg.rewards["track_linear_velocity_attainment"].weight = 2.0
+  cfg.rewards["track_linear_velocity_attainment"].weight = 4.0
   cfg.rewards["track_angular_velocity_attainment"].weight = 1.0
+
+  # Why the linear weight is 4.0 and not 2.0, measured rather than guessed.
+  # At a commanded 1.2 m/s -- past the ~0.85 m/s ceiling -- a policy walking
+  # at its limit and a policy that has given up and shuffles at 0.33 m/s
+  # score 6.18 and 5.88 per step. Best effort does win, but by 5%. The
+  # attainment and kernel terms pay the walker +1.15 and everything else
+  # claws back -0.88: pose alone hands the shuffler +0.48 for sitting in
+  # the default posture while failing the task, and the seven gait
+  # penalties add -0.29 more because they all scale with motion. A 5%
+  # margin is inside what function approximation can misresolve, and it is
+  # exactly what collapsed -- once enough of the command distribution sat
+  # past the frontier, the policy settled into the flatter of two
+  # near-equal optima and stopped moving above ~1.1 m/s. Doubling the
+  # attainment weight roughly quadruples the margin, which is the point:
+  # trying has to beat surrendering by more than the noise.
 
   # Command curriculum: a real ramp, replacing three identical stages that
   # made the term a no-op. Start inside the robot's reach so the attainment
@@ -411,14 +436,14 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # cannot side-step at its forward speed, and commanding what is
   # unreachable in principle only dilutes the sample budget.
   #
-  # The ramp reaches a little past the last known-good top (1.1) in two
-  # small steps rather than one large one. The stage that broke the policy
-  # widened the forward range by 0.40 at a stroke; the stage before it
-  # widened by 0.30 and was harmless, and exploration is already collapsed
-  # (mean_std ~0.05 from iteration 2000 on) so a policy cannot re-explore
-  # its way out of a jump it cannot follow. 1.25 and then 1.35 keep every
-  # step at or under 0.15 and leave the last 17k iterations to consolidate
-  # at the top of the range.
+  # The ramp tops out at 1.25. Both prior runs put bounds on this: at 1.1
+  # the policy saturated (a 1.8 m/s command still drew 0.80 m/s out of it),
+  # at 1.25 it degraded to a stable partial roll-off, and at 1.35 and 1.50
+  # it collapsed into giving up above ~1.1. Those runs all had the 5%
+  # effort-vs-surrender margin, though, which is the thing actually being
+  # fixed here -- so 1.25 is the value that moves the range past
+  # known-safe while keeping the outcome attributable to the margin rather
+  # than to a range no run has survived.
   cfg.curriculum["command_vel"].params["velocity_stages"] = [
     {
       "step": 0,
@@ -436,12 +461,6 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "step": 11000 * 24,
       "lin_vel_x": (-0.9, 1.25),
       "lin_vel_y": (-0.55, 0.55),
-      "ang_vel_z": (-2.5, 2.5),
-    },
-    {
-      "step": 18000 * 24,
-      "lin_vel_x": (-1.0, 1.35),
-      "lin_vel_y": (-0.6, 0.6),
       "ang_vel_z": (-2.5, 2.5),
     },
   ]

@@ -56,10 +56,17 @@ Changed
   below its promote bar permanently no matter how well the policy walked. The
   full-box ``attain`` remains the headline metric and the degradation signal.
 - NUbots Nugus velocity now ramps its command ranges over three real stages
-  (forward to 1.35 m/s, lateral to 0.6 m/s, yaw to 2.5 rad/s) instead of three
+  (forward to 1.25 m/s, lateral to 0.55 m/s, yaw to 2.5 rad/s) instead of three
   identical ones that made the ``command_vel`` curriculum a no-op. The top of
   the range is held near the robot's measured frontier on purpose: commanding
   far beyond it teaches the policy to give up rather than to saturate.
+- NUbots Nugus velocity weights ``track_linear_velocity_attainment`` at 4.0 and
+  moves the ``pose`` reward's ``running_threshold`` to 0.8. Measured at a
+  commanded 1.2 m/s against a ~0.85 m/s ceiling, best effort beat giving up by
+  only 5% per step -- ``pose`` paid a stalled policy more for holding the
+  default posture than it paid a working one, and the gait penalties all scale
+  with motion. That margin is inside what function approximation can
+  misresolve. The two changes together take it to 21%.
 
 Version 1.6.0 (August 8, 2026)
 ------------------------------
