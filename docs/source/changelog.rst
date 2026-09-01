@@ -8,6 +8,31 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added ``scripts/eval/eval_push_recovery.py`` and ``mjlab.evaluation.push``,
+  which measure how hard a shove a controller can take. A constant force is
+  applied through the torso for 0.2 s and the robot is watched for four seconds
+  afterwards, swept over how hard the push is, which direction it comes from and
+  where in the gait cycle it lands. Magnitude is parameterised as the velocity
+  change the impulse would give a free body of the robot's mass rather than as a
+  force, so plants that do not weigh the same are comparable; the force and the
+  impulse are both recorded. Alongside the usual walking metrics each trial
+  reports ``withstood``, ``time_to_fall``, ``recovered``, ``recovery_time``,
+  ``peak_speed_error``, ``min_upright_after`` and ``heading_error``, and the
+  summary carries the push *envelope*: for each direction, the magnitude at
+  which half the trials end on the floor, interpolated from the survival curve.
+- Added two push batteries per controller to
+  ``scripts/eval/collect_comparison.sh`` -- one shoving the robot while it walks
+  and one while it stands -- and figures 7 to 9 to
+  ``scripts/eval/plot_comparison.py``: the envelope as a polar plot, survival
+  against magnitude by direction, and what a survived push cost in recovery
+  time, speed excursion and lean. The battery is sized so that repeating a
+  collection reproduces it: each (direction, magnitude) point averages 48 trials
+  spread over the gait cycle, since whether a marginal push topples the robot
+  depends on where in the stride it lands. Collected twice at the defaults, the
+  walk engine reported 30.0% and 30.4% withstood over the whole battery and its
+  envelope moved by at most 0.028 m/s, under a third of a magnitude step.
+  ``PUSH=0`` skips the batteries and the usual ``PUSH_*`` environment variables
+  resize them.
 - Added ``scripts/eval/eval_velocity_profile.py`` and
   ``mjlab.evaluation.profile``, which drive any of the three controllers with a
   *moving* velocity command -- forward, then sideways, then turning, then the
@@ -25,7 +50,7 @@ Added
   windowed, and an environment that fell inside the warm-up reports NaN rather
   than a zero it never walked.
 - Added ``scripts/eval/collect_comparison.sh`` and
-  ``scripts/eval/plot_comparison.py``: the seven runs a controller needs for a
+  ``scripts/eval/plot_comparison.py``: the runs a controller needs for a
   velocity-tracking and stability comparison, and the figures drawn from them.
   Any number of controllers can be compared -- two policies against each other,
   or both against the walk engine -- each named on the command line as a

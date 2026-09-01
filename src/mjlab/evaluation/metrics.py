@@ -11,6 +11,10 @@ Adding a metric is a three-line change, all in this file: a buffer in
 :meth:`WalkMetrics.__init__`, its update in :meth:`WalkMetrics.record`, and a
 field in :class:`PerEnvMetrics`. The CSV columns and the JSON summary are
 derived from :class:`PerEnvMetrics`, so nothing downstream needs touching.
+
+A metric that only means something under a disturbance goes in
+:mod:`mjlab.evaluation.push` instead, which wraps :class:`WalkMetrics` rather
+than reimplementing it -- so anything added here a push run picks up for free.
 """
 
 from __future__ import annotations
@@ -463,7 +467,10 @@ WALK_QUALITY_METRICS: tuple[str, ...] = (
 """Metrics that describe *how* the robot walked, as opposed to whether it fell."""
 
 
-def summarise(metrics: PerEnvMetrics) -> dict:
+def summarise(
+  metrics: PerEnvMetrics,
+  quality_metrics: tuple[str, ...] = WALK_QUALITY_METRICS,
+) -> dict:
   """Aggregate per-environment metrics into a JSON-friendly summary.
 
   Walking quality is reported twice: over the environments that survived, and
@@ -471,6 +478,13 @@ def summarise(metrics: PerEnvMetrics) -> dict:
   fallen robot's sliding into a mean speed describes neither population -- but
   when nothing survives they are all NaN, and the all-environment block is what
   is left to look at.
+
+  Args:
+    metrics: The per-environment table to reduce.
+    quality_metrics: Fields to report in the two blocks. A run that measures
+      more than walking -- a push battery, say -- passes its own fields on top
+      of :data:`WALK_QUALITY_METRICS` so its summary keeps the shape every
+      other run writes.
   """
   survived = metrics.survived > 0.5
   summary: dict = {
@@ -479,20 +493,32 @@ def summarise(metrics: PerEnvMetrics) -> dict:
     "survival_rate": float(survived.float().mean()),
     "fall_time": _stat(metrics.fall_time),
     "survivors": {
-      name: _stat(getattr(metrics, name)[survived]) for name in WALK_QUALITY_METRICS
+      name: _stat(getattr(metrics, name)[survived]) for name in quality_metrics
     },
-    "all_envs": {name: _stat(getattr(metrics, name)) for name in WALK_QUALITY_METRICS},
+    "all_envs": {name: _stat(getattr(metrics, name)) for name in quality_metrics},
   }
   return summary
 
 
-def save_run(output_dir: Path, run: dict, metrics: PerEnvMetrics) -> dict:
+def save_run(
+  output_dir: Path,
+  run: dict,
+  metrics: PerEnvMetrics,
+  summary: dict | None = None,
+) -> dict:
   """Write ``per_env.csv`` and ``summary.json``, and return the summary.
 
-  Both entry points call this, so a quintic run and a policy run produce byte
+  Every entry point calls this, so a quintic run and a policy run produce byte
   compatible outputs and can be concatenated without translation.
+
+  Args:
+    output_dir: Directory to write into.
+    run: The run's configuration, written as the summary's ``run`` block.
+    metrics: The per-environment table; becomes ``per_env.csv``.
+    summary: Aggregate to write, if the caller has one of its own. Defaults to
+      :func:`summarise`.
   """
-  summary = {"run": run, **summarise(metrics)}
+  summary = {"run": run, **(summary if summary is not None else summarise(metrics))}
   write_per_env_csv(output_dir / "per_env.csv", metrics)
   write_summary_json(output_dir / "summary.json", summary)
   return summary

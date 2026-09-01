@@ -9,10 +9,11 @@ you** — everything below has only been smoke-tested at 64 environments.
   policy their `module/skill/NeuralWalk` deploys.
 - `eval_rl_walk.py` — a trained RL policy, from an rsl-rl checkpoint.
 - `eval_velocity_profile.py` — any of the three, under a command that *moves*.
+- `eval_push_recovery.py` — any of the three, shoved and made to recover.
 - `collect_comparison.sh` and `plot_comparison.py` — a whole comparison, and its
   figures.
 
-All three are thin entry points over `mjlab.evaluation`, which holds the plant
+They are all thin entry points over `mjlab.evaluation`, which holds the plant
 construction, the harnesses, the metrics and the output format. No script
 computes a metric of its own: they all hand raw simulator state to
 `WalkMetrics`, so every controller's numbers are produced by the same code.
@@ -129,6 +130,133 @@ moving average of about two gait cycles. `plot_comparison.py` does, and it lays
 the six schedules end to end on one time axis: they ran in parallel, so a
 boundary between two blocks is a change of robot, not a change of command.
 
+## Withstanding a push
+
+A sweep asks how fast a controller can walk and a profile asks how well it
+follows a command that moves. Neither disturbs the robot.
+`eval_push_recovery.py` shoves it: a constant force through the torso for 0.2 s,
+swept over how hard, from where, and where in the stride it lands.
+
+```sh
+uv run python scripts/eval/eval_push_recovery.py --engine quintic
+uv run python scripts/eval/eval_push_recovery.py --engine quintic --push.vx 0.0
+uv run python scripts/eval/eval_push_recovery.py --engine rl \
+  --checkpoint logs/rsl_rl/nugus_velocity/wandb_checkpoints/<run>/model_39997.pt
+```
+
+One *trial* is one shove. The robot walks under a fixed command for
+`--push.settle` seconds, the force lands, and the run continues for
+`--push.recovery` seconds while the outcome is measured. A *battery* is a grid
+of trials over three variables:
+
+| variable | flag | what it means |
+| --- | --- | --- |
+| magnitude | `--push.delta-v` | How hard, as the velocity change the impulse would give a free body of the robot's mass. |
+| direction | `--push.directions` | Which way, as a heading in the robot's own yaw frame: 0° shoves it forwards, 90° to its left. |
+| phase | `--push.phases` | Where in the gait cycle it lands. |
+
+**Magnitude is a velocity, not a force.** A push is parameterised by the
+velocity change it would produce on a free body of the robot's mass, which is
+the momentum it carries divided by that mass. The force applied is
+`mass × Δv / duration` and both it and the impulse are written into the CSV.
+Doing it this way is what makes two plants comparable: the NUgus weighs 6.68 kg,
+so 1.0 m/s of Δv is 6.68 N·s, or 33.4 N held for 0.2 s — and the same 33.4 N on
+a heavier robot would be a smaller push, which is not the comparison anyone
+wants.
+
+**Gait phase is swept, not sampled.** A push during single support is a
+different event from the same push during double support, and a controller has
+no say in which one it gets. The onsets are spread evenly over
+`--push.phase-window`, one gait cycle of the walk engine by default, so every
+number the battery reports is an average over phase rather than a measurement
+at one arbitrary point in the stride.
+
+**The direction is latched at onset.** The heading is read off the robot's yaw
+when the force switches on, and the resulting world-frame force is then held
+constant. A shove comes from somewhere; it does not steer itself to follow a
+robot that is going over.
+
+The battery runs one magnitude at a time, so the batch size is
+`directions × phases × replicas` and does not grow when the magnitude axis is
+refined. The defaults are 12 × 12 × 4 = 576 environments over 13 magnitudes,
+which is 7488 trials and about 48 behind every (direction, magnitude) point.
+
+### What comes out
+
+`per_env.csv` carries every column a sweep does — measured over the window that
+opens when the settle time ends, so they describe the robot around its push
+rather than the run-up to it — followed by the push columns:
+
+| column | meaning |
+| --- | --- |
+| `push_delta_v`, `push_impulse`, `push_force` | the same magnitude three ways: m/s of free-body Δv, N·s, N |
+| `push_heading_deg` | direction in the robot's yaw frame at onset; 0 shoves it forwards |
+| `push_time`, `push_offset` | when the force landed, absolute and within the phase window |
+| `fell_before_push` | 1.0 if the robot was already down when the push arrived |
+| `withstood` | **the headline**: 1.0 if still upright a recovery window later |
+| `time_to_fall` | seconds from the onset to the fall; NaN if it did not fall |
+| `recovered`, `recovery_time` | whether and when the velocity error came back inside 0.1 m/s and stayed there for half a second |
+| `peak_speed_error` | worst planar velocity excursion after the push, in m/s |
+| `min_upright_after` | worst lean reached in the recovery window |
+| `heading_error` | yaw stolen by the push, in radians |
+
+`summary.json` adds a `push` block on top of the usual walking summary: the
+trial counts, the overall rates, and the *envelope* — for each direction, the
+magnitude at which half the trials end on the floor.
+
+Two flags in that block need reading carefully. A trial with `fell_before_push`
+is one the controller had already lost before the push landed; it measures the
+command, not the shove, so its `withstood` is NaN rather than 0 and it is left
+out of every survival fraction. And a direction whose survival never crosses one
+half is reported with `crossed: false` and a NaN critical magnitude rather than
+being pinned at the largest magnitude tested — that would report the battery's
+range as the controller's strength.
+
+`recovered` is strictly stronger than `withstood`: a robot can stay upright and
+never get back to the speed it was asked for. It is never weaker — a robot that
+went down inside the window did not recover, whatever its velocity was doing on
+the way.
+
+### Why the batch is the size it is
+
+The recovery test reads a **gait-cycle moving average** of the base velocity,
+not the raw signal. The raw one swings by more than the command does within a
+stride: walking forward at 0.2 m/s on the evaluation plant, the engine's planar
+velocity error averages 0.23 m/s raw, 0.14 m/s over a 0.30 s window and 0.03 m/s
+over the 0.64 s one this uses. Anything shorter than a full cycle leaves the
+sideways sway in, and no run would ever be recorded as recovered.
+
+The sample size is set by repeatability rather than by coverage. Whether a
+marginal push topples the robot depends on where in the stride it lands, and two
+identical robots in one batch are separated by reduction ordering within a few
+steps — so a trial near the edge of the envelope is effectively a coin flip, and
+what has to be stable is the *fraction*, not any one trial. The default 48
+trials per (direction, magnitude) point put a standard error of at most 7% on
+one point and under 2.5% on a whole direction; the envelope is better than
+either, because it is interpolated from a whole survival curve rather than
+rounded to the nearest magnitude tested.
+
+Collected twice, back to back, walk engine on the evaluation plant at the
+defaults — the two runs are *not* bit-identical, so this measures the thing
+rather than assuming it:
+
+| | run 1 | run 2 |
+| --- | --- | --- |
+| withstood, whole battery | 30.04% | 30.42% |
+| recovered, whole battery | 28.46% | 28.65% |
+| critical Δv, weakest direction | 0.275 m/s | 0.286 m/s |
+| critical Δv, strongest direction | 0.550 m/s | 0.543 m/s |
+
+Across all twelve directions the envelope moved by at most 0.028 m/s, under a
+third of a magnitude step, and by 0.010 m/s typically. Individual
+(direction, magnitude) cells moved by 1.2 percentage points on average and 10 at
+worst, which is the resolution to read a single cell at — and the reason the
+figures are drawn from curves and envelopes rather than from cells.
+
+Halving `PUSH_PHASES` and `PUSH_REPLICAS` halves the collection time and doubles
+those numbers. It is a reasonable trade for a first look; it is not what to
+quote.
+
 ## The whole comparison
 
 ```sh
@@ -137,9 +265,12 @@ scripts/eval/collect_comparison.sh \
 uv run python scripts/eval/plot_comparison.py --input-dir logs/eval/comparison
 ```
 
-Seven runs per controller: a profile run, three single-axis sweeps and three
-two-axis grids, all on the evaluation plant, 60 s a command with the first 8 s
-discarded. About twelve minutes a controller on an RTX 3060.
+Nine runs per controller: a profile run, three single-axis sweeps, three
+two-axis grids and two push batteries, all on the evaluation plant. The sweeps
+and grids run 60 s a command with the first 8 s discarded — about twelve minutes
+a controller on an RTX 3060. The batteries shove the robot 7488 times each, once
+while it walks and once while it stands, which is another five and a half
+minutes a controller on an RTX A5500.
 
 The command envelope lives in two places in that script, deliberately. The
 `*_MIN` / `*_MAX` / `*_STEP` variables set the sweep and grid axes, which feed
@@ -154,8 +285,10 @@ The RL half runs first. The checkpoint is checked for existence before anything
 starts, but a checkpoint that exists can still fail to load, and putting the
 quintic half first would hide that failure behind twenty minutes of work. The grids carry
 both the combined-axis tracking and — through `fall_time` — the stability
-envelope, so nothing is collected twice. Figures land in
-`logs/eval/comparison/figures` as 300 dpi PNG and PDF.
+envelope, so nothing is collected twice. The push batteries run last, walking
+before standing, so an interrupted collection still has the one the figures lead
+with. `PUSH=0` skips them. Figures land in `logs/eval/comparison/figures` as 300
+dpi PNG and PDF.
 
 Every environment in a sweep is a distinct command rather than a replica: the
 plant is deterministic and the domain randomisation is off, so replicas of one
@@ -217,6 +350,14 @@ environment, so a quick coarse pass needs no edit to the script:
 
 ```sh
 DURATION=20 VX_STEP=0.1 VX_GRID_STEP=0.25 scripts/eval/collect_comparison.sh ...
+```
+
+The push batteries read `PUSH_*` the same way — `PUSH_DV`, `PUSH_DIRECTIONS`,
+`PUSH_PHASES`, `PUSH_REPLICAS`, `PUSH_VX`, `PUSH_DURATION`, `PUSH_SETTLE` and
+`PUSH_RECOVERY` — and `PUSH=0` leaves them out:
+
+```sh
+PUSH_PHASES=4 PUSH_REPLICAS=1 scripts/eval/collect_comparison.sh ...
 ```
 
 ### Watching a run
@@ -335,6 +476,11 @@ A profile run writes `trace.csv` and `run.json` instead: one row per control
 step per environment (`step`, `time`, `env`, the three commanded components, the
 three measured ones, and `upright`), and the schedule that produced them.
 
+A push battery writes the same two files as a sweep, one row per *trial* rather
+than per environment — a battery is several passes of one batch — with the push
+columns after the walking ones and a `push` block in the summary. See
+[Withstanding a push](#withstanding-a-push).
+
 `per_env.csv` has an `env` column followed by every field of `PerEnvMetrics`:
 
 | column | meaning |
@@ -376,6 +522,12 @@ do not read yet, add it to `EvalState` and to `EvalState.from_entity` — that o
 method is where both engines get their state, and keeping it that way is what
 makes the comparison sound.
 
+A push metric goes in the same three places in `src/mjlab/evaluation/push.py`
+instead — `PushMetrics` and `PerEnvPushMetrics`, with `PUSH_QUALITY_METRICS` for
+the aggregate. That module wraps `WalkMetrics` rather than reimplementing it, so
+a metric that describes *walking* still belongs in `metrics.py` and a push run
+picks it up for free.
+
 ## Runtime and memory
 
 Measured on an RTX 3060 (12 GiB), quintic engine, evaluation plant, warm warp
@@ -400,7 +552,20 @@ with one small matrix multiply per control step and keeps the phase clock, so it
 is a little cheaper than the quintic side at the same rate — until
 `--track-teacher`, which runs both and costs both.
 
+A default push battery is 7488 trials of 12.64 s each, run as 13 passes of 576
+environments. Measured on an RTX A5500: 164 s wall for 95 000 robot-seconds, at
+3.1 GiB. Two batteries a controller, so about five and a half minutes on that
+card. The magnitude axis costs wall time and no memory, since it is one pass per
+value; the direction, phase and replica counts are what set the batch.
+
 ## Things to read before designing an experiment
+
+**A push is a much smaller disturbance than it sounds.** The NUgus weighs
+6.68 kg, so the walk engine's envelope — around 0.3 m/s of free-body Δv walking
+forward, 0.55 m/s from the side — is 2 to 4 N·s, or 10 to 18 N held for a fifth
+of a second. Read the impulse rather than the force when comparing against
+published push-recovery numbers, which are usually reported for robots an order
+of magnitude heavier.
 
 **Backward walking falls over.** With the deployed parameters the quintic engine
 does not walk backwards: at −0.1 m/s it falls after about 2.5 s on both the

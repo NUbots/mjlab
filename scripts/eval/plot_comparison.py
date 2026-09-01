@@ -14,7 +14,10 @@ before that manifest existed is read from the runs it holds instead.
 ``--controllers a,b`` narrows and reorders the set, keeping each
 controller's colour from the full comparison.
 
-Figures land in ``<input-dir>/figures`` as PNG (300 dpi) and PDF.
+Figures land in ``<input-dir>/figures`` as PNG (300 dpi) and PDF: one tracking
+trace per controller, then the command sweeps, the command plane, stability
+against time, gait quality, and last the three push figures -- the envelope,
+survival against magnitude, and what a push cost the robots that took it.
 """
 
 from __future__ import annotations
@@ -297,6 +300,99 @@ def load_trace(directory: Path, controller: Controller) -> Trace:
     achieved=reshape("achieved_vx", "achieved_vy", "achieved_wz"),
     upright=flat["upright"].reshape(num_steps, num_envs),
   )
+
+
+@dataclass
+class Battery:
+  """One push battery: every trial, and the aggregate the run wrote."""
+
+  controller: Controller
+  data: dict[str, np.ndarray]
+  summary: dict
+
+  @property
+  def envelope(self) -> list[dict]:
+    """Critical magnitude per direction, as the run computed it.
+
+    Read rather than recomputed, for the reason nothing else here is
+    recomputed: the run that measured a battery is the thing that decides what
+    its numbers mean, and a plotter that re-derived them could disagree with
+    the summary sitting next to the figure."""
+    return self.summary["push"]["envelope"]
+
+  @property
+  def command(self) -> tuple[float, float, float]:
+    push = self.summary["run"]["push"]
+    return (push["vx"], push["vy"], push["wz"])
+
+  @property
+  def magnitudes(self) -> np.ndarray:
+    return np.unique(self.data["push_delta_v"])
+
+  @property
+  def trials_per_cell(self) -> int:
+    return int(self.summary["push"].get("trials_per_cell", 0))
+
+  @property
+  def mass(self) -> float:
+    return float(self.summary["run"]["robot_mass_kg"])
+
+  def survival(self, selected: np.ndarray | None = None) -> np.ndarray:
+    """Fraction withstanding each magnitude, over the selected trials.
+
+    Trials whose robot was already down when the push landed carry NaN and drop
+    out here: they measure the command, not the push.
+    """
+    withstood = self.data["withstood"]
+    magnitude = self.data["push_delta_v"]
+    keep = np.isfinite(withstood)
+    if selected is not None:
+      keep = keep & selected
+    return np.array(
+      [
+        (
+          withstood[keep & (magnitude == value)].mean()
+          if (keep & (magnitude == value)).any()
+          else np.nan
+        )
+        for value in self.magnitudes
+      ]
+    )
+
+  def mean_of(self, field: str, selected: np.ndarray | None = None) -> np.ndarray:
+    """Mean of one metric per magnitude, over the trials that stayed up.
+
+    Averaging a fallen robot's recovery time into the survivors' would describe
+    neither population, exactly as it would in a sweep.
+    """
+    values = self.data[field]
+    magnitude = self.data["push_delta_v"]
+    keep = (self.data["withstood"] > 0.5) & np.isfinite(values)
+    if selected is not None:
+      keep = keep & selected
+    return np.array(
+      [
+        (
+          values[keep & (magnitude == value)].mean()
+          if (keep & (magnitude == value)).any()
+          else np.nan
+        )
+        for value in self.magnitudes
+      ]
+    )
+
+  def heading(self, *degrees: float) -> np.ndarray:
+    """Trials pushed in any of these directions."""
+    selected = np.zeros(self.data["push_heading_deg"].size, dtype=bool)
+    for degree in degrees:
+      selected |= np.isclose(self.data["push_heading_deg"], degree)
+    return selected
+
+
+def load_battery(directory: Path, controller: Controller) -> Battery:
+  with (directory / "summary.json").open() as handle:
+    summary = json.load(handle)
+  return Battery(controller, read_csv(directory / "per_env.csv"), summary)
 
 
 def moving_average(values: np.ndarray, window: int) -> np.ndarray:
@@ -1096,6 +1192,352 @@ def figure_gait_quality(
   save(fig, path)
 
 
+# --------------------------------------------------------------------------
+# Figures 7 to 9: push recovery
+# --------------------------------------------------------------------------
+
+BATTERY_KEYS = ("push_walk", "push_stand")
+BATTERY_TITLE = {"push_walk": "Pushed while walking", "push_stand": "Pushed at a stand"}
+
+PUSH_AXIS_LABEL = r"push magnitude (m/s of free-body $\Delta v$)"
+
+PUSH_SECTORS = (
+  ("all directions", None),
+  ("pushed forwards", (0.0,)),
+  ("pushed sideways", (90.0, 270.0)),
+  ("pushed backwards", (180.0,)),
+)
+"""Cuts of the direction axis for the survival curves.
+
+Left and right are pooled: the robot is laterally symmetric and its command is
+straight ahead, so the two are the same experiment twice, and pooling them puts
+twice the trials behind the sideways curve rather than drawing two of it.
+"""
+
+
+def battery_caption(
+  batteries: dict[str, dict[str, Battery]],
+  places: tuple[str, str],
+  lead: str = "",
+) -> str:
+  """What a reader needs to size the numbers on a push figure.
+
+  Broken over three short lines rather than run out as one. These figures are
+  saved with a tight bounding box, so a caption wider than the panels widens
+  the whole image and leaves the panels stranded in the middle of it.
+
+  Args:
+    batteries: The collection, for the numbers that go in the caption.
+    places: Where the walking and standing batteries sit on this figure, so the
+      caption can point at them instead of repeating the panel headings.
+    lead: A first line about this figure in particular.
+  """
+  walking = next(iter(batteries.values()))["push_walk"]
+  standing = next(iter(batteries.values()))["push_stand"]
+  vx, _, _ = walking.command
+  return "\n".join(
+    ([lead] if lead else [])
+    + [
+      f"Evaluation plant, shoved through the torso for "
+      f"{walking.summary['run']['push']['duration']:.2f} s while walking at "
+      f"{vx:.2f} m/s ({places[0]}) and at a stand ({places[1]}).",
+      f"Magnitude is the velocity change the impulse would give a free body of "
+      f"the robot's {walking.mass:.2f} kg: 1.0 m/s is {walking.mass:.1f} N s.",
+      f"Every point averages {standing.trials_per_cell} trials spread over the "
+      f"gait cycle.",
+    ]
+  )
+
+
+def figure_push_envelope(
+  controllers: list[Controller], batteries: dict[str, dict[str, Battery]], path: Path
+) -> None:
+  """How hard a shove each direction takes before the robot goes down.
+
+  One closed curve per controller, drawn as seen from above with the robot
+  facing up the page: a lobe pointing up means it takes a shove from behind
+  better than one from the side. The radius is the magnitude at which half the
+  trials in that direction end on the floor, interpolated from the survival
+  curve rather than rounded to the nearest magnitude tested.
+  """
+  fig, axes = plt.subplots(
+    1, 2, figsize=(11.5, 5.9), subplot_kw={"projection": "polar"}
+  )
+  ceiling = 0.0
+  for key in BATTERY_KEYS:
+    for controller in controllers:
+      ceiling = max(ceiling, float(batteries[controller.name][key].magnitudes.max()))
+
+  for ax, key in zip(axes, BATTERY_KEYS, strict=True):
+    ax.set_theta_zero_location("N")
+    ax.set_theta_direction(1)
+    ax.set_facecolor(SURFACE)
+    ax.grid(color=GRID, linewidth=0.6)
+    ax.set_ylim(0.0, ceiling)
+    ax.set_rlabel_position(22.5)
+    ax.tick_params(colors=MUTED, labelsize=7.5)
+    ax.set_xticks(np.deg2rad([0, 90, 180, 270]))
+    ax.set_xticklabels(["forwards", "left", "backwards", "right"], fontsize=8.5)
+
+    for controller in controllers:
+      envelope = batteries[controller.name][key].envelope
+      angles = np.deg2rad([entry["heading_deg"] for entry in envelope])
+      # A direction whose survival never crossed one half is drawn at the edge
+      # of the battery and marked open: its envelope is somewhere beyond the
+      # magnitudes that were tested, and drawing it *at* the largest of them
+      # would report the battery's range as the controller's strength.
+      crossed = np.array([entry["crossed"] for entry in envelope])
+      radius = np.array(
+        [
+          entry["critical_delta_v"] if entry["crossed"] else ceiling
+          for entry in envelope
+        ]
+      )
+      closed = np.append(angles, angles[:1])
+      values = np.append(radius, radius[:1])
+      ax.plot(
+        closed,
+        values,
+        color=controller.colour,
+        linewidth=2.0,
+        zorder=3,
+        label=controller.label,
+      )
+      ax.fill(closed, values, color=controller.colour, alpha=0.13, zorder=2)
+      ax.plot(
+        angles[crossed],
+        radius[crossed],
+        linestyle="none",
+        marker="o",
+        markersize=4.0,
+        color=controller.colour,
+        markeredgecolor=SURFACE,
+        markeredgewidth=1.0,
+        zorder=4,
+      )
+      ax.plot(
+        angles[~crossed],
+        radius[~crossed],
+        linestyle="none",
+        marker="^",
+        markersize=6.0,
+        markerfacecolor=SURFACE,
+        markeredgecolor=controller.colour,
+        markeredgewidth=1.3,
+        zorder=4,
+      )
+    ax.set_title(BATTERY_TITLE[key], loc="left", pad=18, color=INK)
+
+  handles = [
+    Line2D([], [], color=controller.colour, linewidth=2.4, label=controller.label)
+    for controller in controllers
+  ]
+  handles.append(
+    Line2D(
+      [],
+      [],
+      color=INK_2,
+      linestyle="none",
+      marker="^",
+      markersize=6,
+      markerfacecolor=SURFACE,
+      label="withstood every magnitude tested",
+    )
+  )
+  fig.legend(
+    handles=handles,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 0.955),
+    ncol=min(len(handles), 4),
+    columnspacing=2.0,
+  )
+  fig.suptitle(
+    "Push envelope: the shove each direction takes before half the trials fall",
+    x=0.008,
+    y=0.995,
+    ha="left",
+    fontsize=12,
+    fontweight="bold",
+    color=INK,
+  )
+  fig.text(
+    0.008,
+    0.010,
+    battery_caption(
+      batteries,
+      ("left", "right"),
+      "Radius is the push magnitude at 50% survival, in m/s of free-body "
+      "velocity change; the robot faces up the page.",
+    ),
+    fontsize=7.5,
+    color=MUTED,
+    linespacing=1.5,
+  )
+  fig.tight_layout(rect=(0, 0.135, 1, 0.90))
+  save(fig, path)
+
+
+def figure_push_survival(
+  controllers: list[Controller], batteries: dict[str, dict[str, Battery]], path: Path
+) -> None:
+  """Survival against push magnitude, by direction and by what it was doing."""
+  fig, axes = plt.subplots(
+    len(BATTERY_KEYS), len(PUSH_SECTORS), figsize=(13, 6.4), squeeze=False
+  )
+  for row, key in enumerate(BATTERY_KEYS):
+    for column, (label, degrees) in enumerate(PUSH_SECTORS):
+      ax = axes[row, column]
+      despine(ax)
+      for controller in controllers:
+        battery = batteries[controller.name][key]
+        selected = None if degrees is None else battery.heading(*degrees)
+        ax.plot(
+          battery.magnitudes,
+          100 * battery.survival(selected),
+          color=controller.colour,
+          linewidth=2.0,
+          marker="o",
+          markersize=3.2,
+          markeredgecolor=SURFACE,
+          markeredgewidth=0.8,
+          label=controller.label,
+        )
+      # The line the envelope is read off, so the two figures agree by eye.
+      ax.axhline(50.0, color=MUTED, linewidth=1.0, linestyle=(0, (4, 3)), zorder=1)
+      ax.set_ylim(-3, 103)
+      ax.set_title(label, loc="left", pad=6, fontsize=9)
+      if row == len(BATTERY_KEYS) - 1:
+        ax.set_xlabel(PUSH_AXIS_LABEL)
+      if column == 0:
+        ax.set_ylabel("withstood (%)")
+    axes[row, 0].annotate(
+      BATTERY_TITLE[key],
+      xy=(0, 1.0),
+      xycoords="axes fraction",
+      xytext=(0, 28),
+      textcoords="offset points",
+      fontsize=10.5,
+      fontweight="bold",
+      color=INK,
+    )
+
+  handles = [
+    Line2D([], [], color=controller.colour, linewidth=2.4, label=controller.label)
+    for controller in controllers
+  ]
+  fig.legend(
+    handles=handles,
+    loc="upper right",
+    bbox_to_anchor=(0.995, 0.985),
+    ncol=min(len(handles), 4),
+    columnspacing=2.0,
+  )
+  fig.suptitle(
+    "Surviving a push, by how hard and from where",
+    x=0.008,
+    y=0.995,
+    ha="left",
+    fontsize=12,
+    fontweight="bold",
+    color=INK,
+  )
+  fig.text(
+    0.008,
+    0.010,
+    battery_caption(batteries, ("top", "bottom")),
+    fontsize=7.5,
+    color=MUTED,
+    linespacing=1.5,
+  )
+  fig.tight_layout(rect=(0, 0.085, 1, 0.925))
+  save(fig, path)
+
+
+def figure_push_recovery(
+  controllers: list[Controller], batteries: dict[str, dict[str, Battery]], path: Path
+) -> None:
+  """What the push cost the robots that stayed up.
+
+  Survivors only, and that shapes how the panels read: a controller whose curve
+  stops early did not get quieter at the big magnitudes, it ran out of robots
+  that were still upright to average.
+  """
+  panels = (
+    ("recovery_time", "back on command after (s)"),
+    ("peak_speed_error", "worst speed excursion (m/s)"),
+    ("min_upright_after", "worst uprightness (cos of lean)"),
+  )
+  fig, axes = plt.subplots(
+    len(BATTERY_KEYS), len(panels), figsize=(11.5, 6.4), squeeze=False
+  )
+  for row, key in enumerate(BATTERY_KEYS):
+    for column, (field, label) in enumerate(panels):
+      ax = axes[row, column]
+      despine(ax)
+      for controller in controllers:
+        battery = batteries[controller.name][key]
+        ax.plot(
+          battery.magnitudes,
+          battery.mean_of(field),
+          color=controller.colour,
+          linewidth=2.0,
+          marker="o",
+          markersize=3.2,
+          markeredgecolor=SURFACE,
+          markeredgewidth=0.8,
+        )
+      ax.set_title(label, loc="left", pad=6, fontsize=9)
+      if row == len(BATTERY_KEYS) - 1:
+        ax.set_xlabel(PUSH_AXIS_LABEL)
+    axes[row, 0].annotate(
+      BATTERY_TITLE[key],
+      xy=(0, 1.0),
+      xycoords="axes fraction",
+      xytext=(0, 28),
+      textcoords="offset points",
+      fontsize=10.5,
+      fontweight="bold",
+      color=INK,
+    )
+
+  handles = [
+    Line2D([], [], color=controller.colour, linewidth=2.4, label=controller.label)
+    for controller in controllers
+  ]
+  fig.legend(
+    handles=handles,
+    loc="upper right",
+    bbox_to_anchor=(0.995, 0.985),
+    ncol=min(len(handles), 4),
+    columnspacing=2.0,
+  )
+  fig.suptitle(
+    "Cost of a push to the robots that stayed up",
+    x=0.008,
+    y=0.995,
+    ha="left",
+    fontsize=12,
+    fontweight="bold",
+    color=INK,
+  )
+  fig.text(
+    0.008,
+    0.010,
+    battery_caption(
+      batteries,
+      ("top", "bottom"),
+      "Over the trials that withstood the push, all directions pooled. Recovery "
+      "is the planar velocity error back inside 0.1 m/s for half a second, off "
+      "a gait-cycle moving average.",
+    ),
+    fontsize=7.5,
+    color=MUTED,
+    linespacing=1.5,
+  )
+  fig.tight_layout(rect=(0, 0.10, 1, 0.925))
+  save(fig, path)
+
+
 def save(fig, path: Path, tight: bool = True) -> None:
   path.parent.mkdir(parents=True, exist_ok=True)
   kwargs = {"bbox_inches": "tight"} if tight else {}
@@ -1144,7 +1586,10 @@ def check_inputs(input_dir: Path, controllers: list[Controller]) -> None:
       f"{name}/{wanted}"
       for name, wanted in (
         (f"profile_{controller.name}", "trace.csv"),
-        *((f"{key}_{controller.name}", "per_env.csv") for key in SWEEP_KEYS),
+        *(
+          (f"{key}_{controller.name}", "per_env.csv")
+          for key in (*SWEEP_KEYS, *BATTERY_KEYS)
+        ),
       )
       if not (input_dir / name / wanted).is_file()
     ]
@@ -1163,8 +1608,11 @@ def check_inputs(input_dir: Path, controllers: list[Controller]) -> None:
     f"{names} {verb} to be collected too. If collect_comparison.sh stopped "
     f"early, "
     f"check that each engine=rl controller's checkpoint= is the path to a .pt "
-    f"file rather than a wandb run id. To plot what is here instead, name the "
-    f"complete controllers with --controllers."
+    f"file rather than a wandb run id. A collection made before the push "
+    f"batteries existed has no push_walk_* or push_stand_* runs; re-collect it, "
+    f"or run those two on their own with scripts/eval/eval_push_recovery.py. To "
+    f"plot what is here instead, name the complete controllers with "
+    f"--controllers."
   )
   raise SystemExit("\n".join(lines))
 
@@ -1177,10 +1625,15 @@ def main() -> None:
   check_inputs(args.input_dir, controllers)
 
   sweeps: dict[str, dict[str, Sweep]] = {}
+  batteries: dict[str, dict[str, Battery]] = {}
   for controller in controllers:
     sweeps[controller.name] = {
       key: load_sweep(args.input_dir / f"{key}_{controller.name}", controller)
       for key in SWEEP_KEYS
+    }
+    batteries[controller.name] = {
+      key: load_battery(args.input_dir / f"{key}_{controller.name}", controller)
+      for key in BATTERY_KEYS
     }
     trace = load_trace(args.input_dir / f"profile_{controller.name}", controller)
     figure_profile(trace, out / f"fig1_profile_{controller.name}")
@@ -1213,6 +1666,9 @@ def main() -> None:
   )
   figure_stability(controllers, sweeps, out / "fig5_stability_time")
   figure_gait_quality(controllers, sweeps, out / "fig6_gait_quality")
+  figure_push_envelope(controllers, batteries, out / "fig7_push_envelope")
+  figure_push_survival(controllers, batteries, out / "fig8_push_survival")
+  figure_push_recovery(controllers, batteries, out / "fig9_push_recovery")
 
 
 if __name__ == "__main__":

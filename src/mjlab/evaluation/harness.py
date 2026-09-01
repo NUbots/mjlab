@@ -62,6 +62,7 @@ from mjlab.controllers.quintic_walk.walk_generator import (
 )
 from mjlab.entity import Entity
 from mjlab.evaluation.metrics import EvalState, VelocityTrace, WalkMetrics
+from mjlab.evaluation.push import PUSH_BODY, PushDriver, PushMetrics, PushPlan
 from mjlab.scene import Scene
 from mjlab.sim import Simulation
 from mjlab.utils.lab_api.math import matrix_from_quat
@@ -181,6 +182,17 @@ def _body_ids(entity: Entity, names: tuple[str, ...], device) -> torch.Tensor:
   return torch.tensor([lookup[name] for name in names], device=device)
 
 
+def _robot_mass(entity: Entity, mj_model: mujoco.MjModel) -> float:
+  """Total mass of one robot, in kg.
+
+  Summed over the entity's own bodies rather than over the compiled model's,
+  which also carries the terrain. It is what turns a push magnitude expressed
+  as a velocity change into the force to apply, so a battery run on two plants
+  that do not weigh the same still compares like with like.
+  """
+  return float(mj_model.body_mass[entity.indexing.body_ids.cpu().numpy()].sum())
+
+
 class WalkEvalHarness(Generic[ControllerT]):
   """Plant, stance and measurement shared by the scripted-controller rigs.
 
@@ -234,7 +246,8 @@ class WalkEvalHarness(Generic[ControllerT]):
     self._posture_targets = torch.tensor(
       [[POSTURE[name] for name in posture_names]], device=device, dtype=torch.float32
     ).expand(num_envs, len(posture_names))
-    self._torso_id = int(_body_ids(self.robot, ("torso",), device)[0])
+    self.torso_body_id = int(_body_ids(self.robot, (PUSH_BODY,), device)[0])
+    """Index of the body a push is applied to; see :data:`PUSH_BODY`."""
     self.foot_body_ids = _body_ids(self.robot, FOOT_BODY_NAMES, device)
 
   # What a subclass provides.
@@ -285,8 +298,8 @@ class WalkEvalHarness(Generic[ControllerT]):
     """Planted foot phase measured from foot geometry. Shape ``(N,)``."""
     data = self.robot.data
     left, right = sole_poses_from_body_states(
-      data.body_link_pos_w[:, self._torso_id],
-      data.body_link_quat_w[:, self._torso_id],
+      data.body_link_pos_w[:, self.torso_body_id],
+      data.body_link_quat_w[:, self.torso_body_id],
       data.body_link_pos_w[:, self.foot_body_ids[0]],
       data.body_link_quat_w[:, self.foot_body_ids[0]],
       data.body_link_pos_w[:, self.foot_body_ids[1]],
@@ -366,6 +379,45 @@ class WalkEvalHarness(Generic[ControllerT]):
       if on_step is not None:
         on_step(step)
     return trace
+
+  def robot_mass(self) -> float:
+    """Total mass of one robot, in kg. See :func:`_robot_mass`."""
+    return _robot_mass(self.robot, self.sim.mj_model)
+
+  def run_push(
+    self,
+    plan: PushPlan,
+    on_step: Callable[[int], None] | None = None,
+  ) -> PushMetrics:
+    """Walk under a fixed command, take one shove per environment, recover.
+
+    Args:
+      plan: One pass of a push battery; see
+        :mod:`mjlab.evaluation.push`.
+      on_step: Called with the step index after each control step.
+
+    Returns:
+      The recorder, ready to be reduced.
+    """
+    _check_plan(plan, self.num_envs, self.control_dt)
+    self.reset()
+    driver = PushDriver(plan, self.robot, self.torso_body_id)
+    metrics = PushMetrics(plan)
+    metrics.start(self.state())
+    try:
+      for step in range(plan.num_steps):
+        # Before the step, so the wrench is applied over the physics this step
+        # integrates rather than over the next one.
+        driver.apply(step)
+        self.step(plan.command)
+        metrics.record(self.state())
+        if on_step is not None:
+          on_step(step)
+    finally:
+      # ``xfrc_applied`` persists until it is overwritten, so a run that ended
+      # mid-push would keep shoving whatever ran next on this harness.
+      driver.clear()
+    return metrics
 
   @property
   def engine_state(self) -> torch.Tensor:
@@ -710,7 +762,13 @@ class RlEvalHarness:
     self.wrapped, self.policy = load_policy(self.env, checkpoint, device, task_id)
     self.robot: Entity = self.env.scene["robot"]
     self.control_dt = float(self.env.step_dt)
+    self.torso_body_id = int(_body_ids(self.robot, (PUSH_BODY,), device)[0])
+    """Index of the body a push is applied to; see :data:`PUSH_BODY`."""
     self.foot_body_ids = _body_ids(self.robot, FOOT_BODY_NAMES, device)
+
+  def robot_mass(self) -> float:
+    """Total mass of one robot, in kg. See :func:`_robot_mass`."""
+    return _robot_mass(self.robot, self.env.sim.mj_model)
 
   @property
   def sim(self) -> Simulation:
@@ -777,6 +835,44 @@ class RlEvalHarness:
           on_step(step)
     return trace
 
+  def run_push(
+    self,
+    plan: PushPlan,
+    on_step: Callable[[int], None] | None = None,
+  ) -> PushMetrics:
+    """Walk under a fixed command, take one shove per environment, recover.
+
+    The force is written straight onto the robot rather than through an event
+    term: the task's own ``push_robot`` event is a training device that
+    teleports a random velocity onto the base at random times, which is neither
+    the disturbance being measured nor under this harness's control. The play
+    config drops it, and :class:`~mjlab.evaluation.push.PushDriver` is the only
+    thing writing ``xfrc_applied`` in an evaluation run.
+    """
+    _check_plan(plan, self.num_envs, self.control_dt)
+    # The reset is inside the inference block, not before it. A battery runs
+    # this method once per magnitude, and the environment's delay buffers are
+    # written in place on reset: buffers first touched under inference mode and
+    # then reset outside it raise. Everything a pass does happens in one mode.
+    with torch.inference_mode():
+      self.wrapped.reset()
+      prescribe_velocity_commands(self.env, plan.command)
+      obs = self.wrapped.get_observations()
+
+      driver = PushDriver(plan, self.robot, self.torso_body_id)
+      metrics = PushMetrics(plan)
+      metrics.start(self.state())
+      try:
+        for step in range(plan.num_steps):
+          driver.apply(step)
+          obs, _, _, _ = self.wrapped.step(self.policy(obs))
+          metrics.record(self.state())
+          if on_step is not None:
+            on_step(step)
+      finally:
+        driver.clear()
+    return metrics
+
   def close(self) -> None:
     self.env.close()
 
@@ -785,6 +881,24 @@ def _check_schedule(schedule: torch.Tensor, num_envs: int) -> None:
   if schedule.ndim != 3 or schedule.shape[1:] != (num_envs, 3):
     raise ValueError(
       f"schedule must have shape (T, {num_envs}, 3), got {tuple(schedule.shape)}"
+    )
+
+
+def _check_plan(plan: PushPlan, num_envs: int, control_dt: float) -> None:
+  """A plan is laid out against a control rate, so both have to match.
+
+  The onsets are step indices, not seconds: a plan built for the walk engine's
+  100 Hz and run at the policy's 50 Hz would push at half the intended times
+  and measure a window half as long, silently.
+  """
+  if plan.num_envs != num_envs:
+    raise ValueError(
+      f"plan is for {plan.num_envs} environments, harness has {num_envs}"
+    )
+  if abs(plan.dt - control_dt) > 1e-9:
+    raise ValueError(
+      f"plan was built for a {1 / plan.dt:.0f} Hz controller, this one runs at "
+      f"{1 / control_dt:.0f} Hz"
     )
 
 

@@ -5,6 +5,8 @@ about forty seconds on a cold CPU cache. The metrics themselves are covered
 without a simulator in ``test_walk_metrics.py``.
 """
 
+from dataclasses import replace
+
 import pytest
 import torch
 from conftest import get_test_device
@@ -19,6 +21,7 @@ from mjlab.evaluation.harness import (
   eval_scene_cfg,
 )
 from mjlab.evaluation.metrics import summarise
+from mjlab.evaluation.push import PushCfg, push_plan, run_push_battery
 
 
 def test_command_grid_tiles_every_point_across_the_batch():
@@ -155,3 +158,79 @@ def test_distilled_harness_starts_in_the_pose_the_policy_asks_for():
   standing = harness.robot.data.joint_pos[0, legs]
 
   assert torch.allclose(standing, harness.controller.home_targets[0], atol=1e-5)
+
+
+@pytest.mark.slow
+def test_a_push_knocks_the_robot_off_its_command_and_a_big_one_topples_it():
+  """The force reaches the plant, and harder is worse.
+
+  Two magnitudes at one heading and one gait phase, both shoving the robot
+  sideways while it walks forward. The small one it should walk out of; the
+  large one is four times the momentum and should put it on the floor. Read as
+  a pair rather than as two thresholds: what is being checked is that the
+  battery is coupled to the simulation at all and in the right direction, not
+  where this controller's envelope happens to sit.
+  """
+  device = get_test_device()
+  cfg = PushCfg(vx=0.2, directions=1, phases=1, replicas=1, settle=4.0, recovery=2.5)
+  harness = QuinticEvalHarness(plant="eval", num_envs=1, device=device)
+
+  gentle = harness.run_push(
+    push_plan(
+      cfg, delta_v=0.1, mass=harness.robot_mass(), dt=harness.control_dt, device=device
+    )
+  ).result()
+  brutal = harness.run_push(
+    push_plan(
+      cfg, delta_v=1.6, mass=harness.robot_mass(), dt=harness.control_dt, device=device
+    )
+  ).result()
+
+  assert gentle.withstood.tolist() == [1.0]
+  assert brutal.withstood.tolist() == [0.0]
+  assert float(brutal.peak_speed_error[0]) > float(gentle.peak_speed_error[0])
+  assert float(brutal.time_to_fall[0]) > 0.0
+  # And the walking metrics still work, measured over the window the push is in.
+  assert float(gentle.achieved_vx[0]) > 0.0
+
+
+@pytest.mark.slow
+def test_a_battery_runs_every_magnitude_through_one_harness():
+  """Passes are independent runs of the same batch, concatenated."""
+  device = get_test_device()
+  cfg = PushCfg(
+    delta_v=(0.1, 1.6),
+    directions=2,
+    phases=1,
+    replicas=1,
+    settle=3.0,
+    recovery=2.0,
+  )
+  harness = QuinticEvalHarness(
+    plant="eval", num_envs=cfg.trials_per_pass, device=device
+  )
+
+  result = run_push_battery(harness, cfg)
+
+  assert result.withstood.numel() == cfg.num_trials
+  assert sorted(set(result.push_delta_v.tolist())) == pytest.approx([0.1, 1.6])
+  assert sorted(set(result.push_heading_deg.tolist())) == pytest.approx([0.0, 180.0])
+  # A magnitude is one pass, so the trials come out in magnitude order.
+  assert result.push_delta_v[: cfg.trials_per_pass].tolist() == pytest.approx([0.1] * 2)
+
+
+@pytest.mark.slow
+def test_a_battery_leaves_no_force_behind_it():
+  """xfrc_applied persists, so a pass that ended mid-push would poison the next
+  run on the same harness."""
+  device = get_test_device()
+  cfg = PushCfg(directions=1, phases=1, replicas=1, settle=1.0, recovery=0.1)
+  harness = QuinticEvalHarness(plant="eval", num_envs=1, device=device)
+  plan = push_plan(
+    cfg, delta_v=1.0, mass=harness.robot_mass(), dt=harness.control_dt, device=device
+  )
+  # A run whose last step is inside the push window: the clear is the only
+  # thing that can zero the wrench.
+  harness.run_push(replace(plan, num_steps=int(plan.push_step[0]) + 1))
+
+  assert float(harness.robot.data.body_external_force.abs().max()) == 0.0

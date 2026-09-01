@@ -16,10 +16,11 @@
 #   colour=      #rrggbb for this controller's series   (default: the plotter's
 #                palette, assigned in the order the controllers are given)
 #
-# Seven runs per controller: a profile run (a moving command, for the tracking
-# time series), three single-axis command sweeps, and three two-axis command
-# grids (which carry both the combined-axis tracking and, through fall_time,
-# the stability envelope).
+# Nine runs per controller: a profile run (a moving command, for the tracking
+# time series), three single-axis command sweeps, three two-axis command grids
+# (which carry both the combined-axis tracking and, through fall_time, the
+# stability envelope), and two push batteries -- one shoving the robot while it
+# walks, one while it stands.
 #
 # Every environment in a sweep or a grid is a distinct command: the plant is
 # deterministic and the domain randomisation is off, so replicas of one command
@@ -27,6 +28,16 @@
 # noisy observations -- so the single-axis sweeps carry four replicas per point
 # for every controller, which gives a policy a band and the engine a
 # (degenerate) line drawn by the same code.
+#
+# A push battery is sized for repeatability rather than for coverage. Each
+# (direction, magnitude) cell is an average over PUSH_PHASES gait phases and
+# PUSH_REPLICAS robots -- 48 trials by default -- because whether a marginal
+# push topples the robot depends on where in the stride it lands, and because
+# two identical robots in one batch diverge within a few steps. Collected twice
+# at these settings, the walk engine's battery reported 30.0% and 30.4%
+# withstood overall, and its envelope moved by at most 0.028 m/s in any
+# direction, under a third of a magnitude step. Halving PUSH_PHASES and
+# PUSH_REPLICAS halves the collection time and doubles those figures.
 #
 # Examples::
 #
@@ -50,6 +61,11 @@
 # environment, so a quick pass over a coarser grid needs no edit here:
 #
 #   DURATION=20 VX_STEP=0.1 VX_GRID_STEP=0.25 scripts/eval/collect_comparison.sh ...
+#
+# The push batteries read PUSH_* from the environment in the same way, and
+# PUSH=0 skips them:
+#
+#   PUSH_PHASES=4 PUSH_REPLICAS=1 scripts/eval/collect_comparison.sh ...
 set -euo pipefail
 
 USAGE="usage: collect_comparison.sh [--out DIR] <controller> [<controller>...]
@@ -279,6 +295,34 @@ WZ_GRID_MIN=${WZ_GRID_MIN:--3.0}
 WZ_GRID_MAX=${WZ_GRID_MAX:-3.0}
 WZ_GRID_STEP=${WZ_GRID_STEP:-0.2}
 
+# --------------------------------------------------------------------------
+# Push batteries
+# --------------------------------------------------------------------------
+
+# Two batteries per controller: one shoving the robot while it walks forward at
+# PUSH_VX, one at a zero command. They are separate runs rather than a third
+# axis of one battery so that each keeps the full sample size, and they are
+# both collected because the two are different problems -- and because the
+# controllers do different things at rest. The policy stands; the walk engine
+# marches in place, so its "standing" battery is a robot lifting a foot every
+# 0.32 s with nowhere to go.
+PUSH=${PUSH:-1}
+PUSH_VX=${PUSH_VX:-0.2}
+
+# Magnitude, as the velocity change the impulse would give a free body of the
+# robot's mass. Fine where the envelope is and coarse above it; see PushCfg.
+PUSH_DV=${PUSH_DV:-"(0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.2,1.4,1.6)"}
+
+# The batch is directions x phases x replicas; the magnitude axis is run one
+# pass at a time, so refining it costs wall time and no memory.
+PUSH_DIRECTIONS=${PUSH_DIRECTIONS:-12}
+PUSH_PHASES=${PUSH_PHASES:-12}
+PUSH_REPLICAS=${PUSH_REPLICAS:-4}
+
+PUSH_DURATION=${PUSH_DURATION:-0.2}
+PUSH_SETTLE=${PUSH_SETTLE:-8.0}
+PUSH_RECOVERY=${PUSH_RECOVERY:-4.0}
+
 
 # Generate comma-separated lists from the above ranges and step sizes
 make_axis() {
@@ -370,6 +414,44 @@ run_controller() {
     --num-envs ${N_YW} --duration ${DURATION} --warmup ${WARMUP} \
     --sweep-vy "${VY_GRID}" --sweep-wz "${WZ_GRID}" \
     --output-dir "${OUT}" --tag "grid_vy_wz_${name}"
+
+  ((PUSH)) || return 0
+
+  # Walking first: it is the battery the push figures lead with, so an
+  # interrupted collection still has the one that matters.
+  echo "=== ${name} (${engine}): push recovery, walking ==="
+  run_push_battery "${index}" "${PUSH_VX}" "push_walk_${name}"
+
+  echo "=== ${name} (${engine}): push recovery, standing ==="
+  run_push_battery "${index}" 0.0 "push_stand_${name}"
+}
+
+# The push script takes --engine, as eval_velocity_profile.py does, so unlike
+# the sweeps it is one script for all three controllers.
+run_push_battery() {
+  local index=$1
+  local vx=$2
+  local tag=$3
+  local -a extra=()
+
+  if [[ ${ENGINES[index]} == rl ]]; then
+    extra+=(--checkpoint "${CHECKPOINTS[index]}")
+    if [[ -n ${TASKS[index]} ]]; then
+      extra+=(--task-id "${TASKS[index]}")
+    fi
+  fi
+
+  uv run python scripts/eval/eval_push_recovery.py \
+    --engine "${ENGINES[index]}" "${extra[@]}" \
+    --push.vx "${vx}" --push.vy 0.0 --push.wz 0.0 \
+    --push.delta-v "${PUSH_DV}" \
+    --push.directions "${PUSH_DIRECTIONS}" \
+    --push.phases "${PUSH_PHASES}" \
+    --push.replicas "${PUSH_REPLICAS}" \
+    --push.duration "${PUSH_DURATION}" \
+    --push.settle "${PUSH_SETTLE}" \
+    --push.recovery "${PUSH_RECOVERY}" \
+    --output-dir "${OUT}" --tag "${tag}"
 }
 
 # --------------------------------------------------------------------------
