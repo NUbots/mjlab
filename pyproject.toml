@@ -164,9 +164,13 @@ venvPath = "."
 venv = ".venv"
 ignore = ["./typings", "./src/mjlab/utils/lab_api", "./docs"]
 stubPath = "typings"
+# The plotting scripts import each other by name, the way tests import conftest:
+# they are run as `python scripts/eval/<script>.py`, which puts that directory
+# first on sys.path. Naming it here lets the checkers resolve the same imports.
+extraPaths = ["scripts/eval"]
 
 [tool.ty.environment]
-extra-paths = ["typings"]
+extra-paths = ["typings", "scripts/eval"]
 
 [tool.ty.src]
 include = ["src", "tests"]

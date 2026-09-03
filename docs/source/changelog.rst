@@ -8,6 +8,28 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added ``scripts/eval/plot_mocap_profile.py``, which draws the velocity-profile
+  figures from a motion-capture log of the real robot rather than from a
+  simulated run: the tracking trace, achieved-against-commanded for every held
+  command, and the path over the floor. It reads an ``nbs2json`` export
+  directly, taking the command from ``WalkState``, the motion from the tracked
+  rigid body, and the IMU only to settle the capture frame's handedness.
+  Profile figures only -- a sweep or a grid is hundreds of runs at held
+  commands, which a capture cannot be.
+
+  The capture frame is calibrated from the data and the calibration is printed:
+  the floor plane by a robust PCA, its sign from the fact that a robot can be
+  carried well above the plane it walks on but not below it, the handedness by
+  correlating the captured yaw rate against the robot's gyroscope, and forward
+  from the direction of travel under a forward command. Velocity is a
+  straight-line fit over 1.43 measured strides -- the window at which a
+  least-squares slope stops seeing the sway, which is not the one stride a
+  moving mean would need -- and the stride itself is measured from the sway's
+  own spectrum. Samples where the robot was off its feet are shaded and left
+  out.
+- Added ``scripts/eval/figure_style.py``, the palette, matplotlib defaults and
+  save helpers shared by ``plot_comparison.py`` and ``plot_mocap_profile.py``,
+  so a simulated figure and a captured one can sit on the same page.
 - Added ``scripts/eval/eval_push_recovery.py`` and ``mjlab.evaluation.push``,
   which measure how hard a shove a controller can take. A constant force is
   applied through the torso for 0.2 s and the robot is watched for four seconds

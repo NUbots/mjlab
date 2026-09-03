@@ -12,11 +12,18 @@ you** — everything below has only been smoke-tested at 64 environments.
 - `eval_push_recovery.py` — any of the three, shoved and made to recover.
 - `collect_comparison.sh` and `plot_comparison.py` — a whole comparison, and its
   figures.
+- `plot_mocap_profile.py` — the profile figures again, from a motion-capture log
+  of the *robot* rather than from a simulated run.
+- `figure_style.py` — the palette and the matplotlib defaults both plotters
+  draw with, so a simulated figure and a captured one can sit on one page.
 
-They are all thin entry points over `mjlab.evaluation`, which holds the plant
-construction, the harnesses, the metrics and the output format. No script
-computes a metric of its own: they all hand raw simulator state to
+The `eval_*` scripts are thin entry points over `mjlab.evaluation`, which holds
+the plant construction, the harnesses, the metrics and the output format. No
+script computes a metric of its own: they all hand raw simulator state to
 `WalkMetrics`, so every controller's numbers are produced by the same code.
+`plot_mocap_profile.py` is the exception and has to be — there is no simulator
+under it, so it derives its velocities from a capture itself; what it shares
+with the rest is the fall threshold and the figures' house style.
 
 ## The grid
 
@@ -274,8 +281,9 @@ minutes a controller on an RTX A5500.
 
 The command envelope lives in two places in that script, deliberately. The
 `*_MIN` / `*_MAX` / `*_STEP` variables set the sweep and grid axes, which feed
-figures 03 to 07; the `PROFILE_*` variables set the amplitudes of the profile
-lanes, which are figures 01 and 02 and nothing else. Widening the sweeps does
+figures 2 to 6; the `PROFILE_*` variables set the amplitudes of the profile
+lanes, which are figure 1 and nothing else, and the `PUSH_*` variables set the
+batteries behind figures 7 to 9. Widening the sweeps does
 not widen the profile, and it should not: a sweep is meant to overshoot what a
 controller can do so the stability envelope has an outside, while a profile is
 meant to show a controller tracking a moving command, which it cannot do at a
@@ -460,6 +468,130 @@ The engine it is compared against runs with balance control off, because
 `WalkDataCollector` recorded the generator's own foot poses and never ran
 `FootController` over them — the policy never saw a balance correction and
 cannot produce one.
+
+## The robot, from motion capture
+
+`plot_mocap_profile.py` draws the profile figures from a capture of the real
+robot instead of a simulated run, so the hardware can be laid next to the
+simulation and read the same way.
+
+```sh
+uv run python scripts/eval/plot_mocap_profile.py \
+  --log logs/eval/quintic-profilewalk-mocap.json
+```
+
+Profile figures only. A sweep or a grid is hundreds of runs at held commands,
+which is a simulator's job; a capture is one robot doing one schedule once, and
+that is exactly what a profile is. Three figures come out, plus a
+`profile_<name>.json` carrying the same numbers:
+
+| figure | what it shows |
+| --- | --- |
+| `fig1_mocap_profile_*` | command against response, three panels, the whole capture on one time axis |
+| `fig2_mocap_plateaus_*` | achieved against commanded, one point per held command, every plateau in every panel |
+| `fig3_mocap_ground_track_*` | the path over the floor, seen from above |
+
+### The input
+
+JSON Lines — one JSON object per line, as `nbs2json` writes. Three message
+types are read and everything else is ignored:
+
+| message | what is taken from it |
+| --- | --- |
+| `message.behaviour.state.WalkState` | `velocityTarget`, the command in force |
+| `message.input.MotionCapture` | `rigidBodies[0]`, the tracked torso, and `natnetTimestamp` |
+| `message.input.Sensors` | `gyroscope` and `accelerometer`, to fix the capture frame's handedness |
+
+Two details of the format matter enough to state. The log's own timestamps on a
+`MotionCapture` message record when the batch it arrived in was unpacked, not
+when the cameras took the frame — they come in bursts a fifth of a millisecond
+apart and are useless for differentiating — so the time base is
+`natnetTimestamp`, shifted onto the log's clock by the median offset between
+them. And the walk engine publishes its state before it has a command to
+publish, so the first few `velocityTarget`s are uninitialised stack memory;
+denormals and absurd magnitudes are dropped rather than plotted.
+
+### The frame
+
+A capture volume's coordinate frame has nothing to do with the robot's. Motive
+sets a rigid body's axes from whatever pose it was in when the body was
+created, and the floor is wherever the calibration square was put. Four things
+have to be pinned down before any velocity can be called "forward". Three come
+out of physics and one out of the command, and the run prints all four:
+
+```
+  up: floor normal, sign from 237 samples more than 30 cm clear of the walking
+      plane against 0 that far under it
+  handedness: mirrored, from a -0.93 correlation between the captured yaw rate
+      and the robot's gyroscope
+  forward: direction of travel over 1077 samples of forward-only command
+```
+
+**The floor plane** is a robust PCA of the tracked position. The robot walks on
+a plane, so the smallest principal direction is its normal; on the capture this
+was written against the residual is 6 mm against 1.3 m of in-plane travel.
+
+**Up** is the sign of that normal, and it follows from the floor being a floor:
+somebody picking the robot up carries the torso far above the height it walks
+at and holds it there, and nothing holds it the same distance below. It is the
+weakest of the four and deliberately the one that matters least — flip it and
+the handedness flips with it, the two cancel, and every velocity, yaw rate and
+ground track comes out identical. The only thing left depending on the sign is
+which samples count as *off its feet*.
+
+**The handedness** is read off the robot's own gyroscope, because capture
+systems differ on whether their frame is right- or left-handed and a mirrored
+one leaves forward alone while quietly reversing left, right and the sense of
+every rotation. The yaw rate measured about the floor normal is correlated
+against the yaw rate the IMU measures about the torso's gravity axis; disagree
+in sign and the frame is mirrored. The capture this was written against *is*
+mirrored, at a correlation of −0.93. Nothing in that test involves the command,
+so it cannot be talked into agreeing with one.
+
+**Forward** is the one thing taken from the command: the direction the robot
+travelled during the forward-commanded plateaus. It only has to be right to
+within a quadrant — a walk engine told to go forward does not go sideways — but
+it does mean the *heading* of the measured velocity relative to the command is
+calibrated rather than measured. Everything else is measured: every speed,
+every yaw rate, the whole time response, and the off-axis coupling, which on
+this capture is most of what there is to see.
+
+`--up`, `--forward` and `--chirality` pin any of them by hand. Pin them if you
+know your capture.
+
+### Velocity from a position track
+
+Motion capture measures position, so every velocity here is a straight line
+fitted to the track over a window, and the window is the whole question. Two
+things set it:
+
+- **A stride swamps the command.** The torso sways sideways and counter-rotates
+  once per stride, and on the hardware that sway is larger than any velocity
+  the profile asks for: at a commanded 0.20 m/s sideways the raw lateral
+  velocity swings by ±0.4. So the stride is measured — from the peak of the
+  lateral sway's own spectrum, averaged Welch-style over the commanded blocks —
+  rather than assumed from the engine's tuning, which is one of the things a
+  capture is for checking. This one came out at 0.656 s against the engine's
+  nominal 0.64.
+- **One stride is the wrong window.** A moving *mean* over exactly one period
+  of a sinusoid cancels it; a moving least-squares *slope* does not, because it
+  weights each sample by its distance from the middle of the window. The
+  slope's response vanishes where `tan(x) = x` with `x = π W / T`, whose first
+  non-zero root puts the window at 1.43 periods. It shows: the residual sway in
+  the lateral trace is 0.29 m/s at half a stride, 0.18 at one and 0.11 at 1.43.
+
+`--smooth` overrides the window — set it to the simulated figure's 0.6 s to put
+the two side by side. The plateau means the figures report move by under
+0.02 m/s across the whole range, so nothing quoted turns on the choice.
+
+### What is not walking
+
+A three-minute capture of a walk engine that falls over backwards contains
+several seconds of a robot on its side and in somebody's hands. Samples where
+the torso is more than 8 cm above the walking plane, tipped past the same 60°
+the simulated metrics call a fall, or unsolved by the capture system are shaded
+on the figures and left out of every average, along with half a second either
+side. The fall itself is marked where it happened.
 
 ## Output
 

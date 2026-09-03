@@ -27,112 +27,33 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
 import tyro
+from figure_style import (
+  AXIS_COLOUR,
+  AXIS_LABEL,
+  AXIS_UNIT,
+  BASELINE,
+  GRID,
+  INK,
+  INK_2,
+  MUTED,
+  PALETTE,
+  RED,
+  SEQUENTIAL,
+  SMOOTH_S,
+  SURFACE,
+  despine,
+  hide,
+  moving_average,
+  save,
+  use_house_style,
+)
+from matplotlib.colors import Normalize
+from matplotlib.lines import Line2D
 
 import mjlab
-
-mpl.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib.colors import LinearSegmentedColormap, Normalize  # noqa: E402
-from matplotlib.lines import Line2D  # noqa: E402
-
-# Palette. Controllers take categorical slots in the order they were collected;
-# where a panel is split by command axis instead, the three axes take slots 1 to
-# 3. Chart chrome is the ink scale, never a series colour.
-BLUE = "#2a78d6"
-ORANGE = "#eb6834"
-AQUA = "#1baf7a"
-PURPLE = "#7b5bd6"
-GOLD = "#b8860b"
-RED = "#d03b3b"
-
-SURFACE = "#fcfcfb"
-INK = "#0b0b0b"
-INK_2 = "#52514e"
-MUTED = "#898781"
-GRID = "#e1e0d9"
-BASELINE = "#c3c2b7"
-
-PALETTE = (BLUE, ORANGE, AQUA, PURPLE, GOLD, RED)
-"""Series colours, handed out in collection order.
-
-Red is last on purpose: it marks a fall everywhere else on these figures, so it
-is only spent on a controller once five others have taken a slot.
-"""
-
-AXIS_COLOUR = {"vx": BLUE, "vy": ORANGE, "wz": AQUA}
-AXIS_LABEL = {"vx": "$v_x$", "vy": "$v_y$", "wz": r"$\omega_z$"}
-AXIS_UNIT = {"vx": "m/s", "vy": "m/s", "wz": "rad/s"}
-
-SMOOTH_S = 0.6
-"""Window of the moving average drawn over a raw velocity trace, in seconds.
-
-About two gait cycles at the engine's 0.32 s step period. The raw signal swings
-by more than the command does within a single step -- the torso sways sideways
-and counter-rotates every stride -- so the raw trace shows the gait and the
-smoothed one shows the tracking.
-"""
-
-# Sequential blue, light to dark: near-zero recedes toward the surface.
-SEQUENTIAL = LinearSegmentedColormap.from_list(
-  "mjlab_blue",
-  ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"],
-)
-# Diverging blue <-> red about a neutral gray, for a signed error.
-DIVERGING = LinearSegmentedColormap.from_list(
-  "mjlab_bwr",
-  ["#0d366b", "#3987e5", "#9ec5f4", "#f0efec", "#f0a3a3", "#d03b3b", "#7d1f1f"],
-)
-
-
-def use_house_style() -> None:
-  plt.rcParams.update(
-    {
-      "figure.facecolor": SURFACE,
-      "axes.facecolor": SURFACE,
-      "savefig.facecolor": SURFACE,
-      "font.family": "sans-serif",
-      "font.sans-serif": ["DejaVu Sans"],
-      "font.size": 9,
-      "axes.titlesize": 10,
-      "axes.titleweight": "semibold",
-      "axes.titlecolor": INK,
-      "axes.labelsize": 9,
-      "axes.labelcolor": INK_2,
-      "axes.edgecolor": BASELINE,
-      "axes.linewidth": 0.8,
-      "axes.grid": True,
-      "axes.axisbelow": True,
-      "grid.color": GRID,
-      "grid.linewidth": 0.6,
-      "xtick.color": MUTED,
-      "ytick.color": MUTED,
-      "xtick.labelcolor": INK_2,
-      "ytick.labelcolor": INK_2,
-      "xtick.labelsize": 8,
-      "ytick.labelsize": 8,
-      "legend.frameon": False,
-      "legend.fontsize": 8,
-      "figure.dpi": 130,
-    }
-  )
-
-
-def despine(ax) -> None:
-  hide(ax.spines["top"])
-  hide(ax.spines["right"])
-
-
-def hide(artist) -> None:
-  """Hide one artist.
-
-  Untyped on purpose: matplotlib's stubs do not resolve ``Spine.set_visible``,
-  and the alternative is a suppression comment on every call.
-  """
-  artist.set_visible(False)
-
 
 # --------------------------------------------------------------------------
 # Loading
@@ -393,15 +314,6 @@ def load_battery(directory: Path, controller: Controller) -> Battery:
   with (directory / "summary.json").open() as handle:
     summary = json.load(handle)
   return Battery(controller, read_csv(directory / "per_env.csv"), summary)
-
-
-def moving_average(values: np.ndarray, window: int) -> np.ndarray:
-  """Centred moving average, edges shortened rather than padded."""
-  if window <= 1:
-    return values
-  kernel = np.ones(window) / window
-  padded = np.pad(values, (window // 2, window - 1 - window // 2), mode="edge")
-  return np.convolve(padded, kernel, mode="valid")
 
 
 # --------------------------------------------------------------------------
@@ -1536,15 +1448,6 @@ def figure_push_recovery(
   )
   fig.tight_layout(rect=(0, 0.10, 1, 0.925))
   save(fig, path)
-
-
-def save(fig, path: Path, tight: bool = True) -> None:
-  path.parent.mkdir(parents=True, exist_ok=True)
-  kwargs = {"bbox_inches": "tight"} if tight else {}
-  fig.savefig(path.with_suffix(".png"), dpi=300, **kwargs)
-  fig.savefig(path.with_suffix(".pdf"), **kwargs)
-  plt.close(fig)
-  print(f"wrote {path.with_suffix('.png')}")
 
 
 @dataclass
