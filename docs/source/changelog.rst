@@ -9,13 +9,13 @@ Added
 ^^^^^
 
 - Added ``scripts/eval/plot_mocap_profile.py``, which draws the velocity-profile
-  figures from a motion-capture log of the real robot rather than from a
-  simulated run: the tracking trace, achieved-against-commanded for every held
-  command, and the path over the floor. It reads an ``nbs2json`` export
-  directly, taking the command from ``WalkState``, the motion from the tracked
-  rigid body, and the IMU only to settle the capture frame's handedness.
-  Profile figures only -- a sweep or a grid is hundreds of runs at held
-  commands, which a capture cannot be.
+  figure from a motion-capture log of the real robot rather than from a
+  simulated run: command against response for all three axes, on one time axis
+  spanning the whole capture. It reads an ``nbs2json`` export directly, taking
+  the command from ``WalkState``, the motion from the tracked rigid body, and
+  the IMU only to settle the capture frame's handedness. The profile figure
+  only -- a sweep or a grid is hundreds of runs at held commands, which a
+  capture cannot be.
 
   The capture frame is calibrated from the data and the calibration is printed:
   the floor plane by a robust PCA, its sign from the fact that a robot can be

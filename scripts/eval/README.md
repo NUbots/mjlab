@@ -12,7 +12,7 @@ you** — everything below has only been smoke-tested at 64 environments.
 - `eval_push_recovery.py` — any of the three, shoved and made to recover.
 - `collect_comparison.sh` and `plot_comparison.py` — a whole comparison, and its
   figures.
-- `plot_mocap_profile.py` — the profile figures again, from a motion-capture log
+- `plot_mocap_profile.py` — the profile figure again, from a motion-capture log
   of the *robot* rather than from a simulated run.
 - `figure_style.py` — the palette and the matplotlib defaults both plotters
   draw with, so a simulated figure and a captured one can sit on one page.
@@ -471,7 +471,7 @@ cannot produce one.
 
 ## The robot, from motion capture
 
-`plot_mocap_profile.py` draws the profile figures from a capture of the real
+`plot_mocap_profile.py` draws the profile figure from a capture of the real
 robot instead of a simulated run, so the hardware can be laid next to the
 simulation and read the same way.
 
@@ -480,16 +480,14 @@ uv run python scripts/eval/plot_mocap_profile.py \
   --log logs/eval/quintic-profilewalk-mocap.json
 ```
 
-Profile figures only. A sweep or a grid is hundreds of runs at held commands,
-which is a simulator's job; a capture is one robot doing one schedule once, and
-that is exactly what a profile is. Three figures come out, plus a
-`profile_<name>.json` carrying the same numbers:
+The profile figure only. A sweep or a grid is hundreds of runs at held
+commands, which is a simulator's job; a capture is one robot doing one schedule
+once, and that is exactly what a profile is. One figure comes out, plus a
+`profile_<name>.json` carrying the capture's numbers and its calibration:
 
 | figure | what it shows |
 | --- | --- |
 | `fig1_mocap_profile_*` | command against response, three panels, the whole capture on one time axis |
-| `fig2_mocap_plateaus_*` | achieved against commanded, one point per held command, every plateau in every panel |
-| `fig3_mocap_ground_track_*` | the path over the floor, seen from above |
 
 ### The input
 
@@ -549,7 +547,7 @@ mirrored, at a correlation of −0.93. Nothing in that test involves the command
 so it cannot be talked into agreeing with one.
 
 **Forward** is the one thing taken from the command: the direction the robot
-travelled during the forward-commanded plateaus. It only has to be right to
+travelled while a forward-only command was in force. It only has to be right to
 within a quadrant — a walk engine told to go forward does not go sideways — but
 it does mean the *heading* of the measured velocity relative to the command is
 calibrated rather than measured. Everything else is measured: every speed,
@@ -569,7 +567,8 @@ things set it:
   once per stride, and on the hardware that sway is larger than any velocity
   the profile asks for: at a commanded 0.20 m/s sideways the raw lateral
   velocity swings by ±0.4. So the stride is measured — from the peak of the
-  lateral sway's own spectrum, averaged Welch-style over the commanded blocks —
+  lateral sway's own spectrum, averaged Welch-style over the stretches that
+  were commanded to move —
   rather than assumed from the engine's tuning, which is one of the things a
   capture is for checking. This one came out at 0.656 s against the engine's
   nominal 0.64.
@@ -581,8 +580,8 @@ things set it:
   the lateral trace is 0.29 m/s at half a stride, 0.18 at one and 0.11 at 1.43.
 
 `--smooth` overrides the window — set it to the simulated figure's 0.6 s to put
-the two side by side. The plateau means the figures report move by under
-0.02 m/s across the whole range, so nothing quoted turns on the choice.
+the two side by side. Steady-state speeds move by under 0.02 m/s across the
+whole range, so nothing quoted turns on the choice.
 
 ### What is not walking
 
@@ -590,8 +589,7 @@ A three-minute capture of a walk engine that falls over backwards contains
 several seconds of a robot on its side and in somebody's hands. Samples where
 the torso is more than 8 cm above the walking plane, tipped past the same 60°
 the simulated metrics call a fall, or unsolved by the capture system are shaded
-on the figures and left out of every average, along with half a second either
-side. The fall itself is marked where it happened.
+on the figure and left out, along with half a second either side. The fall itself is marked where it happened.
 
 ## Output
 

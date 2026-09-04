@@ -19,12 +19,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "eval"))
 
 from plot_mocap_profile import (  # noqa: E402
-  MIN_PLATEAU_S,
   STRIDE_WINDOWS,
   Frame,
   build_run,
   calibrate,
-  find_plateaus,
   gait_period,
   local_slope,
   read_log,
@@ -87,6 +85,26 @@ def _command_at(t: float) -> tuple[float, float, float]:
 
 def _duration() -> float:
   return sum(hold for hold, _ in SCHEDULE)
+
+
+def _commanded_spans() -> list[tuple[float, float]]:
+  """``(start, end)`` of every non-zero stretch of the schedule."""
+  spans, elapsed = [], 0.0
+  for hold, value in SCHEDULE:
+    if any(value):
+      spans.append((elapsed, elapsed + hold))
+    elapsed += hold
+  return spans
+
+
+def _settled_mean(run, start: float, end: float) -> np.ndarray:
+  """Mean measured velocity over the second half of a commanded stretch.
+
+  The fit window straddles the step at the stretch's start, so the opening of
+  one is still catching up and is not steady state.
+  """
+  window = (run.t >= start + 0.5 * (end - start)) & (run.t <= end) & run.walked
+  return run.smooth[window].mean(0)
 
 
 def write_capture(path: Path, mirrored: bool = False, lift: bool = True) -> None:
@@ -228,16 +246,20 @@ def test_local_slope_survives_dropped_frames():
 # --------------------------------------------------------------------------
 
 
-def test_plateaus_are_detected_not_assumed(capture):
+def test_the_commanded_stretches_are_detected_not_assumed(capture):
+  """The schedule is a property of the run that produced the log, not of this
+  script, so the same code has to segment a capture whose timings changed."""
   log = read_log(capture)
+  frame, _ = calibrate(log, None, None, None)
+  run = build_run(log, frame)
 
-  plateaus = find_plateaus(log.command_t, log.command, MIN_PLATEAU_S)
-  commanded = [value for _, _, value in plateaus if np.abs(value).max() > 0]
-
-  assert len(plateaus) == len(SCHEDULE)
-  assert [tuple(np.round(v, 3)) for v in commanded] == [
-    value for _, value in SCHEDULE if any(value)
-  ]
+  expected = _commanded_spans()
+  assert len(run.driven) == len(expected)
+  for (start, end), (wanted_start, wanted_end) in zip(
+    run.driven, expected, strict=True
+  ):
+    assert start == pytest.approx(wanted_start, abs=0.05)
+    assert end == pytest.approx(wanted_end, abs=0.05)
 
 
 def test_uninitialised_commands_are_dropped(tmp_path):
@@ -295,10 +317,12 @@ def test_the_robot_is_recovered_from_an_awkward_capture_frame(tmp_path, mirrored
 
   assert frame.chirality == (-1.0 if mirrored else 1.0)
   assert frame.plane_residual < 1e-6
-  for plateau in run.plateaus:
-    if plateau.resting or plateau.fell:
-      continue
-    assert plateau.achieved == pytest.approx(plateau.command, abs=0.05), plateau.label
+  assert run.driven
+  for start, end in run.driven:
+    commanded = _command_at(0.5 * (start + end))
+    assert _settled_mean(run, start, end) == pytest.approx(commanded, abs=0.05), (
+      commanded
+    )
 
 
 def test_being_carried_is_not_counted_as_walking(capture):
@@ -330,7 +354,7 @@ def test_the_up_sign_only_decides_what_counts_as_off_its_feet(capture):
 
   a, b = build_run(log, upright), build_run(log, upside_down)
   assert np.nanmax(np.abs(a.smooth - b.smooth)) < 1e-6
-  assert np.nanmax(np.abs(a.ground - b.ground)) < 1e-6
+  assert np.nanmax(np.abs(a.raw - b.raw)) < 1e-6
 
 
 def test_a_pinned_frame_is_used_as_given(capture):
