@@ -10,25 +10,30 @@ Added
 
 - Added ``scripts/eval/plot_mocap_profile.py``, which draws the velocity-profile
   figure from a motion-capture log of the real robot rather than from a
-  simulated run: command against response for all three axes, plus the torso's
-  height above the walking plane, on one time axis spanning the whole capture.
-  It reads an ``nbs2json`` export directly, taking the command from
-  ``WalkState``, the motion from the tracked rigid body, and the IMU only to
-  settle the capture frame's handedness. The profile figure only -- a sweep or
+  simulated run: command against response, with the capture's commanded phases
+  laid end to end on one axis the way the simulated figure lays its schedules.
+  The rests between commands are cut, and each phase draws only the axes it
+  commanded -- on a real robot every axis carries a stride larger than the
+  command, so drawing all three everywhere buries the measurement. It reads an
+  ``nbs2json`` export directly, taking the command from ``WalkState``, the
+  motion from the tracked rigid body, and the IMU to settle which way the
+  capture frame points and whether it is mirrored. The profile figure only -- a sweep or
   a grid is hundreds of runs at held commands, which a capture cannot be.
 
   The capture frame is calibrated from the data and the calibration is printed:
-  the floor plane by a robust PCA, its sign from the fact that a robot can be
-  carried well above the plane it walks on but not below it, the handedness by
-  correlating the captured yaw rate against the robot's gyroscope, and forward
-  from the direction of travel under a forward command. Velocity is a
+  the floor plane by a robust PCA, its sign by agreeing with the accelerometer
+  over samples that are both still and upright, the handedness by correlating
+  the captured yaw rate against the robot's gyroscope, and forward from the
+  direction of travel under a forward command. The plane is fitted at torso
+  height rather than floor height, so a fallen robot leaves it by as much as a
+  carried one and the sign cannot be had by counting which side is busier. Velocity is a
   straight-line fit over 1.43 measured strides -- the window at which a
   least-squares slope stops seeing the sway, which is not the one stride a
   moving mean would need -- and the stride itself is measured from the sway's
-  own spectrum. Being off its feet is a lift over 4 cm and nothing else; a fall
-  is the opposite sign of the same quantity and is taken from the torso's
-  attitude. Neither is cut out of the traces -- the spans are shaded and drawn,
-  so what the robot did while it was held stays visible.
+  own spectrum. Off its feet is a lift over 4 cm above the walking plane or a
+  fall past the same 60° the simulated metrics use -- the two are opposite
+  signs of one quantity -- and both are cut out of the traces, with a fall also
+  shaded to the end of its block and dated within it.
 - Added ``scripts/eval/figure_style.py``, the palette, matplotlib defaults and
   save helpers shared by ``plot_comparison.py`` and ``plot_mocap_profile.py``,
   so a simulated figure and a captured one can sit on the same page.

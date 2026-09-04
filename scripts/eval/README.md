@@ -487,7 +487,7 @@ once, and that is exactly what a profile is. One figure comes out, plus a
 
 | figure | what it shows |
 | --- | --- |
-| `fig1_mocap_profile_*` | command against response, a panel per axis plus the torso's height, the whole capture on one time axis |
+| `fig1_mocap_profile_*` | command against response, the commanded phases laid end to end on one axis |
 
 ### The input
 
@@ -596,22 +596,42 @@ A three-minute capture of a walk engine that falls over backwards contains
 several seconds of a robot on its side and in somebody's hands. The two are
 opposite signs of one quantity, and that is the whole test:
 
-- **Off its feet** is `height >= 0.04` — 4 cm over the height it walks at is
-  somebody holding it. Those spans are shaded, and the height panel draws the
-  threshold as a dashed line so the call can be checked by eye.
+- **A lift** is `height >= 0.04` — 4 cm over the height it walks at is somebody
+  holding it.
 - **A fall** goes the other way, and is taken from the torso's attitude, past
-  the same 60° the simulated metrics use. It is marked where it happened.
+  the same 60° the simulated metrics use. It also fixes the moment the robot
+  went down, which the figure dates within its block.
 
-Nothing is cut out of the traces either way — the shading says the robot was
-held, and leaves you to see what it did while it was. On the reference capture
-that is three lifts inside the run (109 s, 121 s and 175 s, each about a
-second, and each visible as a spike in the lateral and yaw traces), plus the
-set-down and pick-up at either end, against one fall at 36 s that puts the
-torso 50 cm *under* the walking plane for eight seconds.
+Either one is off its feet, and both are cut out of the traces rather than
+drawn, so a gap in a line is always a robot that was not walking rather than a
+robot that was walking badly. On the reference capture that is three lifts
+inside the run (109 s, 121 s and 175 s, each about a second) plus the set-down
+and pick-up at either end, and one fall nine seconds into the `vx-0.35` phase
+that puts the torso 50 cm *under* the walking plane for eight seconds.
 
-The velocity panels are scaled to the 97th percentile of the response rather
-than the 99.5th for the same reason: being carried produces speeds and yaw
-rates a gait never reaches, and scaling to them would flatten the walking.
+### One strip, and only what was commanded
+
+The figure is a single axis with the twelve commanded phases laid end to end,
+matching the simulated profile figure so the two can sit on one page. Two
+things keep it readable:
+
+- **The rests are cut.** Nearly half the capture is the robot standing between
+  one command and the next. Only the commands survive, plus a second of rest
+  either side so a block opens and closes at a stand — 108 s of strip out of a
+  191 s capture.
+- **Each phase draws only the axes it commanded.** All three axes are moving
+  all the time on a real robot, mostly with the gait, and the sway on an axis
+  nothing asked for is larger than the tracking on the one that was. Drawing
+  all three through all twelve phases is thirty-six traces of which twelve are
+  the measurement. Off-axis coupling is real and worth a figure, but not this
+  one.
+
+One y-scale covers the strip, set by the largest command rather than by the
+response, so linear speeds in m/s and yaw rates in rad/s share it — the axis
+colours and the direct labels say which is which. Scaling to the response
+instead would let the gait set the frame: the torso's yaw swings through a
+stride by several times any commanded turn, which is why the raw trace is
+drawn faintly and clipped rather than given room.
 
 ## Output
 

@@ -73,12 +73,11 @@ import tyro
 from figure_style import (
   AXIS_COLOUR,
   AXIS_LABEL,
-  AXIS_UNIT,
   BASELINE,
+  GRID,
   INK,
   INK_2,
   MUTED,
-  PURPLE,
   RED,
   SMOOTH_S,
   despine,
@@ -126,12 +125,15 @@ somebody's hands. Falls are not part of it -- a fall puts the torso *below* the
 plane, and is detected from the torso's attitude instead.
 """
 
-LEAD_S = 3.0
-"""Seconds of the standing-around either end of a capture that are drawn.
+PHASE_PAD_S = 1.0
+"""Seconds of the surrounding rest kept either side of a commanded phase.
 
-Recording starts and stops by hand, so a capture opens and closes with a
-stationary robot; this keeps just enough to show the trace leaving rest.
+Enough for a block to open and close at rest and to show the robot coming back
+to a stand, without redrawing the whole gap. Trimmed where two phases are
+closer together than twice this.
 """
+
+AXIS_INDEX = {"vx": 0, "vy": 1, "wz": 2}
 
 
 # --------------------------------------------------------------------------
@@ -568,9 +570,10 @@ class Run:
     command: Shape ``(M, 3)`` command, interpolated onto ``t``.
     raw: Shape ``(M, 3)`` body velocity over ``RAW_WINDOW_S``.
     smooth: Shape ``(M, 3)`` body velocity over ``smooth_s``.
-    height: Shape ``(M,)`` torso height above the walking plane, in metres.
-    lifted: Shape ``(M,)`` samples with the torso off its feet; see
-      :data:`LIFTED_HEIGHT_M`.
+    lifted: Shape ``(M,)`` samples with the torso held above the walking plane;
+      see :data:`LIFTED_HEIGHT_M`.
+    off_feet: Shape ``(M,)`` samples that are a lift or a fall, cut out of the
+      drawn traces.
     driven: Stretches of ``t`` during which a non-zero command was in force.
     fall_t: When the torso first went past the fall threshold, if it did.
     smooth_s: Width of the fit behind ``smooth``, in seconds.
@@ -583,8 +586,8 @@ class Run:
   command: np.ndarray
   raw: np.ndarray
   smooth: np.ndarray
-  height: np.ndarray
   lifted: np.ndarray
+  off_feet: np.ndarray
   driven: list[tuple[float, float]]
   fall_t: float | None
   smooth_s: float
@@ -650,6 +653,7 @@ def build_run(log: Log, frame: Frame, smooth: float | None = None) -> Run:
   command = _interpolate(log.mocap_t, log.command_t, log.command)
   upright = np.cos(np.radians(frame.tilt_deg))
 
+  lifted = frame.height >= LIFTED_HEIGHT_M
   fall_t = None
   fallen = np.flatnonzero(upright < FALL_UPRIGHT_THRESHOLD)
   if fallen.size:
@@ -674,8 +678,8 @@ def build_run(log: Log, frame: Frame, smooth: float | None = None) -> Run:
     command=command,
     raw=raw,
     smooth=smoothed,
-    height=frame.height,
-    lifted=frame.height >= LIFTED_HEIGHT_M,
+    lifted=lifted,
+    off_feet=lifted | (upright < FALL_UPRIGHT_THRESHOLD),
     driven=driven,
     fall_t=fall_t,
     smooth_s=window_s,
@@ -688,124 +692,186 @@ def build_run(log: Log, frame: Frame, smooth: float | None = None) -> Run:
 # --------------------------------------------------------------------------
 
 
-def figure_profile(run: Run, label: str, path: Path) -> None:
-  """Command against response, for the whole capture, on one time axis.
+def _phases(run: Run) -> list[tuple[float, float, dict[str, float]]]:
+  """Every commanded stretch, with the axes it drove and their amplitudes.
 
-  Two differences from the simulated profile figure, both forced by the data.
-  It is one robot walking continuously rather than six independent lanes laid
-  end to end, so a fall is drawn where it happened. And the three axes get a
-  panel each: every axis is drawn throughout, because the response to a command
-  the robot was not given is rarely zero, but the torso's yaw swings through a
-  stride by more than any commanded speed, so one shared scale would flatten
-  the two linear axes.
-
-  A fourth panel carries the torso's height above the walking plane, which is
-  what separates the two ways a robot stops walking: a lift goes up, a fall
-  goes down. Stretches off its feet are shaded but nothing is cut out of the
-  traces -- the reader can see what the robot did while it was held.
+  Padded into the surrounding rest so a block opens and closes at a standing
+  robot, and trimmed where two commands are close enough that their pads would
+  meet.
   """
-  if not run.driven:
+  phases = []
+  for order, (start, end) in enumerate(run.driven):
+    before = run.driven[order - 1][1] if order else run.t[0]
+    after = run.driven[order + 1][0] if order + 1 < len(run.driven) else run.t[-1]
+    start -= min(PHASE_PAD_S, 0.5 * (start - before))
+    end += min(PHASE_PAD_S, 0.5 * (after - end))
+    window = (run.t >= start) & (run.t <= end)
+    held = run.command[window]
+    driving = {}
+    for name, column in AXIS_INDEX.items():
+      deepest = int(np.argmax(np.abs(held[:, column])))
+      if abs(held[deepest, column]) > 1e-6:
+        driving[name] = float(held[deepest, column])
+    if driving:
+      phases.append((float(start), float(end), driving))
+  return phases
+
+
+def figure_profile(run: Run, label: str, path: Path) -> None:
+  """Command against response, as one strip of commanded phases.
+
+  The counterpart of the simulated profile figure, and laid out the same way:
+  one axis, the commanded phases end to end, each washed alternately and named
+  over the top. Two differences the data forces.
+
+  The rests are cut. A capture spends nearly half its length standing between
+  one command and the next, which is dead width on a figure; only the commands
+  and enough of the rest either side to open and close at a stand are drawn.
+  Unlike the simulated figure a boundary here is a change of command rather
+  than a change of robot, so the response does carry across it -- which is why
+  the pad is there rather than a hard cut at the ramp.
+
+  And each phase draws only the axes it commanded. On a real robot every axis
+  is moving all the time, mostly with the gait: putting all three through all
+  twelve phases means thirty-six traces of which twelve are the measurement,
+  and the sway on an axis nothing asked for is larger than the tracking on the
+  one that was. Off-axis coupling is real and worth a figure, but not this one.
+  """
+  phases = _phases(run)
+  if not phases:
     raise SystemExit("no commanded motion in this capture; nothing to draw")
 
-  names = ("vx", "vy", "wz")
-  fig, axes = plt.subplots(
-    4,
-    1,
-    figsize=(17, 9.6),
-    sharex=True,
-    gridspec_kw={"height_ratios": [1.0, 1.0, 1.0, 0.62]},
+  fig, ax = plt.subplots(figsize=(16, 4.6))
+  despine(ax)
+
+  # One y-scale for the whole strip, set by the command rather than by the
+  # response: the torso sways through a stride by more than the command asks
+  # for, and scaling to that would flatten the tracking into a band across the
+  # middle. The raw trace is clipped to the frame instead.
+  span = max(
+    0.5, 1.7 * max(abs(v) for _, _, driving in phases for v in driving.values())
   )
 
-  first = run.driven[0][0] - LEAD_S
-  last = run.driven[-1][1] + LEAD_S
-  window = (run.t >= first) & (run.t <= last)
-  t = run.t[window]
-  trace = run.smooth[window]
-  raw = run.raw[window]
-  height = run.height[window]
-  lifted = [
-    (max(a, first), min(b, last))
-    for a, b in _spans(run.t, run.lifted)
-    if b >= first and a <= last
-  ]
+  offset = 0.0
+  boundaries: list[float] = []
+  for order, (start, end, driving) in enumerate(phases):
+    window = (run.t >= start) & (run.t <= end)
+    time = run.t[window] - start + offset
+    width = end - start
+    off = run.off_feet[window]
 
-  for index, (ax, name) in enumerate(zip(axes[:3], names, strict=True)):
-    despine(ax)
-    colour = AXIS_COLOUR[name]
-    commanded = run.command[window, index]
-    # Whichever is larger, the command or the response: a real robot
-    # overshoots, and scaling to the command alone would clip it off. The
-    # percentile is well short of the maximum because a lift off the floor is
-    # drawn rather than filtered, and carries velocities a gait never reaches.
-    span = max(
-      0.15,
-      1.6 * float(np.abs(commanded).max()),
-      1.05 * float(np.nanpercentile(np.abs(trace[:, index]), 97.0)),
-    )
+    # Alternate blocks carry a wash, so a dozen phases on one axis stay
+    # separable without a dozen frames around them.
+    if order % 2:
+      ax.axvspan(offset, offset + width, color=GRID, alpha=0.28, zorder=0)
 
-    for a, b in lifted:
-      ax.axvspan(a, b, color=MUTED, alpha=0.22, zorder=1)
-    ax.axhline(0.0, color=BASELINE, linewidth=0.8, zorder=1)
-    ax.plot(
-      t,
-      np.clip(raw[:, index], -span, span),
-      color=colour,
-      linewidth=0.4,
-      alpha=0.30,
-      zorder=2,
-    )
-    ax.plot(t, commanded, color=INK_2, linewidth=1.4, linestyle=(0, (5, 3)), zorder=3)
-    ax.plot(
-      t,
-      np.clip(trace[:, index], -span, span),
-      color=colour,
-      linewidth=1.8,
-      zorder=4,
-      solid_capstyle="round",
-    )
-    ax.set_ylim(-span, span)
-    ax.set_ylabel(f"{AXIS_LABEL[name]} ({AXIS_UNIT[name]})", color=colour)
+    # Worked out before anything is drawn: in a combined phase both axes move
+    # together, so placing one label above its trace and the other below by
+    # their order stacks them wherever the traces are close. Placing by value
+    # pushes them apart.
+    series = []
+    for name in driving:
+      column = AXIS_INDEX[name]
+      commanded = run.command[window, column]
+      # The middle of the plateau, not its start: the measurement lags the
+      # command, so the leading edge carries a response still climbing.
+      magnitude = np.abs(commanded)
+      at_peak = np.flatnonzero(magnitude >= magnitude.max() - 1e-6)
+      plateau = int(at_peak[at_peak.size // 2])
+      smoothed = np.where(off, np.nan, run.smooth[window, column])
+      raw = np.where(off, np.nan, run.raw[window, column])
+      anchor = smoothed[plateau]
+      if not np.isfinite(anchor):
+        anchor = commanded[plateau]
+      series.append((name, raw, smoothed, commanded, plateau, float(anchor)))
+    highest = max(range(len(series)), key=lambda i: series[i][5])
 
-  # Height above the walking plane. Shorter than the velocity panels because it
-  # is read for its shape -- flat, then a step while somebody holds the robot --
-  # rather than for a value.
-  floor = axes[3]
-  despine(floor)
-  for a, b in lifted:
-    floor.axvspan(a, b, color=MUTED, alpha=0.22, zorder=1)
-  floor.axhline(0.0, color=BASELINE, linewidth=0.8, zorder=1)
-  floor.axhline(
-    LIFTED_HEIGHT_M, color=MUTED, linewidth=0.9, linestyle=(0, (4, 3)), zorder=2
-  )
-  floor.plot(t, height, color=PURPLE, linewidth=1.4, zorder=3)
-  low, high = float(np.nanmin(height)), float(np.nanmax(height))
-  pad = 0.08 * max(high - low, 0.1)
-  floor.set_ylim(min(low - pad, -0.05), max(high + pad, 0.10))
-  floor.set_ylabel("height (m)", color=PURPLE)
+    for depth, (name, raw, smoothed, commanded, plateau, anchor) in enumerate(series):
+      colour = AXIS_COLOUR[name]
+      # Fainter than the simulated figure's raw trace: there it is one robot's
+      # noise, here it is a whole stride, several times the command on every
+      # axis and clipped to the frame for most of the strip.
+      ax.plot(
+        time,
+        np.clip(raw, -span, span),
+        color=colour,
+        linewidth=0.4,
+        alpha=0.13,
+        zorder=2,
+      )
+      ax.plot(
+        time,
+        commanded,
+        color=colour,
+        linewidth=1.3,
+        linestyle=(0, (5, 3)),
+        alpha=0.95,
+        zorder=3,
+      )
+      ax.plot(
+        time,
+        np.clip(smoothed, -span, span),
+        color=colour,
+        linewidth=2.0,
+        zorder=4,
+        solid_capstyle="round",
+      )
+      # Direct label, so identity never rests on colour alone.
+      above = depth == highest
+      ax.annotate(
+        AXIS_LABEL[name],
+        xy=(float(time[plateau]), anchor),
+        xytext=(0, 11 if above else -12),
+        textcoords="offset points",
+        color=colour,
+        fontsize=9,
+        fontweight="bold",
+        ha="center",
+        va="bottom" if above else "top",
+      )
 
-  for ax in axes:
-    ax.set_xlim(first, last)
-    ax.margins(x=0)
-    if run.fall_t is not None and first <= run.fall_t <= last:
-      ax.axvline(run.fall_t, color=RED, linewidth=1.2, linestyle=":", zorder=5)
+    if run.fall_t is not None and start <= run.fall_t <= end:
+      at = run.fall_t - start + offset
+      ax.axvspan(at, offset + width, color=RED, alpha=0.09, zorder=1)
+      ax.axvline(at, color=RED, linewidth=1.2, linestyle=":", zorder=5)
+      ax.annotate(
+        f"fell {run.fall_t - start:.1f} s in",
+        xy=(at, 0.02),
+        xycoords=("data", "axes fraction"),
+        xytext=(4, 0),
+        textcoords="offset points",
+        color=RED,
+        fontsize=7.5,
+        fontweight="bold",
+      )
 
-  if run.fall_t is not None and first <= run.fall_t <= last:
-    axes[0].annotate(
-      f"fell at {run.fall_t:.0f} s",
-      xy=(run.fall_t, 0.03),
+    # What this phase asked for, centred over its block.
+    ax.annotate(
+      "  ".join(f"{AXIS_LABEL[n]}{v:+.2f}" for n, v in driving.items()),
+      xy=(offset + width / 2, 1.0),
       xycoords=("data", "axes fraction"),
-      xytext=(4, 0),
+      xytext=(0, 5),
       textcoords="offset points",
-      color=RED,
-      fontsize=7.5,
-      fontweight="bold",
+      ha="center",
+      va="bottom",
+      fontsize=8.0,
+      fontweight="semibold",
+      color=INK,
     )
-  axes[-1].set_xlabel("time through the capture (s)")
+
+    offset += width
+    boundaries.append(offset)
+
+  for edge in boundaries[:-1]:
+    ax.axvline(edge, color=BASELINE, linewidth=1.0, zorder=5)
+  ax.axhline(0.0, color=BASELINE, linewidth=0.8, zorder=1)
+  ax.set_ylim(-span, span)
+  ax.set_xlim(0.0, offset)
+  ax.margins(x=0)
+  ax.set_xlabel(f"time (s), the {len(phases)} commanded phases laid end to end")
+  ax.set_ylabel("velocity (m/s) · yaw rate (rad/s)")
 
   handles = [
-    Line2D(
-      [], [], color=INK_2, linewidth=1.6, linestyle=(0, (5, 3)), label="commanded"
-    ),
     Line2D(
       [], [], color=INK_2, linewidth=2.0, label=f"measured ({run.smooth_s:.2f} s fit)"
     ),
@@ -813,20 +879,23 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
       [],
       [],
       color=INK_2,
-      linewidth=0.8,
-      alpha=0.45,
+      linewidth=0.7,
+      alpha=0.35,
       label=f"measured ({RAW_WINDOW_S:.2f} s fit)",
     ),
+    Line2D(
+      [], [], color=INK_2, linewidth=1.4, linestyle=(0, (5, 3)), label="commanded"
+    ),
   ]
-  if lifted:
-    handles.append(
-      Line2D([], [], color=MUTED, linewidth=8, alpha=0.35, label="off its feet")
-    )
+  handles += [
+    Line2D([], [], color=AXIS_COLOUR[a], linewidth=2.4, label=f"{AXIS_LABEL[a]} axis")
+    for a in ("vx", "vy", "wz")
+  ]
   fig.legend(
     handles=handles,
     loc="upper right",
     bbox_to_anchor=(0.995, 0.995),
-    ncol=len(handles),
+    ncol=6,
     columnspacing=1.6,
   )
   fig.suptitle(
@@ -840,20 +909,17 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
   )
   fig.text(
     0.006,
-    0.010,
-    "Motion capture of the robot, one continuous run: unlike the simulated "
-    "figure, everything carries across a change of command.\n"
-    f"Velocity is a {run.smooth_s:.2f} s straight-line fit to the tracked "
-    f"torso -- the window that cancels a measured stride -- drawn over the "
-    f"same fit across {RAW_WINDOW_S:.2f} s.\n"
-    f"The bottom panel is the torso's height above the walking plane; over "
-    f"{100 * LIFTED_HEIGHT_M:.0f} cm (dashed) is somebody holding it, and a "
-    f"fall goes the other way. Shaded spans are drawn, not cut out.",
+    0.012,
+    "Motion capture of the robot, one continuous run with the rests between "
+    "commands cut out; each phase draws only the axes it commanded. Velocity "
+    f"is a {run.smooth_s:.2f} s straight-line fit to the tracked torso, the "
+    "window that cancels a measured stride. Gaps are the robot off its feet -- "
+    f"held more than {100 * LIFTED_HEIGHT_M:.0f} cm over the height it walks "
+    "at, or fallen -- and are cut rather than drawn.",
     fontsize=7.5,
     color=MUTED,
-    linespacing=1.5,
   )
-  fig.tight_layout(rect=(0, 0.065, 1, 0.95))
+  fig.tight_layout(rect=(0, 0.05, 1, 0.90))
   save(fig, path)
 
 
@@ -897,7 +963,7 @@ def summarise(run: Run, label: str) -> dict:
       "mocap_frames": int(len(run.t)),
       "frames_kept": round(float(run.log.frames_kept), 4),
       "clock_jitter_s": round(float(run.log.clock_jitter), 4),
-      "peak_height_m": round(float(np.nanmax(run.height)), 4),
+      "peak_height_m": round(float(np.nanmax(run.frame.height)), 4),
       "lifts": [[round(a, 2), round(b, 2)] for a, b in _spans(run.t, run.lifted)],
       "stride_s": None if run.gait_s is None else round(run.gait_s, 4),
       "velocity_window_s": round(run.smooth_s, 4),
@@ -953,8 +1019,8 @@ def main() -> None:
     print(f"fell              : at {run.fall_t:.1f} s, from the torso's attitude")
   lifts = _spans(run.t, run.lifted)
   print(
-    f"off its feet      : {len(lifts)} lifts over {100 * LIFTED_HEIGHT_M:.0f} cm, "
-    f"peak {100 * float(np.nanmax(run.height)):.0f} cm"
+    f"off its feet      : {len(lifts)} lifts over {100 * LIFTED_HEIGHT_M:.0f} cm "
+    f"(peak {100 * float(np.nanmax(run.frame.height)):.0f} cm), cut out"
   )
   for a, b in lifts:
     print(f"  {a:6.1f} -> {b:6.1f} s  ({b - a:.1f} s)")

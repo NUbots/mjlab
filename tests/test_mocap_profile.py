@@ -340,8 +340,8 @@ def test_the_robot_is_recovered_from_an_awkward_capture_frame(tmp_path, mirrored
 
 
 def test_being_carried_shows_up_in_the_height_trace(capture):
-  """Nothing is filtered on account of a lift, so the height panel is the only
-  thing that tells a reader the robot was in somebody's hands."""
+  """The height above the walking plane is what a lift is detected from, and
+  the sign of it is what says a lift from a fall."""
   log = read_log(capture)
   frame, _ = calibrate(log, None, None, None)
   run = build_run(log, frame)
@@ -350,10 +350,11 @@ def test_being_carried_shows_up_in_the_height_trace(capture):
   # A margin either side: the capture clock and the schedule disagree by up to
   # a frame over where the lift starts.
   clear = (run.t < LIFT_FROM - 0.05) | (run.t > LIFT_TO + 0.05)
-  assert run.height[lifted].min() > 0.5
-  assert np.abs(run.height[clear]).max() < 0.05
+  assert frame.height[lifted].min() > 0.5
+  assert np.abs(frame.height[clear]).max() < 0.05
   assert run.lifted[lifted].all()
   assert not run.lifted[clear].any()
+  assert run.off_feet[lifted].all()
   assert run.fall_t == pytest.approx(LIFT_FROM, abs=0.5)
 
 
@@ -376,19 +377,21 @@ def test_a_long_fall_does_not_invert_the_height_sign(tmp_path):
   during_lift = (run.t >= LIFT_FROM + 0.2) & (run.t <= LIFT_TO - 0.2)
   # Deeper below than the lift is above, and for longer: the count loses here.
   assert during_fall.sum() > during_lift.sum()
-  assert run.height[during_fall].max() < -0.3
-  assert run.height[during_lift].min() > 0.5
-  # A fall is not a lift, and only the lift is called off its feet.
+  assert frame.height[during_fall].max() < -0.3
+  assert frame.height[during_lift].min() > 0.5
+  # A fall is not a lift, but both are off its feet and both get cut.
   assert run.lifted[during_lift].all()
   assert not run.lifted[during_fall].any()
+  assert run.off_feet[during_lift].all()
+  assert run.off_feet[during_fall].all()
 
 
-def test_the_up_sign_only_decides_which_way_height_is_measured(capture):
+def test_the_up_sign_only_decides_what_counts_as_off_its_feet(capture):
   """Flip it and the handedness flips with it; the two cancel in every velocity.
 
-  Worth pinning, because it is what makes the weakest of the four calibration
-  steps harmless: the sign is read off which way the robot leaves the floor,
-  and the only thing left depending on it is the sign of the height trace.
+  Worth pinning, because it bounds the damage when the sign is wrong: every
+  speed and yaw rate is identical either way, and all that changes is the sign
+  of the height, and so which samples are cut out as off its feet.
   """
   log = read_log(capture)
   upright, _ = calibrate(log, None, None, None)
@@ -401,7 +404,10 @@ def test_the_up_sign_only_decides_which_way_height_is_measured(capture):
   a, b = build_run(log, upright), build_run(log, upside_down)
   assert np.nanmax(np.abs(a.smooth - b.smooth)) < 1e-6
   assert np.nanmax(np.abs(a.raw - b.raw)) < 1e-6
-  assert np.nanmax(np.abs(a.height + b.height)) < 1e-6
+  assert np.nanmax(np.abs(upright.height + upside_down.height)) < 1e-6
+  # The one thing that does change: a flipped sign cuts out the wrong samples.
+  assert a.lifted.any()
+  assert not b.lifted[a.lifted].any()
 
 
 def test_a_pinned_frame_is_used_as_given(capture):
