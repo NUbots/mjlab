@@ -487,7 +487,7 @@ once, and that is exactly what a profile is. One figure comes out, plus a
 
 | figure | what it shows |
 | --- | --- |
-| `fig1_mocap_profile_*` | command against response, three panels, the whole capture on one time axis |
+| `fig1_mocap_profile_*` | command against response, a panel per axis plus the torso's height, the whole capture on one time axis |
 
 ### The input
 
@@ -529,13 +529,20 @@ out of physics and one out of the command, and the run prints all four:
 a plane, so the smallest principal direction is its normal; on the capture this
 was written against the residual is 6 mm against 1.3 m of in-plane travel.
 
-**Up** is the sign of that normal, and it follows from the floor being a floor:
-somebody picking the robot up carries the torso far above the height it walks
-at and holds it there, and nothing holds it the same distance below. It is the
-weakest of the four and deliberately the one that matters least — flip it and
-the handedness flips with it, the two cancel, and every velocity, yaw rate and
-ground track comes out identical. The only thing left depending on the sign is
-which samples count as *off its feet*.
+**Up** is the sign of that normal, and it comes from the accelerometer: at rest
+it reads the reaction to gravity, which points up, so the floor normal has to
+agree with it. Measured over samples that are both still and upright, so a
+robot lying on the ground cannot contribute.
+
+Counting which of the two deep tails is more populated — carrying lifts the
+torso, and surely the floor stops it going as far down — looks reasonable and
+is *wrong*, because the plane is fitted at torso height rather than floor
+height. A fallen robot sits as far below it as a carried one sits above, and a
+long fall contributes more samples than a few short lifts. On the reference
+capture that heuristic put the eight seconds the robot spent on the ground at
++50 cm and every genuine lift below zero. Flipping it also flips the handedness
+test, so the two cancel and no velocity ever changed — which is exactly why it
+went unnoticed until the height was drawn.
 
 **The handedness** is read off the robot's own gyroscope, because capture
 systems differ on whether their frame is right- or left-handed and a mirrored
@@ -586,10 +593,25 @@ whole range, so nothing quoted turns on the choice.
 ### What is not walking
 
 A three-minute capture of a walk engine that falls over backwards contains
-several seconds of a robot on its side and in somebody's hands. Samples where
-the torso is more than 8 cm above the walking plane, tipped past the same 60°
-the simulated metrics call a fall, or unsolved by the capture system are shaded
-on the figure and left out, along with half a second either side. The fall itself is marked where it happened.
+several seconds of a robot on its side and in somebody's hands. The two are
+opposite signs of one quantity, and that is the whole test:
+
+- **Off its feet** is `height >= 0.04` — 4 cm over the height it walks at is
+  somebody holding it. Those spans are shaded, and the height panel draws the
+  threshold as a dashed line so the call can be checked by eye.
+- **A fall** goes the other way, and is taken from the torso's attitude, past
+  the same 60° the simulated metrics use. It is marked where it happened.
+
+Nothing is cut out of the traces either way — the shading says the robot was
+held, and leaves you to see what it did while it was. On the reference capture
+that is three lifts inside the run (109 s, 121 s and 175 s, each about a
+second, and each visible as a spike in the lateral and yaw traces), plus the
+set-down and pick-up at either end, against one fall at 36 s that puts the
+torso 50 cm *under* the walking plane for eight seconds.
+
+The velocity panels are scaled to the 97th percentile of the response rather
+than the 99.5th for the same reason: being carried produces speeds and yaw
+rates a gait never reaches, and scaling to them would flatten the walking.
 
 ## Output
 

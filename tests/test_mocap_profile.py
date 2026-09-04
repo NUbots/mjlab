@@ -49,6 +49,16 @@ SCHEDULE = (
 LIFT_FROM, LIFT_TO = 36.6, 39.4
 """Seconds the synthetic robot spends in somebody's hands, as they all do."""
 
+FALL_FROM, FALL_TO = 24.2, 27.8
+FALL_DEPTH = 0.45
+"""Seconds the robot spends on the ground, and how far the torso drops.
+
+Deliberately longer than the lift and deep enough to clear the same threshold,
+because that combination is what a sign test must not be fooled by: the plane
+is fitted at torso height, so a fall leaves the plane by as much as a lift and
+a long one contributes more samples.
+"""
+
 
 def _rot(axis: str, angle: float) -> np.ndarray:
   c, s = math.cos(angle), math.sin(angle)
@@ -103,11 +113,13 @@ def _settled_mean(run, start: float, end: float) -> np.ndarray:
   The fit window straddles the step at the stretch's start, so the opening of
   one is still catching up and is not steady state.
   """
-  window = (run.t >= start + 0.5 * (end - start)) & (run.t <= end) & run.walked
-  return run.smooth[window].mean(0)
+  window = (run.t >= start + 0.5 * (end - start)) & (run.t <= end)
+  return np.nanmean(run.smooth[window], axis=0)
 
 
-def write_capture(path: Path, mirrored: bool = False, lift: bool = True) -> None:
+def write_capture(
+  path: Path, mirrored: bool = False, lift: bool = True, fall: bool = False
+) -> None:
   """A synthetic NBS-to-JSON log of a robot that tracks its command exactly.
 
   The robot walks in a world frame with z up, x forward. Three constant
@@ -131,10 +143,12 @@ def write_capture(path: Path, mirrored: bool = False, lift: bool = True) -> None
     world = _rot("z", yaw) @ np.array([vx, vy + sway, 0.0])
     position = position + world / MOCAP_HZ
     yaw += wz / MOCAP_HZ
-    # Being carried: up and away, and tipped over while it happens.
+    # Being carried: up and away, and tipped over while it happens. A fall is
+    # the other way -- the torso ends up below the height it walks at.
     carried = lift and LIFT_FROM <= t <= LIFT_TO
-    height = 0.6 if carried else 0.0
-    tip = _rot("y", 1.2) if carried else np.eye(3)
+    down = fall and FALL_FROM <= t <= FALL_TO
+    height = 0.6 if carried else (-FALL_DEPTH if down else 0.0)
+    tip = _rot("y", 1.2) if carried or down else np.eye(3)
     torso = _rot("z", yaw) @ tip
     # A mirrored capture frame reports positions mirrored and rotations
     # conjugated: a rotation stays a proper rotation, but its sense about any
@@ -325,24 +339,56 @@ def test_the_robot_is_recovered_from_an_awkward_capture_frame(tmp_path, mirrored
     )
 
 
-def test_being_carried_is_not_counted_as_walking(capture):
+def test_being_carried_shows_up_in_the_height_trace(capture):
+  """Nothing is filtered on account of a lift, so the height panel is the only
+  thing that tells a reader the robot was in somebody's hands."""
   log = read_log(capture)
   frame, _ = calibrate(log, None, None, None)
   run = build_run(log, frame)
 
   lifted = (run.t >= LIFT_FROM) & (run.t <= LIFT_TO)
-  assert not run.walked[lifted].any()
-  # And the samples either side of it, on the way into and out of the hands.
-  assert run.walked.mean() > 0.7
+  # A margin either side: the capture clock and the schedule disagree by up to
+  # a frame over where the lift starts.
+  clear = (run.t < LIFT_FROM - 0.05) | (run.t > LIFT_TO + 0.05)
+  assert run.height[lifted].min() > 0.5
+  assert np.abs(run.height[clear]).max() < 0.05
+  assert run.lifted[lifted].all()
+  assert not run.lifted[clear].any()
   assert run.fall_t == pytest.approx(LIFT_FROM, abs=0.5)
 
 
-def test_the_up_sign_only_decides_what_counts_as_off_its_feet(capture):
-  """Flip it and the handedness flips with it; the two cancel everywhere else.
+def test_a_long_fall_does_not_invert_the_height_sign(tmp_path):
+  """The failure a sample count cannot survive.
+
+  The floor plane is fitted at torso height, so a fallen robot sits as far
+  below it as a carried one sits above, and here it sits there for longer.
+  Counting which tail is more populated picks the fall; the accelerometer does
+  not, because it is measuring gravity rather than voting.
+  """
+  path = tmp_path / "fallen.json"
+  write_capture(path, fall=True)
+
+  log = read_log(path)
+  frame, _ = calibrate(log, None, None, None)
+  run = build_run(log, frame)
+
+  during_fall = (run.t >= FALL_FROM + 0.2) & (run.t <= FALL_TO - 0.2)
+  during_lift = (run.t >= LIFT_FROM + 0.2) & (run.t <= LIFT_TO - 0.2)
+  # Deeper below than the lift is above, and for longer: the count loses here.
+  assert during_fall.sum() > during_lift.sum()
+  assert run.height[during_fall].max() < -0.3
+  assert run.height[during_lift].min() > 0.5
+  # A fall is not a lift, and only the lift is called off its feet.
+  assert run.lifted[during_lift].all()
+  assert not run.lifted[during_fall].any()
+
+
+def test_the_up_sign_only_decides_which_way_height_is_measured(capture):
+  """Flip it and the handedness flips with it; the two cancel in every velocity.
 
   Worth pinning, because it is what makes the weakest of the four calibration
   steps harmless: the sign is read off which way the robot leaves the floor,
-  which is exactly the question it is then used to answer.
+  and the only thing left depending on it is the sign of the height trace.
   """
   log = read_log(capture)
   upright, _ = calibrate(log, None, None, None)
@@ -355,6 +401,7 @@ def test_the_up_sign_only_decides_what_counts_as_off_its_feet(capture):
   a, b = build_run(log, upright), build_run(log, upside_down)
   assert np.nanmax(np.abs(a.smooth - b.smooth)) < 1e-6
   assert np.nanmax(np.abs(a.raw - b.raw)) < 1e-6
+  assert np.nanmax(np.abs(a.height + b.height)) < 1e-6
 
 
 def test_a_pinned_frame_is_used_as_given(capture):

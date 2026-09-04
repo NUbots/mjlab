@@ -37,11 +37,14 @@ Floor plane
   Robust PCA fit to the tracked position; the smallest principal direction is
   the normal. 6 mm residual against 1.3 m of travel on the reference log.
 Up
-  The populated one of the two deep tails -- carrying the robot holds the torso
-  well above the walking plane and the floor stops it going equally far below.
-  The weakest of the four, and deliberately the least load-bearing: flipping it
-  flips the handedness test too, the two cancel, and only which samples count
-  as *off its feet* depends on the answer.
+  The sign of that normal, taken from the accelerometer: at rest it reads the
+  reaction to gravity, which points up, so the floor normal has to agree with
+  it. Counting which of the two deep tails is more populated does *not* work,
+  and the reason is worth recording -- the plane is fitted at torso height, not
+  floor height, so a fallen robot sits as far below it as a carried one sits
+  above, and a long fall outvotes a few short lifts. On the reference capture
+  that heuristic put the eight seconds the robot spent lying on the ground at
+  +50 cm and every genuine lift below zero.
 Handedness
   A mirrored frame leaves forward alone but reverses left, right and the sense
   of every rotation. Caught by correlating the yaw rate about the floor normal
@@ -75,6 +78,7 @@ from figure_style import (
   INK,
   INK_2,
   MUTED,
+  PURPLE,
   RED,
   SMOOTH_S,
   despine,
@@ -114,14 +118,12 @@ Residual lateral sway on the reference capture: 0.29 m/s at half a stride,
 0.18 at one, 0.11 here.
 """
 
-LIFTED_HEIGHT_M = 0.08
-"""Height above the walking plane past which the torso is not being walked."""
+LIFTED_HEIGHT_M = 0.04
+"""Height above the walking plane past which the robot is off its feet.
 
-HANDLED_PAD_S = 0.5
-"""Seconds either side of a handled span that are also discarded.
-
-The samples on the way into somebody's hands and back out of them are not a
-gait either.
+The whole of the test: a torso this far over the height it walks at is in
+somebody's hands. Falls are not part of it -- a fall puts the torso *below* the
+plane, and is detected from the torso's attitude instead.
 """
 
 LEAD_S = 3.0
@@ -316,14 +318,6 @@ def _spans(t: np.ndarray, flag: np.ndarray) -> list[tuple[float, float]]:
   ]
 
 
-def _grow(t: np.ndarray, flag: np.ndarray, pad: float) -> np.ndarray:
-  """Widen every true span by ``pad`` seconds on each side."""
-  grown = np.zeros_like(flag)
-  for a, b in _spans(t, flag):
-    grown |= (t >= a - pad) & (t <= b + pad)
-  return grown
-
-
 def _interpolate(t: np.ndarray, source_t: np.ndarray, values: np.ndarray):
   return np.stack(
     [np.interp(t, source_t, values[:, k]) for k in range(values.shape[1])], -1
@@ -401,33 +395,21 @@ def calibrate(log: Log, up: str | None, forward: str | None, chirality: int | No
     normal = _parse_vector(up, "--up")
     height = (log.position - log.position[usable].mean(0)) @ normal
     height -= np.median(height[usable])
-    notes.append("up: given on the command line")
-  else:
-    # Of the two deep tails, the populated one is up: the floor is in the way
-    # of the other.
-    deep = 0.6 * float(np.percentile(np.abs(height[usable]), 99.9))
-    above = int((height[usable] > deep).sum())
-    below = int((height[usable] < -deep).sum())
-    if below > above:
-      normal, height, above, below = -normal, -height, below, above
-    notes.append(
-      f"up: floor normal, sign from {above} samples more than {100 * deep:.0f} cm "
-      f"clear of the walking plane against {below} that far under it"
-    )
-    if above <= below * 2:
-      # Only the off-its-feet test reads this sign; say so rather than letting
-      # a coin flip look like a measurement.
-      notes.append(
-        "  (weak: nothing left the walking plane by much, so the sign is a "
-        "guess -- it only decides which samples count as off its feet)"
-      )
 
   # The floor normal in the tracked body's own frame: constant while the robot
-  # is upright, and the reference every tilt is measured from.
+  # is upright, and the reference every tilt is measured from. Both are
+  # invariant to the normal's sign, so the tilt is settled before the sign is.
   normal_b = np.einsum("tji,j->ti", log.rotation, normal)
   up_b = np.median(normal_b[usable], 0)
   up_b /= np.linalg.norm(up_b)
   tilt = np.degrees(np.arccos(np.clip(normal_b @ up_b, -1.0, 1.0)))
+
+  if up is not None:
+    notes.append("up: given on the command line")
+  else:
+    flip, note = _up_sign(log, up_b, tilt)
+    normal, height, up_b = flip * normal, flip * height, flip * up_b
+    notes.append(note)
 
   upright = usable & (tilt < 15.0) & (np.abs(height) < LIFTED_HEIGHT_M)
   yaw_rate = yaw_rate_about(log, normal, SMOOTH_S)
@@ -476,6 +458,40 @@ def calibrate(log: Log, up: str | None, forward: str | None, chirality: int | No
     notes=notes,
   )
   return frame, yaw_rate
+
+
+def _up_sign(log: Log, up_b: np.ndarray, tilt: np.ndarray):
+  """Does the fitted floor normal point up, or down?
+
+  A plane fit gives a normal only up to sign. The accelerometer settles it: at
+  rest it reads the reaction to gravity, which points up. Read over samples
+  that are both still and upright, so a robot lying on the ground -- where the
+  reading points along some other body axis -- cannot contribute.
+
+  The one assumption is that the tracked rigid body's axes are within a right
+  angle of the torso's, since ``up_b`` is in the body's frame and the
+  accelerometer reads in the torso's. Motive builds a body from the pose it was
+  created in, so a body made from a standing robot clears that easily: the
+  agreement is 0.96 on the synthetic capture and 0.80 on the reference log,
+  where the difference is the torso's walking pitch. ``--up`` pins it outright
+  if a capture ever does something stranger.
+
+  Returns:
+    ``+1`` to keep the normal, ``-1`` to flip it, and a note saying which and
+    on what evidence.
+  """
+  if len(log.imu_t) >= 100:
+    still = np.abs(np.linalg.norm(log.accel, axis=1) - 9.81) < 0.4
+    steady = still & (np.interp(log.imu_t, log.mocap_t, tilt) < 15.0)
+    if steady.sum() >= 50:
+      gravity = np.median(log.accel[steady], 0)
+      gravity /= np.linalg.norm(gravity)
+      agreement = float(up_b @ gravity)
+      return (1.0 if agreement >= 0.0 else -1.0), (
+        f"up: floor normal, sign from a {agreement:+.2f} agreement with the "
+        f"accelerometer over {steady.sum()} still, upright samples"
+      )
+  return 1.0, "up: floor normal, sign assumed (no still, upright IMU samples)"
 
 
 def _parse_vector(text: str, flag: str) -> np.ndarray:
@@ -552,9 +568,9 @@ class Run:
     command: Shape ``(M, 3)`` command, interpolated onto ``t``.
     raw: Shape ``(M, 3)`` body velocity over ``RAW_WINDOW_S``.
     smooth: Shape ``(M, 3)`` body velocity over ``smooth_s``.
-    upright: Shape ``(M,)`` cosine of the torso's lean from vertical.
-    walked: Shape ``(M,)`` samples that are a gait and have a usable fit.
-    handled: Shape ``(M,)`` samples off the floor, on its side, or unsolved.
+    height: Shape ``(M,)`` torso height above the walking plane, in metres.
+    lifted: Shape ``(M,)`` samples with the torso off its feet; see
+      :data:`LIFTED_HEIGHT_M`.
     driven: Stretches of ``t`` during which a non-zero command was in force.
     fall_t: When the torso first went past the fall threshold, if it did.
     smooth_s: Width of the fit behind ``smooth``, in seconds.
@@ -567,9 +583,8 @@ class Run:
   command: np.ndarray
   raw: np.ndarray
   smooth: np.ndarray
-  upright: np.ndarray
-  walked: np.ndarray
-  handled: np.ndarray
+  height: np.ndarray
+  lifted: np.ndarray
   driven: list[tuple[float, float]]
   fall_t: float | None
   smooth_s: float
@@ -635,13 +650,6 @@ def build_run(log: Log, frame: Frame, smooth: float | None = None) -> Run:
   command = _interpolate(log.mocap_t, log.command_t, log.command)
   upright = np.cos(np.radians(frame.tilt_deg))
 
-  # Off the floor, on its side, or unsolved: not a gait, whatever the command
-  # said. Padded either side; see HANDLED_PAD_S.
-  suspect = (
-    ~log.tracked | (frame.height > LIFTED_HEIGHT_M) | (upright < FALL_UPRIGHT_THRESHOLD)
-  )
-  handled = _grow(log.mocap_t, suspect, HANDLED_PAD_S)
-
   fall_t = None
   fallen = np.flatnonzero(upright < FALL_UPRIGHT_THRESHOLD)
   if fallen.size:
@@ -666,9 +674,8 @@ def build_run(log: Log, frame: Frame, smooth: float | None = None) -> Run:
     command=command,
     raw=raw,
     smooth=smoothed,
-    upright=upright,
-    walked=~handled & np.isfinite(smoothed[:, 0]),
-    handled=handled,
+    height=frame.height,
+    lifted=frame.height >= LIFTED_HEIGHT_M,
     driven=driven,
     fall_t=fall_t,
     smooth_s=window_s,
@@ -686,43 +693,57 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
 
   Two differences from the simulated profile figure, both forced by the data.
   It is one robot walking continuously rather than six independent lanes laid
-  end to end, so a fall is drawn where it happened. And it is three panels
-  rather than one: every axis is drawn throughout, because the response to a
-  command the robot was not given is rarely zero, but the torso's yaw swings
-  through a stride by more than any commanded speed, so one shared scale would
-  flatten the two linear axes.
+  end to end, so a fall is drawn where it happened. And the three axes get a
+  panel each: every axis is drawn throughout, because the response to a command
+  the robot was not given is rarely zero, but the torso's yaw swings through a
+  stride by more than any commanded speed, so one shared scale would flatten
+  the two linear axes.
+
+  A fourth panel carries the torso's height above the walking plane, which is
+  what separates the two ways a robot stops walking: a lift goes up, a fall
+  goes down. Stretches off its feet are shaded but nothing is cut out of the
+  traces -- the reader can see what the robot did while it was held.
   """
   if not run.driven:
     raise SystemExit("no commanded motion in this capture; nothing to draw")
 
   names = ("vx", "vy", "wz")
-  fig, axes = plt.subplots(3, 1, figsize=(17, 8.4), sharex=True)
+  fig, axes = plt.subplots(
+    4,
+    1,
+    figsize=(17, 9.6),
+    sharex=True,
+    gridspec_kw={"height_ratios": [1.0, 1.0, 1.0, 0.62]},
+  )
 
   first = run.driven[0][0] - LEAD_S
   last = run.driven[-1][1] + LEAD_S
   window = (run.t >= first) & (run.t <= last)
   t = run.t[window]
-  trace = np.where(run.walked[window, None], run.smooth[window], np.nan)
-  raw = np.where(run.walked[window, None], run.raw[window], np.nan)
-  handled = [
+  trace = run.smooth[window]
+  raw = run.raw[window]
+  height = run.height[window]
+  lifted = [
     (max(a, first), min(b, last))
-    for a, b in _spans(run.t, run.handled)
+    for a, b in _spans(run.t, run.lifted)
     if b >= first and a <= last
   ]
 
-  for index, (ax, name) in enumerate(zip(axes, names, strict=True)):
+  for index, (ax, name) in enumerate(zip(axes[:3], names, strict=True)):
     despine(ax)
     colour = AXIS_COLOUR[name]
     commanded = run.command[window, index]
     # Whichever is larger, the command or the response: a real robot
-    # overshoots, and scaling to the command alone would clip it off.
+    # overshoots, and scaling to the command alone would clip it off. The
+    # percentile is well short of the maximum because a lift off the floor is
+    # drawn rather than filtered, and carries velocities a gait never reaches.
     span = max(
       0.15,
       1.6 * float(np.abs(commanded).max()),
-      1.05 * float(np.nanpercentile(np.abs(trace[:, index]), 99.5)),
+      1.05 * float(np.nanpercentile(np.abs(trace[:, index]), 97.0)),
     )
 
-    for a, b in handled:
+    for a, b in lifted:
       ax.axvspan(a, b, color=MUTED, alpha=0.22, zorder=1)
     ax.axhline(0.0, color=BASELINE, linewidth=0.8, zorder=1)
     ax.plot(
@@ -742,12 +763,31 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
       zorder=4,
       solid_capstyle="round",
     )
-    if run.fall_t is not None and first <= run.fall_t <= last:
-      ax.axvline(run.fall_t, color=RED, linewidth=1.2, linestyle=":", zorder=5)
     ax.set_ylim(-span, span)
+    ax.set_ylabel(f"{AXIS_LABEL[name]} ({AXIS_UNIT[name]})", color=colour)
+
+  # Height above the walking plane. Shorter than the velocity panels because it
+  # is read for its shape -- flat, then a step while somebody holds the robot --
+  # rather than for a value.
+  floor = axes[3]
+  despine(floor)
+  for a, b in lifted:
+    floor.axvspan(a, b, color=MUTED, alpha=0.22, zorder=1)
+  floor.axhline(0.0, color=BASELINE, linewidth=0.8, zorder=1)
+  floor.axhline(
+    LIFTED_HEIGHT_M, color=MUTED, linewidth=0.9, linestyle=(0, (4, 3)), zorder=2
+  )
+  floor.plot(t, height, color=PURPLE, linewidth=1.4, zorder=3)
+  low, high = float(np.nanmin(height)), float(np.nanmax(height))
+  pad = 0.08 * max(high - low, 0.1)
+  floor.set_ylim(min(low - pad, -0.05), max(high + pad, 0.10))
+  floor.set_ylabel("height (m)", color=PURPLE)
+
+  for ax in axes:
     ax.set_xlim(first, last)
     ax.margins(x=0)
-    ax.set_ylabel(f"{AXIS_LABEL[name]} ({AXIS_UNIT[name]})", color=colour)
+    if run.fall_t is not None and first <= run.fall_t <= last:
+      ax.axvline(run.fall_t, color=RED, linewidth=1.2, linestyle=":", zorder=5)
 
   if run.fall_t is not None and first <= run.fall_t <= last:
     axes[0].annotate(
@@ -778,9 +818,9 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
       label=f"measured ({RAW_WINDOW_S:.2f} s fit)",
     ),
   ]
-  if handled:
+  if lifted:
     handles.append(
-      Line2D([], [], color=MUTED, linewidth=8, alpha=0.35, label="not on its feet")
+      Line2D([], [], color=MUTED, linewidth=8, alpha=0.35, label="off its feet")
     )
   fig.legend(
     handles=handles,
@@ -805,12 +845,15 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
     "figure, everything carries across a change of command.\n"
     f"Velocity is a {run.smooth_s:.2f} s straight-line fit to the tracked "
     f"torso -- the window that cancels a measured stride -- drawn over the "
-    f"same fit across {RAW_WINDOW_S:.2f} s.",
+    f"same fit across {RAW_WINDOW_S:.2f} s.\n"
+    f"The bottom panel is the torso's height above the walking plane; over "
+    f"{100 * LIFTED_HEIGHT_M:.0f} cm (dashed) is somebody holding it, and a "
+    f"fall goes the other way. Shaded spans are drawn, not cut out.",
     fontsize=7.5,
     color=MUTED,
     linespacing=1.5,
   )
-  fig.tight_layout(rect=(0, 0.06, 1, 0.945))
+  fig.tight_layout(rect=(0, 0.065, 1, 0.95))
   save(fig, path)
 
 
@@ -854,7 +897,8 @@ def summarise(run: Run, label: str) -> dict:
       "mocap_frames": int(len(run.t)),
       "frames_kept": round(float(run.log.frames_kept), 4),
       "clock_jitter_s": round(float(run.log.clock_jitter), 4),
-      "walked_fraction": round(float(run.walked.mean()), 4),
+      "peak_height_m": round(float(np.nanmax(run.height)), 4),
+      "lifts": [[round(a, 2), round(b, 2)] for a, b in _spans(run.t, run.lifted)],
       "stride_s": None if run.gait_s is None else round(run.gait_s, 4),
       "velocity_window_s": round(run.smooth_s, 4),
       "fall_time_s": None if run.fall_t is None else round(run.fall_t, 2),
@@ -906,10 +950,14 @@ def main() -> None:
   print(f"velocity window   : {run.smooth_s:.2f} s{strides}")
   print(f"commanded motion  : {len(run.driven)} stretches")
   if run.fall_t is not None:
-    print(f"fell              : at {run.fall_t:.1f} s")
-  off = 1.0 - float(run.walked.mean())
-  if off > 0.001:
-    print(f"not on its feet   : {100 * off:.1f}% of the capture, left out")
+    print(f"fell              : at {run.fall_t:.1f} s, from the torso's attitude")
+  lifts = _spans(run.t, run.lifted)
+  print(
+    f"off its feet      : {len(lifts)} lifts over {100 * LIFTED_HEIGHT_M:.0f} cm, "
+    f"peak {100 * float(np.nanmax(run.height)):.0f} cm"
+  )
+  for a, b in lifts:
+    print(f"  {a:6.1f} -> {b:6.1f} s  ({b - a:.1f} s)")
 
   figure_profile(run, label, out / f"fig1_mocap_profile_{name}")
 

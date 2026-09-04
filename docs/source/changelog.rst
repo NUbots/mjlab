@@ -10,12 +10,12 @@ Added
 
 - Added ``scripts/eval/plot_mocap_profile.py``, which draws the velocity-profile
   figure from a motion-capture log of the real robot rather than from a
-  simulated run: command against response for all three axes, on one time axis
-  spanning the whole capture. It reads an ``nbs2json`` export directly, taking
-  the command from ``WalkState``, the motion from the tracked rigid body, and
-  the IMU only to settle the capture frame's handedness. The profile figure
-  only -- a sweep or a grid is hundreds of runs at held commands, which a
-  capture cannot be.
+  simulated run: command against response for all three axes, plus the torso's
+  height above the walking plane, on one time axis spanning the whole capture.
+  It reads an ``nbs2json`` export directly, taking the command from
+  ``WalkState``, the motion from the tracked rigid body, and the IMU only to
+  settle the capture frame's handedness. The profile figure only -- a sweep or
+  a grid is hundreds of runs at held commands, which a capture cannot be.
 
   The capture frame is calibrated from the data and the calibration is printed:
   the floor plane by a robust PCA, its sign from the fact that a robot can be
@@ -25,8 +25,10 @@ Added
   straight-line fit over 1.43 measured strides -- the window at which a
   least-squares slope stops seeing the sway, which is not the one stride a
   moving mean would need -- and the stride itself is measured from the sway's
-  own spectrum. Samples where the robot was off its feet are shaded and left
-  out.
+  own spectrum. Being off its feet is a lift over 4 cm and nothing else; a fall
+  is the opposite sign of the same quantity and is taken from the torso's
+  attitude. Neither is cut out of the traces -- the spans are shaded and drawn,
+  so what the robot did while it was held stays visible.
 - Added ``scripts/eval/figure_style.py``, the palette, matplotlib defaults and
   save helpers shared by ``plot_comparison.py`` and ``plot_mocap_profile.py``,
   so a simulated figure and a captured one can sit on the same page.
