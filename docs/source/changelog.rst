@@ -8,6 +8,15 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added ``scripts/eval/plot_mocap_profile_pair.py``, a one-off that draws the
+  profile strip from two motion-capture logs instead of one. The RL capture had
+  to be flown twice -- the first attempt went down during the yaw stage -- and
+  between them the two logs hold the twelve-phase schedule exactly once, so the
+  figure stitches the head of one onto the rest of the other. The two captures
+  are calibrated separately but fitted over one window, measured from the
+  longer of them, and the seam between them is drawn heavier than a phase
+  boundary and named in the key. Everything but the drawing is imported from
+  ``plot_mocap_profile`` rather than copied.
 - Added ``scripts/eval/plot_mocap_profile.py``, which draws the velocity-profile
   figure from a motion-capture log of the real robot rather than from a
   simulated run: command against response, with the capture's commanded phases
