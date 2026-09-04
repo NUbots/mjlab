@@ -483,7 +483,7 @@ def figure_profile(trace: Trace, path: Path) -> None:
   ax.set_ylim(-span, span)
   ax.set_xlim(0.0, offset)
   ax.margins(x=0)
-  ax.set_xlabel("time (s), the six schedules laid end to end")
+  ax.set_xlabel("time (s)")
   ax.set_ylabel("velocity (m/s) · yaw rate (rad/s)")
 
   handles = [

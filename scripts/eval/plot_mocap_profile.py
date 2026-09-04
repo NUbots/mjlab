@@ -77,7 +77,6 @@ from figure_style import (
   GRID,
   INK,
   INK_2,
-  MUTED,
   RED,
   SMOOTH_S,
   despine,
@@ -721,8 +720,9 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
   """Command against response, as one strip of commanded phases.
 
   The counterpart of the simulated profile figure, and laid out the same way:
-  one axis, the commanded phases end to end, each washed alternately and named
-  over the top. Two differences the data forces.
+  one axis, the commanded phases end to end, washed alternately so they stay
+  separable. What each phase asked for is read off its dashed command line
+  rather than written over the block. Two differences the data forces.
 
   The rests are cut. A capture spends nearly half its length standing between
   one command and the next, which is dead width on a figure; only the commands
@@ -765,29 +765,12 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
     if order % 2:
       ax.axvspan(offset, offset + width, color=GRID, alpha=0.28, zorder=0)
 
-    # Worked out before anything is drawn: in a combined phase both axes move
-    # together, so placing one label above its trace and the other below by
-    # their order stacks them wherever the traces are close. Placing by value
-    # pushes them apart.
-    series = []
     for name in driving:
       column = AXIS_INDEX[name]
+      colour = AXIS_COLOUR[name]
       commanded = run.command[window, column]
-      # The middle of the plateau, not its start: the measurement lags the
-      # command, so the leading edge carries a response still climbing.
-      magnitude = np.abs(commanded)
-      at_peak = np.flatnonzero(magnitude >= magnitude.max() - 1e-6)
-      plateau = int(at_peak[at_peak.size // 2])
       smoothed = np.where(off, np.nan, run.smooth[window, column])
       raw = np.where(off, np.nan, run.raw[window, column])
-      anchor = smoothed[plateau]
-      if not np.isfinite(anchor):
-        anchor = commanded[plateau]
-      series.append((name, raw, smoothed, commanded, plateau, float(anchor)))
-    highest = max(range(len(series)), key=lambda i: series[i][5])
-
-    for depth, (name, raw, smoothed, commanded, plateau, anchor) in enumerate(series):
-      colour = AXIS_COLOUR[name]
       # Fainter than the simulated figure's raw trace: there it is one robot's
       # noise, here it is a whole stride, several times the command on every
       # axis and clipped to the frame for most of the strip.
@@ -803,31 +786,18 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
         time,
         commanded,
         color=colour,
-        linewidth=1.3,
-        linestyle=(0, (5, 3)),
-        alpha=0.95,
+        linewidth=1.2,
         zorder=3,
       )
       ax.plot(
         time,
         np.clip(smoothed, -span, span),
         color=colour,
-        linewidth=2.0,
+        linewidth=1.0,
+        linestyle=(0, (2, 1)),
+        alpha=0.8,
         zorder=4,
         solid_capstyle="round",
-      )
-      # Direct label, so identity never rests on colour alone.
-      above = depth == highest
-      ax.annotate(
-        AXIS_LABEL[name],
-        xy=(float(time[plateau]), anchor),
-        xytext=(0, 11 if above else -12),
-        textcoords="offset points",
-        color=colour,
-        fontsize=9,
-        fontweight="bold",
-        ha="center",
-        va="bottom" if above else "top",
       )
 
     if run.fall_t is not None and start <= run.fall_t <= end:
@@ -843,21 +813,8 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
         color=RED,
         fontsize=7.5,
         fontweight="bold",
+        zorder=6,
       )
-
-    # What this phase asked for, centred over its block.
-    ax.annotate(
-      "  ".join(f"{AXIS_LABEL[n]}{v:+.2f}" for n, v in driving.items()),
-      xy=(offset + width / 2, 1.0),
-      xycoords=("data", "axes fraction"),
-      xytext=(0, 5),
-      textcoords="offset points",
-      ha="center",
-      va="bottom",
-      fontsize=8.0,
-      fontweight="semibold",
-      color=INK,
-    )
 
     offset += width
     boundaries.append(offset)
@@ -868,13 +825,21 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
   ax.set_ylim(-span, span)
   ax.set_xlim(0.0, offset)
   ax.margins(x=0)
-  ax.set_xlabel(f"time (s), the {len(phases)} commanded phases laid end to end")
+  ax.set_xlabel("time (s)")
   ax.set_ylabel("velocity (m/s) · yaw rate (rad/s)")
 
   handles = [
     Line2D(
-      [], [], color=INK_2, linewidth=2.0, label=f"measured ({run.smooth_s:.2f} s fit)"
+      [],
+      [],
+      color=INK_2,
+      linewidth=0.8,
+      linestyle=(0, (2, 1)),
+      alpha=0.6,
+      label=f"measured ({run.smooth_s:.2f} s fit)",
     ),
+    # The one swatch not drawn at its true weight: the raw trace is faint
+    # enough on the strip that a key at the same alpha would be blank.
     Line2D(
       [],
       [],
@@ -883,12 +848,21 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
       alpha=0.35,
       label=f"measured ({RAW_WINDOW_S:.2f} s fit)",
     ),
-    Line2D(
-      [], [], color=INK_2, linewidth=1.4, linestyle=(0, (5, 3)), label="commanded"
-    ),
+    Line2D([], [], color=INK_2, linewidth=2.0, label="commanded"),
   ]
+  # Dots rather than lines: every line style in this key already means
+  # something -- commanded against measured -- so a solid colour swatch reads
+  # as a fourth command trace rather than as an axis.
   handles += [
-    Line2D([], [], color=AXIS_COLOUR[a], linewidth=2.4, label=f"{AXIS_LABEL[a]} axis")
+    Line2D(
+      [],
+      [],
+      color=AXIS_COLOUR[a],
+      marker="o",
+      markersize=6.5,
+      linestyle="none",
+      label=f"{AXIS_LABEL[a]} axis",
+    )
     for a in ("vx", "vy", "wz")
   ]
   fig.legend(
@@ -907,19 +881,7 @@ def figure_profile(run: Run, label: str, path: Path) -> None:
     fontweight="bold",
     color=INK,
   )
-  fig.text(
-    0.006,
-    0.012,
-    "Motion capture of the robot, one continuous run with the rests between "
-    "commands cut out; each phase draws only the axes it commanded. Velocity "
-    f"is a {run.smooth_s:.2f} s straight-line fit to the tracked torso, the "
-    "window that cancels a measured stride. Gaps are the robot off its feet -- "
-    f"held more than {100 * LIFTED_HEIGHT_M:.0f} cm over the height it walks "
-    "at, or fallen -- and are cut rather than drawn.",
-    fontsize=7.5,
-    color=MUTED,
-  )
-  fig.tight_layout(rect=(0, 0.05, 1, 0.90))
+  fig.tight_layout(rect=(0, 0.0, 1, 0.93))
   save(fig, path)
 
 
