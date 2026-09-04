@@ -1,5 +1,7 @@
 """NUbots Nugus velocity environment confiurations."""
 
+import os
+
 from mjlab.asset_zoo.robots import (
   NUGUS_ACTION_SCALE,
   NUGUS_MOTOR_JOINT_REGEX,
@@ -25,6 +27,37 @@ from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
+
+NUGUS_FOCUS = mdp.balanced()
+"""What this run is trying to be good at.
+
+Edit here, or override per-run without touching the file:
+
+* ``MJLAB_VELOCITY_FOCUS=<preset>`` picks a different preset entirely --
+  see ``mdp.FOCUS_PRESETS`` for the list.
+* ``MJLAB_VELOCITY_FOCUS_BALANCE=<0..1>`` slides the chosen preset between
+  all-stability (``0``) and all-speed (``1``) without changing its shape,
+  which is the knob to sweep when hunting for the middle ground.
+
+Env vars rather than ``--env.…`` overrides because tyro cannot introspect
+into a term's ``params`` dict, which is where the focus lands.
+"""
+
+_FOCUS_PRESET_ENV_VAR = "MJLAB_VELOCITY_FOCUS"
+_FOCUS_BALANCE_ENV_VAR = "MJLAB_VELOCITY_FOCUS_BALANCE"
+
+
+def _resolve_focus() -> mdp.TrainingFocusCfg:
+  """``NUGUS_FOCUS`` with the environment-variable overrides applied."""
+  focus = NUGUS_FOCUS
+  preset = os.environ.get(_FOCUS_PRESET_ENV_VAR)
+  if preset:
+    focus = mdp.get_focus_preset(preset)
+  balance = os.environ.get(_FOCUS_BALANCE_ENV_VAR)
+  if balance:
+    focus = focus.with_balance(float(balance))
+  return focus
+
 
 # Peak weights the competence-gated movement penalties ramp toward. Each
 # term starts at 0.0 and only advances a stage while the population is
@@ -354,6 +387,11 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["limb_symmetry"].weight = -0.0  # Disable (debugging)
   cfg.rewards["feet_distance"].weight = -0.1
   cfg.rewards["foot_flat"].weight = -0.5  # Encourage flat-footed, level swing.
+
+  # Training focus. Must come after every per-robot reward edit above: it
+  # wraps the stability terms, and a wrapped term's params are no longer
+  # reachable as ``cfg.rewards[name].params``.
+  mdp.apply_training_focus(cfg, _resolve_focus(), add_diagnostics=not play)
 
   # Competence-gated movement penalties plus the frontier diagnostics that
   # explain them. Always on.

@@ -66,6 +66,97 @@ def track_angular_velocity(
   return torch.exp(-ang_vel_error / std**2)
 
 
+def track_linear_velocity_attainment(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  channel_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
+  command_threshold: float = 0.15,
+  min_credit: float = -0.5,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward the fraction of the commanded linear velocity actually delivered.
+
+  The exponential kernel in :func:`track_linear_velocity` is a *precision*
+  reward: beyond roughly two ``std`` of error it is numerically zero and,
+  worse, flat. A policy handed a command past its capability therefore
+  sees no gradient toward trying harder -- every attainable fraction of
+  that command pays the same nothing -- while moving still costs the
+  movement penalties. Standing still wins. This term restores the missing
+  gradient by paying linearly in the fraction delivered, so closing the
+  last of an unreachable command pays what closing the first of an easy
+  one pays. Pair it with the kernel rather than replacing it: this supplies
+  reach, the kernel supplies accuracy.
+
+  ``channel_weights`` is ``(forward, backward, strafe)`` and makes the
+  measure directional. The value is the weighted projection
+
+  ``sum_c w_c * v_c * c_c / sum_c w_c * c_c^2``
+
+  with the fore/aft weight selected per env by the sign of the commanded
+  x. Weighting forward above strafe means a diagonal command pays mostly
+  for closing its forward component, which is what "I want forward speed
+  more than anything else" has to mean for a term that sees both at once.
+  The expression is scale-invariant in the weights, so only their ratios
+  matter and the term's magnitude stays governed by its configured weight.
+
+  With equal weights this reduces to the plain projection onto the command
+  direction -- the same quantity the competence tracker reports as
+  ``attain`` -- so the reward and the curriculum's sandbagging detector
+  agree by construction. Credit is capped at 1.0 (overshoot earns nothing
+  extra; precision remains the kernel's job) and floored at ``min_credit``
+  so a backwards lunge under a small command cannot dominate the return.
+  Commands shorter than ``command_threshold`` score zero, where the
+  normalization blows up and the kernel is the right instrument anyway.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  command = env.command_manager.get_command(command_name)
+  assert command is not None, f"Command '{command_name}' not found."
+  actual = asset.data.root_link_lin_vel_b
+  w_forward, w_backward, w_strafe = channel_weights
+
+  cmd_x, cmd_y = command[:, 0], command[:, 1]
+  w_x = torch.where(
+    cmd_x >= 0.0,
+    torch.full_like(cmd_x, w_forward),
+    torch.full_like(cmd_x, w_backward),
+  )
+  numerator = w_x * actual[:, 0] * cmd_x + w_strafe * actual[:, 1] * cmd_y
+  denominator = w_x * torch.square(cmd_x) + w_strafe * torch.square(cmd_y)
+  attain = (numerator / denominator.clamp(min=1e-6)).clamp(min=min_credit, max=1.0)
+
+  cmd_sq = torch.sum(torch.square(command[:, :2]), dim=1)
+  return torch.where(cmd_sq >= command_threshold**2, attain, torch.zeros_like(attain))
+
+
+def track_angular_velocity_attainment(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  command_threshold: float = 0.15,
+  min_credit: float = -0.5,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Yaw-rate counterpart of :func:`track_linear_velocity_attainment`.
+
+  Kept as its own term rather than folded in as a fourth channel: the
+  linear form normalizes by ``sum w_c * c_c^2``, and mixing rad/s with m/s
+  inside one normalizer would make the linear-versus-angular balance
+  depend silently on the units. Two terms, two weights, no coupling.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  command = env.command_manager.get_command(command_name)
+  assert command is not None, f"Command '{command_name}' not found."
+  cmd_yaw = command[:, 2]
+  # Projection form rather than a plain ratio, so a zero command produces a
+  # clamped denominator instead of an inf that the mask would have to hide.
+  numerator = asset.data.root_link_ang_vel_b[:, 2] * cmd_yaw
+  attain = (numerator / torch.square(cmd_yaw).clamp(min=1e-6)).clamp(
+    min=min_credit, max=1.0
+  )
+  return torch.where(
+    cmd_yaw.abs() >= command_threshold, attain, torch.zeros_like(attain)
+  )
+
+
 class upright:
   """Reward for keeping the base upright.
 

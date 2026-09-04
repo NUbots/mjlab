@@ -31,6 +31,47 @@ Added
   actuator torque changes, and registered ``joint_acc_l2``, ``joule_heating``
   and ``torque_rate`` penalty terms (weight ``0.0`` by default) on the base
   velocity task config.
+- Added a training focus layer for velocity tasks, expressing what a run
+  should care about in terms of four motion channels -- forward, backward,
+  strafe and yaw. ``mjlab.tasks.velocity.mdp.focus`` defines
+  ``TrainingFocusCfg``, which gives each channel a relative speed weight, a
+  command ``target_speed``, and a ``SpeedProfile`` mapping speed to how much
+  stability matters at that speed, plus ``stability_scale``/``speed_scale``
+  (and ``with_balance``) to slide the stability-versus-speed balance without
+  changing its shape. Named presets cover the common intents
+  (``balanced``, ``speed_first``, ``forward_sprint``, ``strafe_first``,
+  ``low_speed_precision``, ``high_speed_stability``, ``stability_first``,
+  ``stability_agnostic``).
+- Added ``StabilityGate`` and the ``stability_gated`` reward wrapper, which
+  scale the attitude/posture reward group per env and per step by the focus
+  config's profiles. The gate speed for a channel is
+  ``min(commanded, achieved)``: capping at the command is what stops a policy
+  from unlocking penalty relief by simply sprinting, since stability
+  penalties shrink as the gate falls. ``focus_diagnostics`` logs the live
+  gate, per-channel emphasis, blend share and gate speed.
+- Added ``track_linear_velocity_attainment`` and
+  ``track_angular_velocity_attainment`` velocity rewards, paying linearly in
+  the fraction of the command actually delivered. The exponential tracking
+  kernels are numerically zero and flat beyond ~2 std of error, so a command
+  past the policy's capability offers no gradient toward trying harder while
+  moving still costs the movement penalties; these restore that gradient.
+  The linear term takes per-channel weights and reduces to the plain
+  projection onto the command direction when they are equal.
+- Added ``apply_training_focus``, which sets the attainment weights, wraps
+  the stability terms and derives the ``command_vel`` curriculum stages from
+  the channel targets. Wired into NUbots Nugus, defaulting to the
+  ``balanced`` preset and overridable per run with ``MJLAB_VELOCITY_FOCUS``
+  and ``MJLAB_VELOCITY_FOCUS_BALANCE``. Competence thresholds are
+  deliberately left independent of the focus, so preference cannot loosen
+  the safety gate.
+
+Changed
+^^^^^^^
+
+- The NUbots Nugus command curriculum now ramps. Its three ``velocity_stages``
+  were previously identical, making the term a no-op; the stages are now
+  derived from the training focus and grow from ``command_ramp_start`` of
+  each channel's target up to the target itself.
 
 Version 1.6.0 (August 8, 2026)
 ------------------------------
