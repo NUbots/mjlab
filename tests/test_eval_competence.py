@@ -382,6 +382,10 @@ def test_cell_summary_reports_spread_and_marks_undefined_attainment():
   # A cell with no attainment evidence is still read through falls and wobble.
   assert turning["fell_rate"] == 1.0
   assert turning["wobble"]["n"] == len(speeds)
+  # Every episode in that cell fell, so every one has a lead time.
+  assert turning["wobble_lead"]["n"] == len(speeds)
+  # None of the walking cell's episodes fell, so it has none.
+  assert walking["wobble_lead"]["n"] == 0
 
 
 def test_fall_rate_carries_a_binomial_interval():
@@ -572,3 +576,88 @@ def test_the_ragged_column_renders_as_space_separated_integers(tmp_path):
   assert columns["wobble_steps_index"] == "0 4"
   assert columns["num_wobble_steps"] == "2.0"
   assert "," not in columns["wobble_steps_index"]
+
+
+# --------------------------------------------------------------------------
+# Wobble measured per fall, not per episode
+# --------------------------------------------------------------------------
+
+
+def test_wobble_lead_is_the_time_from_the_first_crossing_to_the_fall():
+  competence = collector(((0.4, 0.0, 0.0),))
+  for step in range(10):
+    done = torch.tensor([step == 9])
+    quat = pitched(math.radians(30.0)) if step >= 4 else pitched(0.0)
+    competence.record(state(quaternion=quat), done, done)
+
+  table = competence.table()
+  # Crossed at the step with index 4, episode ended after 10 steps: the
+  # warning ran from 4*dt to 10*dt.
+  assert table.wobble_steps_index[0][0].item() == 4
+  assert float(table.wobble_lead[0]) == pytest.approx(6 * DT)
+
+
+def test_only_the_first_crossing_counts_not_the_last():
+  """A robot that wobbles, recovers, then wobbles again and falls was warned
+  from the first time it tilted, not the second."""
+  competence = collector(((0.4, 0.0, 0.0),))
+  wobbly = {2, 7, 8}
+  for step in range(10):
+    done = torch.tensor([step == 9])
+    quat = pitched(math.radians(30.0)) if step in wobbly else pitched(0.0)
+    competence.record(state(quaternion=quat), done, done)
+
+  assert float(competence.table().wobble_lead[0]) == pytest.approx(8 * DT)
+
+
+def test_an_episode_that_did_not_fall_has_no_lead_time():
+  """A wobble that was recovered from is not the precursor to anything."""
+  competence = collector(((0.4, 0.0, 0.0),))
+  run(competence, 10, quaternion=pitched(math.radians(30.0)), fell=False)
+
+  table = competence.table()
+  assert float(table.wobble[0]) == pytest.approx(1.0)  # it wobbled throughout
+  assert bool(table.wobble_lead.isnan().all())  # but it never fell
+
+
+def test_a_fall_with_no_recorded_crossing_reads_zero_warning():
+  """Zero is not NaN: it fell, and the 25 degree channel gave no warning.
+
+  The terminal step is not sampled, so a torso that goes from under 25 degrees
+  to past 50 inside one control step leaves no bit set.
+  """
+  competence = collector(((0.4, 0.0, 0.0),))
+  run(competence, 6, quaternion=pitched(0.0), fell=True)
+
+  table = competence.table()
+  assert float(table.fell[0]) == 1.0
+  assert float(table.wobble_lead[0]) == 0.0
+
+
+def test_lead_time_is_seconds_so_two_control_rates_agree():
+  """The same fall measured at 50 Hz and at 100 Hz is the same warning."""
+  leads = []
+  for dt, steps in ((0.02, 10), (0.01, 20)):
+    grid = build_grid(((0.4, 0.0, 0.0),), (0.0,), num_envs=1)
+    competence = EpisodeCompetence(grid, 200, dt, "cpu")
+    cross = steps // 2
+    for step in range(steps):
+      done = torch.tensor([step == steps - 1])
+      quat = pitched(math.radians(30.0)) if step >= cross else pitched(0.0)
+      competence.record(state(quaternion=quat), done, done)
+    leads.append(float(competence.table().wobble_lead[0]))
+
+  assert leads[0] == pytest.approx(leads[1], abs=1e-6)
+
+
+def test_lead_time_reaches_the_csv():
+  competence = collector(((0.4, 0.0, 0.0),))
+  for step in range(8):
+    done = torch.tensor([step == 7])
+    quat = pitched(math.radians(30.0)) if step >= 3 else pitched(0.0)
+    competence.record(state(quaternion=quat), done, done)
+
+  columns = competence.table().column_names()
+  assert "wobble_lead" in columns
+  values = competence.table().rows()[0]
+  assert values[columns.index("wobble_lead")] == pytest.approx(5 * DT)

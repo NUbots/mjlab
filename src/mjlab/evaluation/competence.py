@@ -20,8 +20,9 @@ This module is that layer. The definitions are the tracker's, transcribed:
 ``attain_y`` axis's share of command energy, sampled where ``|c_axis| >= 0.10``.
              Kept separate because "asked for lateral, delivered forward" is a
              distinct failure the scalar hides.
-``wobble``   Fraction of steps tilted past 25 degrees. The near-miss channel:
-             it shows stress without termination.
+``wobble``   Seconds from the first tilt past 25 degrees to the fall, for
+``_lead``    episodes that fell. How much warning the near-miss channel gave
+             before the failure it precedes; undefined where nothing fell.
 ``fell``     Binary, from the ``fell_over`` termination.
 ``ep_len``   Episode length over the maximum. Survival, which disambiguates a
 ``_frac``    low ``attain`` caused by early termination from one caused by
@@ -258,7 +259,29 @@ class EpisodeTable:
   """Signed achieved/commanded on the forward axis. NaN where unsampled."""
   attain_y: torch.Tensor
   wobble: torch.Tensor
-  """Fraction of the episode's steps tilted past 25 degrees."""
+  """Fraction of the episode's steps tilted past 25 degrees.
+
+  Kept as raw material -- it is what ``num_wobble_steps / steps`` comes to --
+  but it is no longer the reported wobble channel. Averaged over an episode it
+  answers "how much of the run was spent tilted", which mixes a robot that
+  wobbled briefly and recovered with one that wobbled briefly and fell, and
+  divides both by an episode length that a fall cuts short.
+  """
+  wobble_lead: torch.Tensor
+  """Seconds from the first tilt past 25 degrees to the end of the episode.
+
+  Measured per *fall*, not per episode: NaN wherever the episode timed out,
+  because there is no termination to measure to and a robot that wobbled and
+  recovered is not a near-miss of anything. Zero where the episode fell without
+  a recorded crossing, which means the torso went from under 25 degrees to past
+  the 50 the termination fires at inside one control step -- a fall with no
+  warning at all, which is the reading that matters and is distinct from not
+  having fallen.
+
+  This is what the wobble channel is for: 25 degrees is not a failure, it is
+  the precursor to one, and the useful question is how long the precursor ran
+  before the failure arrived.
+  """
   fell: torch.Tensor
   """1.0 if the episode ended in the ``fell_over`` termination."""
   ep_len_frac: torch.Tensor
@@ -477,6 +500,7 @@ class EpisodeCompetence:
         "steps": steps,
         "ep_len": self.episode_step[ids].float() * self.step_dt,
         "num_wobble_steps": self._wobble_sum[ids],
+        "wobble_lead": self._wobble_lead(ids, fell[ids]),
       }
     )
     # One ragged entry per closing episode, in the same order as the columns
@@ -499,6 +523,35 @@ class EpisodeCompetence:
     self._sample_steps[ids] = 0.0
     self._shoves[ids] = 0.0
     self._wobble_mask[ids] = False
+
+  def _wobble_lead(self, ids: torch.Tensor, fell: torch.Tensor) -> torch.Tensor:
+    """Seconds from the first 25-degree crossing to the end of the episode.
+
+    Only for the episodes that fell; the rest get NaN, because a wobble that
+    was recovered from is not the precursor to anything and has no termination
+    to be measured against.
+
+    The first crossing is the first set bit of the episode's wobble bitmap.
+    ``argmax`` on a boolean row returns the first maximum, which is the first
+    ``True``; a row with no crossing returns 0, so it is masked out by the
+    count rather than trusted. A fallen episode with no recorded crossing gets
+    zero: the terminal step is not sampled, so a torso that went from under 25
+    degrees to past 50 inside one step leaves no bit set, and no warning is
+    exactly what happened. For the same reason the smallest non-zero lead is
+    two control periods -- the last step that can carry a crossing, plus the
+    unsampled step the episode ended on.
+    """
+    closing = self._wobble_mask[ids]
+    first = closing.float().argmax(dim=1)
+    crossed = closing.any(dim=1)
+    # Measured from the start of the crossing step to the end of the episode,
+    # not to the last step sampled. The two differ by one control period, and
+    # only the first is rate-invariant: the same fall recorded at 50 Hz and at
+    # 100 Hz has to come to the same number of seconds, or an engine's warning
+    # time and a policy's are not comparable.
+    lead = (self.episode_step[ids] - first).clamp(min=0).float() * self.step_dt
+    lead = torch.where(crossed, lead, torch.zeros_like(lead))
+    return torch.where(fell, lead, torch.full_like(lead, float("nan")))
 
   @property
   def completed_per_cell(self) -> torch.Tensor:
@@ -681,11 +734,18 @@ CELL_METRICS: tuple[str, ...] = (
   "attain",
   "attain_x",
   "attain_y",
+  "wobble_lead",
   "wobble",
   "ep_len_frac",
 )
 """Continuous per-episode quantities summarised by quartiles. ``fell`` is
-binary and gets a rate with a binomial interval instead."""
+binary and gets a rate with a binomial interval instead.
+
+``wobble_lead`` is quartiled over the episodes that fell, which is the only
+place it is defined, so its ``n`` is the cell's fall count rather than its
+episode count. The per-episode ``wobble`` fraction is still summarised -- it
+costs nothing and the raw columns are in ``episodes.csv`` anyway -- but nothing
+draws it."""
 
 
 def summarise_cells(grid: CompetenceGrid, table: EpisodeTable) -> list[dict]:
@@ -729,7 +789,7 @@ def format_grid_summary(grid: CompetenceGrid, records: list[dict]) -> str:
   """One-screen rendering of the grid: one line per cell."""
   header = (
     f"{'vx':>6} {'vy':>6} {'wz':>6} {'dv':>5} {'eps':>5} "
-    f"{'attain':>18} {'wobble':>18} {'fell':>17} {'ep_len':>18}"
+    f"{'attain':>18} {'wobble lead (s)':>18} {'fell':>17} {'ep_len':>18}"
   )
   lines = [
     f"cells {len(grid.cells)}, episodes {sum(r['episodes'] for r in records)}",
@@ -750,7 +810,7 @@ def format_grid_summary(grid: CompetenceGrid, records: list[dict]) -> str:
     lines.append(
       f"{record['vx']:>6.2f} {record['vy']:>6.2f} {record['wz']:>6.2f} "
       f"{record['shove']:>5.2f} {record['episodes']:>5d} "
-      f"{band(record['attain'])} {band(record['wobble'])} {fell} "
+      f"{band(record['attain'])} {band(record['wobble_lead'])} {fell} "
       f"{band(record['ep_len_frac'])}"
     )
   return "\n".join(lines)

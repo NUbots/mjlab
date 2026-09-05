@@ -301,17 +301,37 @@ Five quantities, one number per episode, taken at the reset that ends it:
 | --- | --- |
 | `attain` | the headline: delivered speed projected on the command, over the commanded speed |
 | `attain_x`, `attain_y` | the same per axis, signed, each sample weighted by that axis's share of command energy |
-| `wobble` | fraction of the episode's steps tilted past 25° — the near-miss channel, which shows stress without termination |
+| `wobble_lead` | seconds from the first tilt past 25° to the fall, for episodes that fell — how much warning the near-miss channel gave |
 | `fell` | binary, from the `fell_over` termination |
 | `ep_len_frac` | survival, which disambiguates a low `attain` caused by early termination from one caused by sandbagging |
 
-`episodes.csv` carries the raw counts behind those fractions as well:
+**Wobble is measured per fall, not per episode.** A fraction of the episode's
+steps spent tilted answers "how much of the run was spent near the edge", which
+mixes a robot that wobbled and recovered with one that wobbled and went over,
+and divides both by an episode length that a fall cuts short. The lead time
+answers the question a behaviour tree has instead: once the robot passes 25°,
+how long is there before it is on the floor. On the walk engine at 0.3 m/s the
+median lead is 1.25 s under a 0.4 m/s shove train and 0.52 s under 0.8 — twice
+the disturbance, less than half the warning, which the fraction did not show at
+all.
+
+It is undefined wherever nothing fell, so the envelope's wobble row is hatched
+exactly where the fall-rate row below it reads zero, and a cell's `n` for this
+one quantity is its *fall* count rather than its episode count. Watch that in
+cells that fell once or twice: the median is over that many episodes, and the
+interquartile band is the only thing saying so. Zero means the episode fell with
+no recorded crossing — the torso went from under 25° to past the 50° the
+termination fires at inside one control step, which is a fall with no warning
+and is deliberately distinct from not having fallen.
+
+`episodes.csv` carries the raw counts behind the per-episode fraction as well:
 `num_wobble_steps` over `steps` reproduces `wobble` exactly, `ep_len` is the
 episode in seconds, and `wobble_steps_index` names *which* steps wobbled, as
-space-separated 0-based indices into the episode. That last column is what turns
-"6% of steps wobbled" into "it wobbled from 4.2 s until it went over at 6.7 s",
-which is usually the question. It is empty for the majority of episodes, which
-never wobble at all.
+space-separated 0-based indices into the episode. The lead time is derived from
+the first of those indices, and the rest are there for anything the single
+number does not answer — whether the wobble was continuous or came in bursts,
+say. The index column is empty for the majority of episodes, which never wobble
+at all.
 
 Steps are rate-dependent — the walk engine runs at 100 Hz and a policy at 50, so
 one twenty-second episode is 2000 steps for one and 1000 for the other. `ep_len`

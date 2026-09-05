@@ -18,7 +18,9 @@ Figures land in ``<input-dir>/figures`` as PNG (300 dpi) and PDF:
   bin, each panel the commanded velocity plane. This is the envelope: read down
   a column for what one disturbance level costs, across a row for how the cost
   grows with the shove. Every row's ramp is oriented so that darker is better,
-  wobble and falls included, so the trouble is wherever the grid goes pale.
+  falls included, so the trouble is wherever the grid goes pale. The wobble row
+  reports the lead time a fall was given, so it is hatched wherever nothing
+  fell.
 * ``<run>_spread`` -- the same grid showing the interquartile range instead of
   the median, because the interesting cells are the high-variance ones and a
   median cannot show that.
@@ -86,6 +88,13 @@ class Run:
       if statistic == "median":
         return cell["fell_rate"]
       return cell["fell_ci_high"] - cell["fell_ci_low"]
+    if quantity not in cell:
+      raise KeyError(
+        f"run {self.name!r} has no {quantity!r}: it was collected before that "
+        "quantity existed. Re-run eval_competence_grid.py for it -- the "
+        "episodes.csv beside it cannot be re-summarised, since cells.json is "
+        "what this reads."
+      )
     return cell[quantity][statistic]
 
   def find(self, vx: float, vy: float, wz: float, shove: float) -> dict | None:
@@ -158,13 +167,20 @@ def yaw_cells(run: Run) -> list[dict]:
 
 QUANTITIES: tuple[tuple[str, str, str, bool], ...] = (
   ("attain", "Attainment", "delivered / commanded", True),
-  ("wobble", "Wobble", "fraction of steps past 25 deg", False),
+  ("wobble_lead", "Wobble lead", "seconds from 25 deg to the fall", True),
   ("fell", "fall rate", "episodes ending in a fall", False),
   ("ep_len_frac", "Survival", "ep. length / maximum", True),
 )
-"""What to draw, in the order the panels stack: the headline, the near-miss
-channel that shows stress without termination, the binary, and the survival
-that disambiguates a low attainment from an early termination.
+"""What to draw, in the order the panels stack: the headline, the warning the
+near-miss channel gave before the failure, the binary, and the survival that
+disambiguates a low attainment from an early termination.
+
+Wobble lead is measured per fall, not per episode: seconds from the first tilt
+past 25 degrees to the termination. More of it is better -- a robot that fought
+for a second before going over gave a behaviour tree a second to react, and one
+that snapped over in two control steps gave it nothing. It is undefined
+wherever nothing fell, so that row is hatched exactly where the fall-rate row
+below it reads zero.
 
 The fourth field says whether more of the quantity is better. It sets which way
 up the ramp goes on the median heatmaps, so that dark reads as *good* in every
@@ -181,7 +197,7 @@ def ramp(higher_is_better: bool):
 
 SPREAD_LABEL = {
   "attain": "IQR of attainment",
-  "wobble": "IQR of wobble",
+  "wobble_lead": "IQR of wobble lead",
   "fell": "width of the 95% interval",
   "ep_len_frac": "IQR of survival",
 }
@@ -277,9 +293,14 @@ def draw_heatmap(
             1.0,
             1.0,
             facecolor=SURFACE,
+            # Matplotlib draws a hatch in the patch's edge colour, so the edge
+            # cannot be the surface gap; the separators come from the minor
+            # grid instead, which this has to sit under. The house style puts
+            # the grid at 0.5 and patches default to 1.
             edgecolor=GRID,
             hatch="///",
             linewidth=0.0,
+            zorder=0.25,
           )
         )
   # A surface-coloured gap between cells, so adjacent values read as separate
@@ -349,7 +370,6 @@ def plane_figure(
     bar.ax.tick_params(length=0, labelsize=7, colors=MUTED)
     bar.set_label(f"{title}\n{label}", fontsize=8, color=INK_2, labelpad=6)
 
-  kind = "median" if statistic == "median" else "spread"
   fig.suptitle(
     f"{run.label} — Competence Envelope",
     fontsize=11,
@@ -358,14 +378,11 @@ def plane_figure(
     x=0.5,
     ha="center",
   )
-  scale = (
-    "Darker is better"
-    if statistic == "median"
-    else "Darker is a wider spread"
-  )
+  scale = "Darker is better" if statistic == "median" else "Darker is a wider spread"
   note(
     fig,
-    f"{scale}.",
+    f"{scale}. Hatched: nothing to measure -- no attainment sample below a "
+    "commanded 0.15 m/s, no wobble lead where nothing fell.",
   )
   save(fig, path)
 
@@ -644,8 +661,8 @@ def difference_figure(before: Run, after: Run, path: Path) -> None:
   note(
     fig,
     "gray is no change; which direction is an improvement differs by row -- "
-    "more attainment and survival is better, less wobble and fewer falls is "
-    "better.",
+    "more attainment, more warning before a fall and more survival is better; "
+    "fewer falls is better.",
   )
   save(fig, path)
 

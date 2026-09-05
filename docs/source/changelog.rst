@@ -21,6 +21,7 @@ Added
   whether the episode is one a policy would have been terminated for. The
   distilled policy is not offered: it reads nothing at all, so a disturbance
   axis would measure the plant carrying it, not a controller reacting.
+
 - ``episodes.csv`` now carries the raw step counts behind the competence
   fractions: ``steps`` (the denominator the averages were taken over, so
   ``num_wobble_steps / steps`` reproduces ``wobble`` exactly), ``ep_len`` in
@@ -296,6 +297,25 @@ Added
   task observations, rewards, and reset events are scoped to motor joints
   only via ``NUGUS_MOTOR_JOINT_REGEX`` so the passive joints do not appear
   in the policy's view.
+
+Changed
+^^^^^^^
+
+- Wobble is reported per *fall* rather than per episode. The new
+  ``wobble_lead`` is the seconds from an episode's first tilt past 25 degrees
+  to its termination, defined only where the episode fell, and it replaces the
+  fraction-of-steps-tilted in ``cells.json``, in the console summary and in
+  every figure. Averaged over an episode the fraction mixed a robot that
+  wobbled and recovered with one that wobbled and went over, and divided both
+  by a length a fall cuts short; the lead time answers how much warning the
+  precursor gave before the failure it precedes. Measured from the crossing to
+  the end of the episode rather than to the last sampled step, so the same fall
+  recorded at 50 Hz and at 100 Hz comes to the same number of seconds. NaN
+  where nothing fell -- so the envelope's wobble row is hatched exactly where
+  the fall-rate row reads zero -- and zero where an episode fell with no
+  recorded crossing, which is a fall with no warning rather than no fall. The
+  per-episode fraction stays in ``episodes.csv`` and ``cells.json`` as raw
+  material; nothing draws it.
 
 Fixed
 ^^^^^
