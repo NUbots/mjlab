@@ -76,8 +76,7 @@ class Run:
 
   @property
   def label(self) -> str:
-    plant = self.meta.get("plant")
-    return f"{self.name} ({plant})" if plant else self.name
+    return f"{self.name}"
 
   def value(self, cell: dict | None, quantity: str, statistic: str) -> float:
     """One number out of one cell, or NaN where the cell has no evidence."""
@@ -158,10 +157,10 @@ def yaw_cells(run: Run) -> list[dict]:
 
 
 QUANTITIES: tuple[tuple[str, str, str, bool], ...] = (
-  ("attain", "attainment", "delivered / commanded", True),
-  ("wobble", "wobble", "fraction of steps past 25 deg", False),
+  ("attain", "Attainment", "delivered / commanded", True),
+  ("wobble", "Wobble", "fraction of steps past 25 deg", False),
   ("fell", "fall rate", "episodes ending in a fall", False),
-  ("ep_len_frac", "survival", "episode length / maximum", True),
+  ("ep_len_frac", "Survival", "ep. length / maximum", True),
 )
 """What to draw, in the order the panels stack: the headline, the near-miss
 channel that shows stress without termination, the binary, and the survival
@@ -352,25 +351,21 @@ def plane_figure(
 
   kind = "median" if statistic == "median" else "spread"
   fig.suptitle(
-    f"{run.label} — competence envelope, {kind} over episodes",
+    f"{run.label} — Competence Envelope",
     fontsize=11,
     color=INK,
     fontweight="semibold",
-    x=0.02,
-    ha="left",
+    x=0.5,
+    ha="center",
   )
   scale = (
-    "each row carries its own scale, and the ramps are oriented so darker is "
-    "better in every row -- more attainment and survival, less wobble and "
-    "fewer falls"
+    "Darker is better"
     if statistic == "median"
-    else "each row carries its own scale; darker is a wider spread in every row"
+    else "Darker is a wider spread"
   )
   note(
     fig,
-    f"{scale}. hatched: no attainment sample was taken, the commanded speed "
-    f"being under 0.15 m/s. at least {min_episodes(cells)} episodes behind "
-    "every cell.",
+    f"{scale}.",
   )
   save(fig, path)
 
