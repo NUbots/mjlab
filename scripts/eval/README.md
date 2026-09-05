@@ -405,6 +405,15 @@ draws `curves_<quantity>` — the same numbers against shove magnitude, one pane
 per commanded velocity, one line per run with its interquartile band — and, for
 a pair of runs, `difference`.
 
+Every row of the envelope is oriented so that **darker is better** — the wobble
+and fall-rate ramps are reversed, so dark means *less* of them. One polarity
+across four rows means the trouble is wherever the grid goes pale, without
+stopping at each row to remember which way it reads. It also makes a refusal
+visible at a glance: a controller that declined the command goes pale in the
+attainment row while staying dark in the other three, where one that genuinely
+failed goes pale in all four. The spread figure keeps a single un-reversed ramp,
+because a wide band is not "bad" the way a fall is.
+
 The curve figures cut through six commands, chosen with `--curve-commands`. The
 default set is a forward ladder at 0.25, 0.5 and 0.75, one backwards ask, one
 lateral and one turn-while-walking. It does **not** include 1.0 m/s, for the

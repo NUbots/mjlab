@@ -17,7 +17,8 @@ Figures land in ``<input-dir>/figures`` as PNG (300 dpi) and PDF:
 * ``<run>_envelope`` -- the headline. One row per quantity, one column per shove
   bin, each panel the commanded velocity plane. This is the envelope: read down
   a column for what one disturbance level costs, across a row for how the cost
-  grows with the shove.
+  grows with the shove. Every row's ramp is oriented so that darker is better,
+  wobble and falls included, so the trouble is wherever the grid goes pale.
 * ``<run>_spread`` -- the same grid showing the interquartile range instead of
   the median, because the interesting cells are the high-variance ones and a
   median cannot show that.
@@ -156,15 +157,28 @@ def yaw_cells(run: Run) -> list[dict]:
   return [cell for cell in run.cells if not _close(cell["wz"], 0.0)]
 
 
-QUANTITIES: tuple[tuple[str, str, str], ...] = (
-  ("attain", "attainment", "delivered / commanded"),
-  ("wobble", "wobble", "fraction of steps past 25 deg"),
-  ("fell", "fall rate", "episodes ending in a fall"),
-  ("ep_len_frac", "survival", "episode length / maximum"),
+QUANTITIES: tuple[tuple[str, str, str, bool], ...] = (
+  ("attain", "attainment", "delivered / commanded", True),
+  ("wobble", "wobble", "fraction of steps past 25 deg", False),
+  ("fell", "fall rate", "episodes ending in a fall", False),
+  ("ep_len_frac", "survival", "episode length / maximum", True),
 )
 """What to draw, in the order the panels stack: the headline, the near-miss
 channel that shows stress without termination, the binary, and the survival
-that disambiguates a low attainment from an early termination."""
+that disambiguates a low attainment from an early termination.
+
+The fourth field says whether more of the quantity is better. It sets which way
+up the ramp goes on the median heatmaps, so that dark reads as *good* in every
+row rather than as *more*: a reader scanning four rows at once should be able to
+find the trouble by looking for the pale corner, without stopping to remember
+which two rows invert. The colourbars carry the reversal for anyone reading a
+row on its own."""
+
+
+def ramp(higher_is_better: bool):
+  """The sequential ramp, oriented so its dark end is the good end."""
+  return SEQUENTIAL if higher_is_better else SEQUENTIAL.reversed()
+
 
 SPREAD_LABEL = {
   "attain": "IQR of attainment",
@@ -305,17 +319,20 @@ def plane_figure(
     squeeze=False,
     layout="constrained",
   )
-  for row, (quantity, title, unit) in enumerate(QUANTITIES):
+  for row, (quantity, title, unit, higher_is_better) in enumerate(QUANTITIES):
     grids = [plane_array(run, quantity, statistic, shove, vxs, vys) for shove in shoves]
     finite = np.concatenate([grid[np.isfinite(grid)].ravel() for grid in grids])
     vmin = float(np.min(finite)) if finite.size else 0.0
     vmax = float(np.max(finite)) if finite.size else 1.0
     if vmax - vmin < 1e-9:
       vmax = vmin + 1e-9
+    # Spread is spread: a wide band is not "bad" the way a fall is, and all
+    # four rows already read the same way, so only the medians are oriented.
+    cmap = ramp(higher_is_better) if statistic == "median" else SEQUENTIAL
     image = None
     for column, (shove, grid) in enumerate(zip(shoves, grids, strict=True)):
       ax = axes[row][column]
-      image = draw_heatmap(ax, grid, vxs, vys, SEQUENTIAL, vmin, vmax)
+      image = draw_heatmap(ax, grid, vxs, vys, cmap, vmin, vmax)
       if row == 0:
         ax.set_title(f"$|\\Delta v|$ = {shove:g} m/s", pad=6)
       if column == 0:
@@ -342,12 +359,18 @@ def plane_figure(
     x=0.02,
     ha="left",
   )
+  scale = (
+    "each row carries its own scale, and the ramps are oriented so darker is "
+    "better in every row -- more attainment and survival, less wobble and "
+    "fewer falls"
+    if statistic == "median"
+    else "each row carries its own scale; darker is a wider spread in every row"
+  )
   note(
     fig,
-    "each row carries its own scale, so darker is more of the quantity it "
-    "names -- better for attainment and survival, worse for wobble and falls. "
-    "hatched: no attainment sample was taken, the commanded speed being under "
-    f"0.15 m/s. at least {min_episodes(cells)} episodes behind every cell.",
+    f"{scale}. hatched: no attainment sample was taken, the commanded speed "
+    f"being under 0.15 m/s. at least {min_episodes(cells)} episodes behind "
+    "every cell.",
   )
   save(fig, path)
 
@@ -436,7 +459,7 @@ def yaw_figure(run: Run, path: Path) -> None:
     squeeze=False,
     layout="constrained",
   )
-  for column, (quantity, title, unit) in enumerate(QUANTITIES):
+  for column, (quantity, title, unit, higher_is_better) in enumerate(QUANTITIES):
     grid = np.full((len(shoves), len(wzs)), np.nan)
     for row, shove in enumerate(shoves):
       for index, wz in enumerate(wzs):
@@ -446,7 +469,7 @@ def yaw_figure(run: Run, path: Path) -> None:
     vmin = float(np.min(finite)) if finite.size else 0.0
     vmax = float(np.max(finite)) if finite.size else 1.0
     image = draw_heatmap(
-      ax, grid, wzs, shoves, SEQUENTIAL, vmin, max(vmax, vmin + 1e-9)
+      ax, grid, wzs, shoves, ramp(higher_is_better), vmin, max(vmax, vmin + 1e-9)
     )
     ax.set_title(title, fontsize=9, pad=6)
     ax.set_xlabel(r"$\omega_z$ (rad/s)")
@@ -588,7 +611,7 @@ def difference_figure(before: Run, after: Run, path: Path) -> None:
     squeeze=False,
     layout="constrained",
   )
-  for row, (quantity, title, _) in enumerate(QUANTITIES):
+  for row, (quantity, title, _, _better) in enumerate(QUANTITIES):
     grids = [
       plane_array(after, quantity, "median", shove, vxs, vys)
       - plane_array(before, quantity, "median", shove, vxs, vys)
@@ -702,7 +725,7 @@ def main() -> None:
     axes_figure(run, output_dir / f"{run.name}_axes")
     yaw_figure(run, output_dir / f"{run.name}_yaw")
 
-  for quantity, title, unit in QUANTITIES:
+  for quantity, title, unit, _ in QUANTITIES:
     curve_figure(
       runs, quantity, title, unit, commands, output_dir / f"curves_{quantity}"
     )

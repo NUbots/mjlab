@@ -21,6 +21,14 @@ Added
   whether the episode is one a policy would have been terminated for. The
   distilled policy is not offered: it reads nothing at all, so a disturbance
   axis would measure the plant carrying it, not a controller reacting.
+- The competence envelope's ramps are oriented so darker is better in every
+  row: wobble and fall rate now use the reversed sequential ramp, so dark means
+  less of them, and attainment and survival keep theirs. One polarity across the
+  four rows means the trouble is wherever the grid goes pale, and it makes a
+  refusal legible at a glance -- a controller that declined the command goes
+  pale in attainment alone while the other three rows stay dark, where one that
+  genuinely failed goes pale in all four. The spread figure keeps a single
+  un-reversed ramp, since a wide band is not bad the way a fall is.
 - ``plot_competence_grid.py``'s default curve commands no longer include
   1.0 m/s forward. Both competence-trained policies stop walking and march in
   place above roughly 0.81 m/s commanded -- perfect tracking at 0.80, 0.04 m/s
