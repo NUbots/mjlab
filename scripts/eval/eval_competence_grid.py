@@ -84,9 +84,9 @@ class GridCfg:
   behaviour tree asks for, and the slice keeps yaw from going unmeasured.
   """
 
-  vx: tuple[float, ...] = (-0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0)
+  vx: tuple[float, ...] = (-1.67, -1.33, -1.0, -0.67, -0.33, 0.0, 0.33, 0.67, 1.0, 1.33, 1.67)
   """Forward commands, in m/s. Spans the trained range."""
-  vy: tuple[float, ...] = (-0.5, -0.25, 0.0, 0.25, 0.5)
+  vy: tuple[float, ...] = (-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0)
   """Lateral commands, in m/s."""
   wz: tuple[float, ...] = (-0.5, -0.25, 0.25, 0.5)
   """Yaw rates for the slice, in rad/s. Zero is omitted because the whole plane
@@ -96,7 +96,7 @@ class GridCfg:
   turning while walking are different asks, and the latter is the one a game
   situation produces."""
 
-  shoves: tuple[float, ...] = (0.0, 0.4, 0.6, 0.8, 1.0, 1.2)
+  shoves: tuple[float, ...] = (0.0, 0.8)
   """Shove magnitudes, as ``|dv_xy|`` in m/s. Must include ``0.0``: the
   undisturbed row is what every other row is read against.
 
