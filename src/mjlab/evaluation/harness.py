@@ -518,7 +518,7 @@ class WalkEvalHarness(Generic[ControllerT]):
 
     command = grid.command.to(self.device)
     self.reset()
-    collector = EpisodeCompetence(grid, max_episode_steps, self.device)
+    collector = EpisodeCompetence(grid, max_episode_steps, self.control_dt, self.device)
     generator = torch.Generator(device=self.device)
     generator.manual_seed(seed)
     driver = ShoveDriver(
@@ -1086,7 +1086,9 @@ class RlEvalHarness:
       prescribe_velocity_commands(self.env, grid.command.to(self.device))
       obs = self.wrapped.get_observations()
 
-      collector = EpisodeCompetence(grid, max_episode_steps, self.device)
+      collector = EpisodeCompetence(
+        grid, max_episode_steps, self.control_dt, self.device
+      )
       generator = torch.Generator(device=self.device)
       generator.manual_seed(seed)
       driver = ShoveDriver(

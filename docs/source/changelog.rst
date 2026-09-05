@@ -21,6 +21,16 @@ Added
   whether the episode is one a policy would have been terminated for. The
   distilled policy is not offered: it reads nothing at all, so a disturbance
   axis would measure the plant carrying it, not a controller reacting.
+- ``episodes.csv`` now carries the raw step counts behind the competence
+  fractions: ``steps`` (the denominator the averages were taken over, so
+  ``num_wobble_steps / steps`` reproduces ``wobble`` exactly), ``ep_len`` in
+  seconds, ``num_wobble_steps``, and ``wobble_steps_index`` -- which steps of
+  the episode wobbled, as space-separated 0-based indices. The last is ragged by
+  nature, so it is accumulated as a per-environment bitmap and rendered as one
+  string per row, which keeps a file of one row per episode. Seconds rather than
+  steps for ``ep_len`` because a step is not comparable across controllers: the
+  walk engine runs at 100 Hz and a policy at 50. Nothing the figures read
+  changed.
 - The competence envelope's ramps are oriented so darker is better in every
   row: wobble and fall rate now use the reversed sequential ramp, so dark means
   less of them, and attainment and survival keep theirs. One polarity across the

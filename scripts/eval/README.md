@@ -305,6 +305,18 @@ Five quantities, one number per episode, taken at the reset that ends it:
 | `fell` | binary, from the `fell_over` termination |
 | `ep_len_frac` | survival, which disambiguates a low `attain` caused by early termination from one caused by sandbagging |
 
+`episodes.csv` carries the raw counts behind those fractions as well:
+`num_wobble_steps` over `steps` reproduces `wobble` exactly, `ep_len` is the
+episode in seconds, and `wobble_steps_index` names *which* steps wobbled, as
+space-separated 0-based indices into the episode. That last column is what turns
+"6% of steps wobbled" into "it wobbled from 4.2 s until it went over at 6.7 s",
+which is usually the question. It is empty for the majority of episodes, which
+never wobble at all.
+
+Steps are rate-dependent — the walk engine runs at 100 Hz and a policy at 50, so
+one twenty-second episode is 2000 steps for one and 1000 for the other. `ep_len`
+and `ep_len_frac` are the comparable columns; `steps` and the indices are raw.
+
 **These are the training competence tracker's definitions with the smoothing
 taken off.** `mjlab.tasks.velocity.mdp.competence` EMAs each of them and
 initialises those EMAs pessimistically, because its job is to hand a curriculum

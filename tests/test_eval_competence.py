@@ -25,6 +25,7 @@ from mjlab.evaluation.competence import (
   episode_end,
   projected_gravity_xy_norm,
   summarise_cells,
+  write_episodes_csv,
 )
 from mjlab.evaluation.metrics import FALL_UPRIGHT_THRESHOLD, EvalState
 
@@ -61,7 +62,7 @@ def collector(
   shoves: tuple[float, ...] = (0.0,),
 ) -> EpisodeCompetence:
   grid = build_grid(commands, shoves, num_envs=len(commands) * len(shoves))
-  return EpisodeCompetence(grid, max_episode_steps=MAX_STEPS, device="cpu")
+  return EpisodeCompetence(grid, max_episode_steps=MAX_STEPS, step_dt=DT, device="cpu")
 
 
 def run(
@@ -458,3 +459,116 @@ def test_environments_end_independently():
 
   assert done.tolist() == [True, True, False]
   assert fell.tolist() == [True, False, False]
+
+
+# --------------------------------------------------------------------------
+# The raw step counts and which steps wobbled
+# --------------------------------------------------------------------------
+
+
+def test_steps_is_the_denominator_the_wobble_fraction_used():
+  """``num_wobble_steps / steps`` has to reproduce ``wobble`` exactly.
+
+  Otherwise the raw counts and the fraction are two different measurements
+  wearing one name.
+  """
+  competence = collector(((0.4, 0.0, 0.0),))
+  tilted = pitched(math.radians(30.0))
+  for step in range(10):
+    done = torch.tensor([step == 9])
+    competence.record(
+      state(quaternion=tilted if step < 6 else pitched(0.0)), done, done
+    )
+
+  table = competence.table()
+  # Nine sampled steps: the tenth ended the episode and is excluded.
+  assert float(table.steps[0]) == 9.0
+  assert float(table.num_wobble_steps[0]) == 6.0
+  assert float(table.num_wobble_steps[0] / table.steps[0]) == pytest.approx(
+    float(table.wobble[0])
+  )
+
+
+def test_ep_len_is_seconds_and_counts_the_terminal_step():
+  """Steps are rate-dependent; seconds are what two controllers share."""
+  competence = collector(((0.4, 0.0, 0.0),))
+  run(competence, 20, fell=True)
+
+  table = competence.table()
+  assert float(table.ep_len[0]) == pytest.approx(20 * DT)
+  # The episode length counts the terminal step, the averages do not.
+  assert float(table.steps[0]) == 19.0
+  assert float(table.ep_len_frac[0]) == pytest.approx(20.0 / MAX_STEPS)
+
+
+def test_wobble_indices_name_the_steps_that_wobbled():
+  """0-based within the episode, in order."""
+  competence = collector(((0.4, 0.0, 0.0),))
+  wobbly = {2, 3, 7}
+  for step in range(10):
+    done = torch.tensor([step == 9])
+    quat = pitched(math.radians(30.0)) if step in wobbly else pitched(0.0)
+    competence.record(state(quaternion=quat), done, done)
+
+  table = competence.table()
+  assert len(table.wobble_steps_index) == 1
+  assert table.wobble_steps_index[0].tolist() == sorted(wobbly)
+  assert float(table.num_wobble_steps[0]) == len(wobbly)
+
+
+def test_an_episode_that_never_wobbled_has_an_empty_index():
+  competence = collector(((0.4, 0.0, 0.0),))
+  run(competence, 10)
+
+  table = competence.table()
+  assert table.wobble_steps_index[0].numel() == 0
+  assert float(table.num_wobble_steps[0]) == 0.0
+
+
+def test_wobble_indices_do_not_carry_across_a_reset():
+  """The bitmap is per episode, like every other accumulator."""
+  competence = collector(((0.4, 0.0, 0.0),))
+  run(competence, 4, quaternion=pitched(math.radians(40.0)), fell=True)
+  run(competence, 6, quaternion=pitched(0.0))
+
+  table = competence.table()
+  assert table.num_episodes == 2
+  # Three sampled steps in the first episode, all of them tilted.
+  assert table.wobble_steps_index[0].tolist() == [0, 1, 2]
+  assert table.wobble_steps_index[1].numel() == 0
+
+
+def test_indices_stay_with_their_own_episode_when_several_end_at_once():
+  """Two environments closing on one step must not swap index lists."""
+  competence = collector(((0.4, 0.0, 0.0), (0.5, 0.0, 0.0)))
+  calm, tilted = pitched(0.0), pitched(math.radians(30.0))
+  for step in range(6):
+    done = torch.tensor([step == 5, step == 5])
+    # Only the second environment wobbles, and only on steps 1 and 3.
+    quats = torch.cat([calm, tilted if step in (1, 3) else calm])
+    competence.record(state(quaternion=quats, num_envs=2), done, done)
+
+  table = competence.table()
+  by_cell = {
+    int(c): idx for c, idx in zip(table.cell, table.wobble_steps_index, strict=True)
+  }
+  assert by_cell[0].tolist() == []
+  assert by_cell[1].tolist() == [1, 3]
+
+
+def test_the_ragged_column_renders_as_space_separated_integers(tmp_path):
+  """One row per episode in the CSV, and no quoting needed."""
+  competence = collector(((0.4, 0.0, 0.0),))
+  for step in range(6):
+    done = torch.tensor([step == 5])
+    quat = pitched(math.radians(30.0)) if step in (0, 4) else pitched(0.0)
+    competence.record(state(quaternion=quat), done, done)
+
+  path = tmp_path / "episodes.csv"
+  write_episodes_csv(path, competence.table())
+  header, row = path.read_text().splitlines()
+
+  columns = dict(zip(header.split(","), row.split(","), strict=True))
+  assert columns["wobble_steps_index"] == "0 4"
+  assert columns["num_wobble_steps"] == "2.0"
+  assert "," not in columns["wobble_steps_index"]

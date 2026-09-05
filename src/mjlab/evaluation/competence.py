@@ -233,7 +233,11 @@ def build_grid(
 
 @dataclass(frozen=True)
 class EpisodeTable:
-  """One row per completed episode. Every field is a shape ``(E,)`` tensor.
+  """One row per completed episode.
+
+  Every field is a shape ``(E,)`` tensor except :attr:`wobble_steps_index`,
+  which is ragged -- one variable-length tensor per episode -- because the
+  number of wobbly steps is what it reports.
 
   This is the raw material the figures are built from, and it is what gets
   written to disk. Deliberately not aggregated: the interesting cells are the
@@ -264,11 +268,52 @@ class EpisodeTable:
   took fewer than a full one, which is why the dose is reported rather than
   assumed."""
 
+  steps: torch.Tensor
+  """Steps the episode's averages were taken over.
+
+  The denominator of :attr:`wobble`, so ``num_wobble_steps / steps`` reproduces
+  it exactly. One short of the episode's length whenever the episode ended,
+  because the step it ended on is excluded from the averages -- see
+  :meth:`EpisodeCompetence.record`.
+  """
+  ep_len: torch.Tensor
+  """Length of the episode, in seconds.
+
+  Seconds rather than steps because a step is not comparable across
+  controllers: the walk engine runs at 100 Hz and a policy at 50, so the same
+  twenty-second episode is 2000 steps for one and 1000 for the other. The step
+  count is :attr:`steps` (plus the terminal step), and the fraction of a full
+  episode is :attr:`ep_len_frac`.
+  """
+  num_wobble_steps: torch.Tensor
+  """Steps of the episode tilted past 25 degrees, as a count rather than the
+  fraction :attr:`wobble` reports."""
+  wobble_steps_index: tuple[torch.Tensor, ...]
+  """Which steps those were: one tensor per episode of 0-based step indices.
+
+  Ragged, since an episode has as many entries as it had wobbly steps and most
+  have none. Indices count control steps from the start of the episode, so they
+  are on the same rate-dependent footing as :attr:`steps`; multiply by the
+  control period for seconds.
+  """
+
   def column_names(self) -> list[str]:
     return [f.name for f in fields(self)]
 
-  def rows(self) -> list[list[float]]:
-    columns = [getattr(self, name).tolist() for name in self.column_names()]
+  def rows(self) -> list[list[object]]:
+    """Per-episode rows, in :meth:`column_names` order.
+
+    The ragged column is rendered as space-separated integers, which keeps one
+    row per episode and needs no quoting. It is empty for an episode that never
+    wobbled, which is most of them.
+    """
+    columns: list[list[object]] = []
+    for name in self.column_names():
+      value = getattr(self, name)
+      if name == "wobble_steps_index":
+        columns.append([" ".join(str(i) for i in row.tolist()) for row in value])
+      else:
+        columns.append(list(value.tolist()))
     return [list(row) for row in zip(*columns, strict=True)]
 
   @property
@@ -288,6 +333,7 @@ class EpisodeCompetence:
     self,
     grid: CompetenceGrid,
     max_episode_steps: int,
+    step_dt: float,
     device: torch.device | str,
   ) -> None:
     """
@@ -295,12 +341,15 @@ class EpisodeCompetence:
       grid: The cell assignment; supplies the per-environment command.
       max_episode_steps: Denominator for ``ep_len_frac``, i.e. the environment's
         ``max_episode_length``.
+      step_dt: Control period in seconds, which turns a step count into the
+        ``ep_len`` an engine and a policy can be compared on.
       device: Device the accumulators live on.
     """
     if max_episode_steps <= 0:
       raise ValueError(f"max_episode_steps must be positive, got {max_episode_steps}")
     self.grid = grid
     self.max_episode_steps = max_episode_steps
+    self.step_dt = float(step_dt)
     self.device = torch.device(device)
 
     n = grid.num_envs
@@ -327,7 +376,18 @@ class EpisodeCompetence:
     self._wobble_sum = zeros.clone()
     self._sample_steps = zeros.clone()
     self._shoves = zeros.clone()
+    # Which steps of the current episode wobbled, as a bitmap rather than a
+    # growing list per environment: one bool per env per step is a few megabytes
+    # at any batch this pipeline runs, and it makes the per-episode extraction
+    # one masked nonzero instead of a Python append on every step.
+    self._wobble_mask = torch.zeros(
+      n, max_episode_steps, dtype=torch.bool, device=self.device
+    )
     self._rows: list[dict[str, torch.Tensor]] = []
+    # Kept beside ``_rows`` and appended in the same breath, because the ragged
+    # column has to stay aligned with the columnar ones and nothing else
+    # enforces that.
+    self._wobble_indices: list[torch.Tensor] = []
     self._completed = torch.zeros(len(grid.cells), dtype=torch.long, device=self.device)
 
   def note_shoves(self, env_ids: torch.Tensor) -> None:
@@ -356,8 +416,14 @@ class EpisodeCompetence:
     weight = live.float()
 
     tilt = projected_gravity_xy_norm(state.quaternion_w)
-    self._wobble_sum += weight * (tilt > WOBBLE_GRAVITY_XY).float()
+    wobbling = (tilt > WOBBLE_GRAVITY_XY) & live
+    self._wobble_sum += wobbling.float()
     self._sample_steps += weight
+    # 0-based within the episode, and episode_step was incremented above, so
+    # the step just taken is the one before it. Clamped only so a caller that
+    # runs an episode past its stated length cannot index out of the bitmap.
+    index = (self.episode_step - 1).clamp(0, self.max_episode_steps - 1)
+    self._wobble_mask[wobbling, index[wobbling]] = True
 
     vel_xy = state.lin_vel_b[:, :2]
     attain = (vel_xy * self._cmd_xy).sum(dim=-1) / self._cmd_sq.clamp(min=1e-6)
@@ -408,8 +474,18 @@ class EpisodeCompetence:
         "fell": fell[ids].float(),
         "ep_len_frac": self.episode_step[ids].float() / self.max_episode_steps,
         "shoves_taken": self._shoves[ids],
+        "steps": steps,
+        "ep_len": self.episode_step[ids].float() * self.step_dt,
+        "num_wobble_steps": self._wobble_sum[ids],
       }
     )
+    # One ragged entry per closing episode, in the same order as the columns
+    # above: nonzero returns row-major, so splitting by the per-row counts
+    # recovers each episode's indices without a loop over environments.
+    closing = self._wobble_mask[ids]
+    counts = closing.sum(dim=1)
+    columns = closing.nonzero(as_tuple=False)[:, 1].to(torch.int32)
+    self._wobble_indices.extend(torch.split(columns, counts.tolist()))
     self._completed += torch.bincount(
       self.cell_index[ids], minlength=len(self.grid.cells)
     )
@@ -422,6 +498,7 @@ class EpisodeCompetence:
     self._wobble_sum[ids] = 0.0
     self._sample_steps[ids] = 0.0
     self._shoves[ids] = 0.0
+    self._wobble_mask[ids] = False
 
   @property
   def completed_per_cell(self) -> torch.Tensor:
@@ -440,13 +517,15 @@ class EpisodeCompetence:
     a censored length and a partial dose of shoves, and counting it would pull
     ``ep_len_frac`` down for reasons that have nothing to do with the robot.
     """
-    names = [f.name for f in fields(EpisodeTable)]
+    names = [f.name for f in fields(EpisodeTable) if f.name != "wobble_steps_index"]
     if not self._rows:
       empty = {name: torch.zeros(0, device=self.device) for name in names}
-      return EpisodeTable(**empty)
-    return EpisodeTable(
-      **{name: torch.cat([row[name].float() for row in self._rows]) for name in names}
-    )
+      return EpisodeTable(**empty, wobble_steps_index=())
+    columns = {
+      name: torch.cat([row[name].float() for row in self._rows]) for name in names
+    }
+    assert len(self._wobble_indices) == len(columns["cell"])
+    return EpisodeTable(**columns, wobble_steps_index=tuple(self._wobble_indices))
 
 
 @dataclass(frozen=True)
