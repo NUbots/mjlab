@@ -10,6 +10,9 @@ you** — everything below has only been smoke-tested at 64 environments.
 - `eval_rl_walk.py` — a trained RL policy, from an rsl-rl checkpoint.
 - `eval_velocity_profile.py` — any of the three, under a command that *moves*.
 - `eval_push_recovery.py` — any of the three, shoved and made to recover.
+- `eval_competence_grid.py` and `plot_competence_grid.py` — a policy's
+  envelope over commanded velocity *crossed with* shove magnitude, one
+  distribution of episodes per cell, and its figures.
 - `collect_comparison.sh` and `plot_comparison.py` — a whole comparison, and its
   figures.
 - `plot_mocap_profile.py` — the profile figure again, from a motion-capture log
@@ -263,6 +266,109 @@ figures are drawn from curves and envelopes rather than from cells.
 Halving `PUSH_PHASES` and `PUSH_REPLICAS` halves the collection time and doubles
 those numbers. It is a reasonable trade for a first look; it is not what to
 quote.
+
+## The competence grid
+
+A sweep asks how fast a controller can walk. A push battery asks what one shove
+costs. Neither answers the question conditional on both, which is the one a
+behaviour tree deciding whether to contest a ball actually has: *how much of a
+hit can it absorb while still delivering the commanded velocity*.
+`eval_competence_grid.py` crosses the two axes and reports a distribution over
+episodes in every cell.
+
+```sh
+# The competence-gated policy, on the evaluation plant.
+uv run python scripts/eval/eval_competence_grid.py --num-envs 4096 \
+  --tag gating --checkpoint logs/.../vi302l5f/model_34999.pt
+
+# The policy with the observation window baked in. A checkpoint only loads
+# against the task that builds its observation layout.
+uv run python scripts/eval/eval_competence_grid.py --num-envs 4096 \
+  --tag history --task-id Mjlab-Velocity-Flat-Nubots-Nugus-History \
+  --checkpoint logs/.../th9uyvmp/model_34999.pt
+
+# Both figures sets, plus the difference between the two runs.
+uv run python scripts/eval/plot_competence_grid.py --input-dir logs/eval
+```
+
+Five quantities, one number per episode, taken at the reset that ends it:
+
+| quantity | what it is |
+| --- | --- |
+| `attain` | the headline: delivered speed projected on the command, over the commanded speed |
+| `attain_x`, `attain_y` | the same per axis, signed, each sample weighted by that axis's share of command energy |
+| `wobble` | fraction of the episode's steps tilted past 25° — the near-miss channel, which shows stress without termination |
+| `fell` | binary, from the `fell_over` termination |
+| `ep_len_frac` | survival, which disambiguates a low `attain` caused by early termination from one caused by sandbagging |
+
+**These are the training competence tracker's definitions with the smoothing
+taken off.** `mjlab.tasks.velocity.mdp.competence` EMAs each of them and
+initialises those EMAs pessimistically, because its job is to hand a curriculum
+controller a smoothed population signal and to refuse a fresh policy a spurious
+promotion. Read offline, an EMA is a filtered statistic still carrying its
+initialisation, and a population mean hides the cells worth looking at. What
+this run keeps is the layer underneath — the per-env accumulators collapsed to
+one number per episode — disaggregated, so a cell reports quartiles. The
+tracker's `fast_fall_rate` (a one-iteration control window) and `track_err_norm`
+(legacy, already out of its own predicates) are not carried over.
+
+**Low-command cells are undefined, not zero.** Attainment is sampled only on
+steps where the commanded planar speed clears 0.15 m/s — the tracker's
+anti-gaming filter, which refuses the sample rather than flooring the
+denominator. Cells under that bar took no attainment sample at all, and are
+reported `attain_defined: false` with NaN quartiles; the figures hatch them.
+Painting them at the bottom of the ramp would read as the worst sandbagging on
+the grid, which is the opposite of what happened. They are read through `wobble`
+and `fell` alone.
+
+**This run needs episodes to end.** `fell` and `ep_len_frac` do not exist
+otherwise, so it is the one place in this pipeline that puts the `fell_over`
+termination and the training episode length back
+(`build_rl_env(episodic=True)`). Everything else stays as the other runs have
+it: nominal robot, no reset jitter, no domain randomisation, command pinned per
+environment and re-pinned at every reset, so an environment emits a stream of
+independent episodes all belonging to one cell. The run stops when the
+worst-covered cell reaches `--grid.episodes-per-cell`; episodes still in flight
+are dropped rather than truncated, since their length is censored and their dose
+of shoves partial.
+
+### The disturbance axis
+
+The shove is the training push event
+(`push_cohort_by_setting_velocity`) driven deterministically. There the
+world-frame Δv is drawn from a box and the resulting `|Δv_xy|` is merely
+*observed*, so the training-time survival frontier has to bin it after the fact.
+Here the magnitude **is** the cell and only the heading is drawn, which
+marginalises direction instead of confounding it with magnitude. Four shoves
+land per 20 s episode, at 3, 7, 11 and 15 s: a 3 s settle so the robot is at
+steady state rather than still accelerating out of its reset, 4 s between events
+so one is over before the next arrives, and a 2 s tail so the last one resolves
+inside the episode that owns it. `shoves_taken` is written into every row, so an
+episode that fell early reports the dose it actually received rather than the
+one it was scheduled.
+
+Planar only. The training event also kicks roll and pitch; including those would
+mean the cell's `|Δv_xy|` no longer described the whole disturbance.
+
+**Pick the bins around the cliff, not around the training range.** Measured on
+the competence-gated policy walking forward at 0.5 m/s on the evaluation plant,
+the fall rate is 0% up to 0.6 m/s of Δv, 44% at 0.8, 95% at 1.0 and 100% at 1.2.
+Bins below half a metre per second buy rows that are identical to the
+undisturbed one. Harder commands move the cliff down, which is why the default
+keeps 0.4.
+
+### The figures
+
+`plot_competence_grid.py` reads every subdirectory of `--input-dir` holding a
+`cells.json`, so a directory of runs is drawn as one comparison. Per run it
+draws `<run>_envelope` (one row per quantity, one column per shove bin, each
+panel the commanded velocity plane), `<run>_spread` (the same grid showing the
+interquartile range, because the interesting cells are the high-variance ones),
+`<run>_axes` (the signed per-axis attainments, diverging about 1.0) and
+`<run>_yaw` (the yaw slice, which is one dimensional in command). Across runs it
+draws `curves_<quantity>` — the same numbers against shove magnitude, one panel
+per commanded velocity, one line per run with its interquartile band — and, for
+a pair of runs, `difference`.
 
 ## The whole comparison
 

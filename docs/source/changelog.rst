@@ -8,6 +8,39 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added the competence grid: ``scripts/eval/eval_competence_grid.py`` and
+  ``scripts/eval/plot_competence_grid.py``, over a new
+  ``mjlab.evaluation.competence``. It crosses the commanded velocity with a
+  shove magnitude and reports, per cell, a distribution over episodes of the
+  five per-episode quantities the training competence tracker accumulates --
+  attainment (delivered speed projected on the command), the signed per-axis
+  attainments, wobble (the fraction of steps tilted past 25 degrees), whether
+  the robot fell, and how much of the episode it survived. The definitions are
+  the tracker's, but none of its smoothing is: the EMAs and their pessimistic
+  initialisation exist to give a curriculum controller a population signal, and
+  read offline they are a filtered statistic still carrying its init. What the
+  grid keeps is the layer underneath, disaggregated, so a cell reports
+  quartiles rather than a mean -- the interesting cells are the high-variance
+  ones, and a mean cannot show that. A command under 0.15 m/s takes no
+  attainment sample at all, and those cells are reported undefined rather than
+  zero, which would read as the worst sandbagging on the grid.
+
+  This is the first run in the pipeline that needs episodes to *end*: it
+  restores the ``fell_over`` termination and the training episode length that
+  every other run deliberately removes, via ``build_rl_env(episodic=True)``.
+  The shove is the training push driven deterministically -- magnitude pinned
+  per cell, heading drawn, four events per episode at fixed onsets -- so
+  ``|dv_xy|`` is the cell rather than something binned after the fact.
+  Nothing in ``mjlab.evaluation.competence`` reads the environment, so the same
+  numbers can be produced for a controller that never sees a
+  ``ManagerBasedRlEnv``.
+- Added ``mjlab.tasks.velocity.mdp.competence``, the training-side competence
+  tracker, gated penalty curriculum and frontier diagnostics, taken unchanged
+  from the ``obs-history-competence`` and ``competence-reward-gating`` branches
+  (the file is identical in both). The eval takes its metric definitions and
+  its push mechanism from here so the two cannot drift. The curriculum terms it
+  defines are inert until a config installs them, and none does on this branch:
+  the gated penalties want reward terms this branch does not carry.
 - Added ``scripts/eval/plot_mocap_profile_pair.py``, a one-off that draws the
   profile strip from two motion-capture logs instead of one. The RL capture had
   to be flown twice -- the first attempt went down during the yaw stage -- and

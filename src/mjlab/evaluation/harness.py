@@ -61,6 +61,14 @@ from mjlab.controllers.quintic_walk.walk_generator import (
   WalkParameters,
 )
 from mjlab.entity import Entity
+from mjlab.evaluation.competence import (
+  DEFAULT_SHOVE,
+  CompetenceGrid,
+  EpisodeCompetence,
+  EpisodeTable,
+  ShoveCfg,
+  ShoveDriver,
+)
 from mjlab.evaluation.metrics import EvalState, VelocityTrace, WalkMetrics
 from mjlab.evaluation.push import PUSH_BODY, PushDriver, PushMetrics, PushPlan
 from mjlab.scene import Scene
@@ -670,6 +678,7 @@ def build_rl_env(
   num_envs: int,
   device: str,
   task_id: str = TASK_ID,
+  episodic: bool = False,
 ):
   """Build the velocity task environment for evaluation on one plant.
 
@@ -687,6 +696,17 @@ def build_rl_env(
   - terminations are removed, so a fallen robot stays fallen and is measured
     instead of being teleported upright mid-run;
   - the command term is pinned by :func:`prescribe_velocity_commands`.
+
+  Args:
+    episodic: Restore the training episode instead. A sweep, a profile and a
+      push battery are all one long run whose end the harness chooses, so a
+      termination would only interrupt a measurement. A competence grid is the
+      opposite: it samples a distribution of *episodes*, and two of the five
+      quantities it reports -- whether the robot fell, and how much of the
+      episode it survived -- exist only if the episode can end. This restores
+      the ``fell_over`` termination and the training episode length, and drops
+      the curriculum, which is a training device that has no business mutating
+      anything mid-measurement.
   """
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.tasks.registry import load_env_cfg
@@ -706,7 +726,27 @@ def build_rl_env(
     reset_base.params["pose_range"] = {}
     reset_base.params["velocity_range"] = {}
 
-  cfg.terminations = {}
+  if episodic:
+    # The play config stretches the episode to 1e9 s so a run is never cut
+    # short. Put the training length back: ep_len_frac is measured against it,
+    # so a wrong denominator would silently rescale survival.
+    cfg.episode_length_s = load_env_cfg(task_id, play=False).episode_length_s
+    cfg.curriculum = {}
+    failures = [
+      name
+      for name, term in cfg.terminations.items()
+      if not getattr(term, "time_out", False)
+    ]
+    # `fell` is read off reset_terminated, i.e. every non-timeout term at once.
+    # If another failure term is ever added, that binary stops meaning "fell"
+    # and starts meaning "failed somehow" without anything saying so.
+    if failures != ["fell_over"]:
+      raise RuntimeError(
+        f"episodic evaluation expects 'fell_over' as the only failure "
+        f"termination, found {failures}"
+      )
+  else:
+    cfg.terminations = {}
 
   twist = cfg.commands["twist"]
   assert isinstance(twist, UniformVelocityCommandCfg)
@@ -754,11 +794,12 @@ class RlEvalHarness:
     num_envs: int = 64,
     device: str = "cuda:0",
     task_id: str = TASK_ID,
+    episodic: bool = False,
   ) -> None:
     self.plant: EvalPlant = plant
     self.num_envs = num_envs
     self.device = device
-    self.env = build_rl_env(plant, num_envs, device, task_id)
+    self.env = build_rl_env(plant, num_envs, device, task_id, episodic=episodic)
     self.wrapped, self.policy = load_policy(self.env, checkpoint, device, task_id)
     self.robot: Entity = self.env.scene["robot"]
     self.control_dt = float(self.env.step_dt)
@@ -872,6 +913,88 @@ class RlEvalHarness:
       finally:
         driver.clear()
     return metrics
+
+  def run_competence_grid(
+    self,
+    grid: CompetenceGrid,
+    episodes_per_cell: int = 64,
+    shove_cfg: ShoveCfg = DEFAULT_SHOVE,
+    seed: int = 0,
+    max_steps: int | None = None,
+    on_step: Callable[[int, int], None] | None = None,
+  ) -> EpisodeTable:
+    """Run every cell of a command x disturbance grid until it has episodes.
+
+    Requires an ``episodic=True`` harness: the run is a stream of episodes that
+    end on their own, not one long recording. Each environment holds its cell
+    across resets, so it emits a sequence of independent samples from that
+    cell's distribution, and the run stops once the least-sampled cell has
+    ``episodes_per_cell`` of them.
+
+    Args:
+      grid: Cell assignment, sized to this harness's batch.
+      episodes_per_cell: Episodes the *worst-covered* cell must reach. Cells
+        that fall often reach it sooner, since a fall ends an episode early.
+      shove_cfg: Onset timing of the shove train.
+      seed: Seeds the shove headings, which are the only stochastic input the
+        protocol has.
+      max_steps: Hard cap, in case a cell somehow never closes an episode.
+        Defaults to what the timeout alone guarantees is enough.
+      on_step: Called with the step index and the least-sampled cell's episode
+        count, for progress reporting.
+
+    Returns:
+      One row per completed episode. Episodes still in flight when the run ends
+      are dropped rather than truncated.
+    """
+    if grid.num_envs != self.num_envs:
+      raise ValueError(
+        f"grid is for {grid.num_envs} environments, harness has {self.num_envs}"
+      )
+    if not self.env.cfg.terminations:
+      raise RuntimeError(
+        "a competence grid needs an episodic harness: build RlEvalHarness with "
+        "episodic=True, or fell and ep_len_frac have nothing to measure"
+      )
+    max_episode_steps = int(self.env.max_episode_length)
+    if max_steps is None:
+      # Every episode ends by timeout at worst, so this many steps is enough
+      # even for a cell that never falls.
+      per_cell = int(grid.envs_per_cell().min())
+      rounds = -(-episodes_per_cell // per_cell)  # ceil
+      max_steps = (rounds + 1) * max_episode_steps
+
+    with torch.inference_mode():
+      self.wrapped.reset()
+      prescribe_velocity_commands(self.env, grid.command.to(self.device))
+      obs = self.wrapped.get_observations()
+
+      collector = EpisodeCompetence(grid, max_episode_steps, self.device)
+      generator = torch.Generator(device=self.device)
+      generator.manual_seed(seed)
+      driver = ShoveDriver(
+        magnitude=grid.shove.to(self.device),
+        robot=self.robot,
+        dt=self.control_dt,
+        max_episode_steps=max_episode_steps,
+        cfg=shove_cfg,
+        generator=generator,
+      )
+      terminations = self.env.termination_manager
+
+      for step in range(max_steps):
+        # Before the step, so the impulse is on the books when the physics
+        # runs -- the same ordering the training event term gets.
+        collector.note_shoves(driver.apply(collector.episode_step))
+        obs, _, _, _ = self.wrapped.step(self.policy(obs))
+        collector.record(
+          self.state(), terminations.dones, terminations.get_term("fell_over")
+        )
+        if on_step is not None:
+          on_step(step, collector.min_completed)
+        if collector.min_completed >= episodes_per_cell:
+          break
+    return collector.table()
 
   def close(self) -> None:
     self.env.close()
