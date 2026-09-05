@@ -10,7 +10,6 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.envs.mdp.curriculums import RewardCurriculumStage
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
@@ -59,23 +58,6 @@ def _resolve_focus() -> mdp.TrainingFocusCfg:
   return focus
 
 
-# Peak weights the competence-gated movement penalties ramp toward. Each
-# term starts at 0.0 and only advances a stage while the population is
-# demonstrably stable, so these are the pressure at full competence, never
-# the pressure a fresh policy sees.
-_JOULE_HEATING_PEAK_W = -3e-4
-_JOINT_ACC_PEAK_W = -1e-4
-_TORQUE_RATE_PEAK_W = -1e-3
-_SOFT_LANDING_PEAK_W = -1e-5
-
-
-def _competence_penalty_stages(
-  final_weight: float, *, n_steps: int = 4
-) -> list[RewardCurriculumStage]:
-  """Build competence-gated penalty ramp stages (0 -> full in ``n_steps``)."""
-  return [{"step": i, "weight": final_weight * i / n_steps} for i in range(n_steps + 1)]
-
-
 def _add_competence_tracker_event(cfg: ManagerBasedRlEnvCfg) -> None:
   """Accumulate the per-step competence statistics on every env step."""
   cfg.events["competence_tracker"] = EventTermCfg(
@@ -83,30 +65,6 @@ def _add_competence_tracker_event(cfg: ManagerBasedRlEnvCfg) -> None:
     func=mdp.competence_tracker_step,
     params={},
   )
-
-
-def _add_competence_penalty_gating(cfg: ManagerBasedRlEnvCfg) -> None:
-  """Ramp movement penalties in only while stability competence holds.
-
-  Applying full penalty pressure to a policy that has not yet learned to
-  walk suppresses the motion it needs to learn from; applying it and never
-  releasing it lets a policy slide down the penalty gradient with no way
-  back. Each term walks a five-stage ladder: promote on demonstrated
-  stability, demote when it is badly lost, freeze in between.
-  """
-  for reward_name, peak_weight in (
-    ("joule_heating", _JOULE_HEATING_PEAK_W),
-    ("joint_acc_l2", _JOINT_ACC_PEAK_W),
-    ("torque_rate", _TORQUE_RATE_PEAK_W),
-    ("soft_landing", _SOFT_LANDING_PEAK_W),
-  ):
-    cfg.curriculum[f"{reward_name}_competence"] = CurriculumTermCfg(
-      func=mdp.staged_on_competence,
-      params={
-        "reward_name": reward_name,
-        "stages": _competence_penalty_stages(peak_weight),
-      },
-    )
 
 
 def _add_competence_diagnostics(cfg: ManagerBasedRlEnvCfg) -> None:
@@ -182,13 +140,7 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       if term is not None:
         term.params["asset_cfg"] = motor_cfg()
   cfg.events["reset_robot_joints"].params["asset_cfg"] = motor_cfg()
-  for reward_name in (
-    "pose",
-    "actuation_power",
-    "joint_acc_l2",
-    "joule_heating",
-    "torque_rate",
-  ):
+  for reward_name in ("pose", "actuation_power"):
     cfg.rewards[reward_name].params["asset_cfg"].joint_names = (
       NUGUS_MOTOR_JOINT_REGEX,
     )
@@ -393,10 +345,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # reachable as ``cfg.rewards[name].params``.
   mdp.apply_training_focus(cfg, _resolve_focus(), add_diagnostics=not play)
 
-  # Competence-gated movement penalties plus the frontier diagnostics that
-  # explain them. Always on.
+  # Competence tracking plus the frontier diagnostics it publishes. Log-only:
+  # these install event/curriculum terms but set no reward weight, so the
+  # objective is identical to the ungated config.
   _add_competence_tracker_event(cfg)
-  _add_competence_penalty_gating(cfg)
   if not play:
     _add_competence_diagnostics(cfg)
 

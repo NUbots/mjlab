@@ -817,27 +817,31 @@ def test_staged_on_competence_respects_cooldown(tracked_env: MagicMock) -> None:
 ##
 
 
-def test_competence_wiring_is_always_on() -> None:
+def test_competence_wiring_is_log_only() -> None:
+  """Competence measures but does not gate: it tracks and publishes, and
+  leaves the objective identical to the ungated config, so a competence run
+  and a non-competence run differ only in what is observed."""
   from mjlab.tasks.velocity import mdp
 
   cfg = nubots_nugus_flat_env_cfg()
   assert cfg.events["competence_tracker"].func is mdp.competence_tracker_step
   assert cfg.events["push_robot"].func is mdp.push_cohort_by_setting_velocity
   assert "competence_diagnostics" in cfg.curriculum
-  for reward_name in (
-    "joule_heating",
-    "joint_acc_l2",
-    "torque_rate",
-    "soft_landing",
-  ):
-    term = cfg.curriculum[f"{reward_name}_competence"]
-    assert term.func is mdp.staged_on_competence
-    assert term.params["reward_name"] == reward_name
-    stages = term.params["stages"]
-    # Ramp starts at zero pressure and reaches the term's peak weight.
-    assert stages[0]["weight"] == 0.0
-    assert stages[-1]["weight"] < 0.0
-    assert reward_name in cfg.rewards
+
+  # staged_on_competence stays implemented and tested, but is installed on
+  # nothing, so no curriculum term writes a reward weight.
+  gated = [
+    name
+    for name, term in cfg.curriculum.items()
+    if term.func is mdp.staged_on_competence
+  ]
+  assert not gated, f"competence must gate no reward, but gates {gated}"
+
+  # The movement penalties the gate used to ramp are absent, and soft_landing
+  # keeps the base task's weight instead of being held at stage 0.
+  for reward_name in ("joule_heating", "joint_acc_l2", "torque_rate"):
+    assert reward_name not in cfg.rewards
+  assert cfg.rewards["soft_landing"].weight == -1e-5
 
 
 def test_curriculum_terms_accept_manager_kwargs() -> None:
