@@ -49,7 +49,7 @@ from pathlib import Path
 
 import torch
 
-from mjlab.evaluation.metrics import EvalState
+from mjlab.evaluation.metrics import EvalState, upright_from_quat
 
 WOBBLE_GRAVITY_XY = 0.4226
 """Projected-gravity ``xy`` norm above which a step counts as wobbling.
@@ -68,6 +68,24 @@ of two small numbers. The tracker's answer is not a denominator floor -- which
 would cap perfect tracking of a small command -- but to refuse the sample. Cells
 under this bar therefore have *no* attainment evidence at all and are reported
 undefined rather than zero; they are characterised by ``wobble`` and ``fell``.
+"""
+
+FELL_OVER_UPRIGHT = math.cos(math.radians(50.0))
+"""Torso up-axis component below which an episode counts as a fall.
+
+``cos(50 degrees)``, which is the ``bad_orientation`` limit the velocity task's
+``fell_over`` termination uses. A reinforcement-learned policy's ``fell`` comes
+from that termination directly; a scripted engine has no termination manager, so
+this reproduces its bound from the same raw state.
+
+Deliberately *not*
+:data:`~mjlab.evaluation.metrics.FALL_UPRIGHT_THRESHOLD`, which is
+``cos(60 degrees)``. That one dates the moment a robot stopped walking, and 10
+degrees of extra grace is the right call when the question is when to stop
+averaging. Here the question is whether this episode is one of the ones the
+policy was terminated for, and answering it with a looser bound would let a
+scripted engine tip further before being counted as fallen than a policy is
+allowed to.
 """
 
 MIN_AXIS_COMMAND = 0.10
@@ -94,6 +112,32 @@ def projected_gravity_xy_norm(quaternion_w: torch.Tensor) -> torch.Tensor:
   y = quaternion_w[:, 2]
   z = quaternion_w[:, 3]
   return 2.0 * torch.sqrt((x * z - w * y) ** 2 + (y * z + w * x) ** 2)
+
+
+def episode_end(
+  state: EvalState,
+  episode_step: torch.Tensor,
+  max_episode_steps: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+  """Which environments' episodes end on this step, and which of them fell.
+
+  The termination rule of the velocity task, reproduced from raw state for the
+  harnesses that have no termination manager: an episode ends when the torso
+  tips past :data:`FELL_OVER_UPRIGHT` (a fall) or when it reaches
+  ``max_episode_steps`` (a timeout).
+
+  Args:
+    state: The robot's state after the step.
+    episode_step: Shape ``(N,)`` steps elapsed *including* this one.
+    max_episode_steps: Length of a full episode, in control steps.
+
+  Returns:
+    ``(done, fell)``, both shape ``(N,)`` bool. ``fell`` implies ``done``; an
+    environment that tips on its last step is recorded as a fall rather than a
+    timeout, which is the order the termination manager resolves them in.
+  """
+  fell = upright_from_quat(state.quaternion_w) < FELL_OVER_UPRIGHT
+  return fell | (episode_step >= max_episode_steps), fell
 
 
 @dataclass(frozen=True)

@@ -8,6 +8,26 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- ``scripts/eval/eval_competence_grid.py`` gained ``--engine quintic``: the
+  ported walk engine now runs the same competence grid a policy does, through
+  the same collector, shove train, stopping rule and output format. The two
+  paths differ in one unavoidable place -- a policy runs inside a
+  ``ManagerBasedRlEnv`` that ends and resets episodes for it, an engine does not
+  -- so ``WalkEvalHarness`` gained ``reset_idx`` for per-environment resets and
+  applies the task's termination rule itself, reproduced from raw state as
+  ``competence.episode_end`` against ``competence.FELL_OVER_UPRIGHT``. That bound
+  is the task's 50 degrees, deliberately not the pipeline's more generous 60
+  degree ``FALL_UPRIGHT_THRESHOLD``, which dates a fall rather than deciding
+  whether the episode is one a policy would have been terminated for. The
+  distilled policy is not offered: it reads nothing at all, so a disturbance
+  axis would measure the plant carrying it, not a controller reacting.
+- ``plot_competence_grid.py``'s default curve commands no longer include
+  1.0 m/s forward. Both competence-trained policies stop walking and march in
+  place above roughly 0.81 m/s commanded -- perfect tracking at 0.80, 0.04 m/s
+  delivered at 0.82 -- so that panel put a policy that refused the command
+  beside one that attempted it and read as a tracking collapse. A backwards ask
+  takes its place. Where each controller's band ends is a real finding, but it
+  belongs on the envelope heatmaps, which show the whole plane.
 - Added the competence grid: ``scripts/eval/eval_competence_grid.py`` and
   ``scripts/eval/plot_competence_grid.py``, over a new
   ``mjlab.evaluation.competence``. It crosses the commanded velocity with a

@@ -234,3 +234,56 @@ def test_a_battery_leaves_no_force_behind_it():
   harness.run_push(replace(plan, num_steps=int(plan.push_step[0]) + 1))
 
   assert float(harness.robot.data.body_external_force.abs().max()) == 0.0
+
+
+@pytest.mark.slow
+def test_partial_reset_leaves_the_other_environments_walking():
+  """A competence grid resets the episodes that ended and nothing else.
+
+  Two environments walk; one is reset. The reset one must be back in the
+  stance at its own origin, and the other must be exactly where it was --
+  a reset that touched it would silently restart its episode mid-measurement.
+  """
+  device = get_test_device()
+  harness = QuinticEvalHarness(plant="eval", num_envs=2, device=device)
+  command = constant_command(0.2, 0.0, 0.0, 2, device)
+  for _ in range(120):
+    harness.step(command)
+
+  walked = harness.state().position_w.clone()
+  assert float(walked[0, 0] - harness.scene.env_origins[0, 0]) > 0.02
+
+  harness.reset_idx(torch.tensor([0], device=device))
+  after = harness.state().position_w
+
+  # The reset environment is back at its origin's stance.
+  stance_x = float(harness._stance_root_pose[0])  # noqa: SLF001
+  assert float(after[0, 0] - harness.scene.env_origins[0, 0]) == pytest.approx(
+    stance_x, abs=1e-4
+  )
+  # The untouched one has not moved.
+  assert float((after[1] - walked[1]).abs().max()) == pytest.approx(0.0, abs=1e-5)
+
+
+@pytest.mark.slow
+def test_quintic_competence_grid_produces_independent_episodes():
+  """The engine runs the same competence collector a policy does."""
+  from mjlab.evaluation.competence import ShoveCfg, build_grid
+
+  device = get_test_device()
+  harness = QuinticEvalHarness(plant="eval", num_envs=4, device=device)
+  grid = build_grid(((0.2, 0.0, 0.0),), (0.0,), num_envs=4, device=device)
+
+  table = harness.run_competence_grid(
+    grid,
+    episodes_per_cell=2,
+    shove_cfg=ShoveCfg(settle=0.5, period=1.0, tail=0.5),
+    episode_length_s=2.0,
+  )
+
+  assert table.num_episodes >= 2
+  # Two seconds at 100 Hz, so a full episode is 200 steps and ep_len_frac 1.0.
+  assert float(table.ep_len_frac.max()) == pytest.approx(1.0)
+  assert bool((table.ep_len_frac > 0.0).all())
+  # The engine walks at this command, so attainment is measured, not NaN.
+  assert bool(table.attain.isfinite().any())

@@ -281,6 +281,10 @@ episodes in every cell.
 uv run python scripts/eval/eval_competence_grid.py --num-envs 4096 \
   --tag gating --checkpoint logs/.../vi302l5f/model_34999.pt
 
+# The quintic walk engine, through the same collector. No checkpoint.
+uv run python scripts/eval/eval_competence_grid.py --engine quintic \
+  --num-envs 4096 --tag quintic
+
 # The policy with the observation window baked in. A checkpoint only loads
 # against the task that builds its observation layout.
 uv run python scripts/eval/eval_competence_grid.py --num-envs 4096 \
@@ -320,6 +324,37 @@ reported `attain_defined: false` with NaN quartiles; the figures hatch them.
 Painting them at the bottom of the ramp would read as the worst sandbagging on
 the grid, which is the opposite of what happened. They are read through `wobble`
 and `fell` alone.
+
+**The walk engine runs the same grid.** `--engine quintic` drives the ported
+NUbots engine through the identical collector, shove train, stopping rule and
+output format, so an engine's competence numbers and a policy's are produced by
+one piece of code. The two differ in exactly one place, and it is unavoidable: a
+policy runs inside a `ManagerBasedRlEnv` that decides when an episode ends and
+resets it in place, and an engine does not, so the engine's harness applies the
+termination rule itself from raw state and does its own per-environment reset.
+The rule is the task's own — the torso past 50° — reproduced in
+`competence.FELL_OVER_UPRIGHT`.
+
+Note that 50° is *not* the 60° `FALL_UPRIGHT_THRESHOLD` the rest of the pipeline
+dates falls with. That one is deliberately generous, because it answers "when
+did this stop being walking". `fell` has to answer "is this one of the episodes
+the policy would have been terminated for", and using the looser bound would let
+the engine tip ten degrees further than a policy is allowed to before being
+counted.
+
+The distilled policy is deliberately *not* offered. It reads nothing at all — no
+sensors, no state — so it cannot react to a shove, and a disturbance axis
+measures only how far the plant carries it before it walks back into the
+trajectory it would have played regardless. That number is a property of the
+robot's mass, not of a controller.
+
+**Read `attain` next to `ep_len_frac`, especially for the engine.** Attainment is
+averaged over the episode that happened, so it is conditioned on survival up to
+the fall. A controller that gets shoved, slides in roughly the commanded
+direction and goes over can post a *higher* attainment than the same controller
+walking the full twenty seconds — the engine does exactly this at low forward
+speeds. The pair is the reading: attainment says what was delivered while it
+lasted, survival says how long that was.
 
 **This run needs episodes to end.** `fell` and `ep_len_frac` do not exist
 otherwise, so it is the one place in this pipeline that puts the `fell_over`
@@ -369,6 +404,11 @@ interquartile range, because the interesting cells are the high-variance ones),
 draws `curves_<quantity>` — the same numbers against shove magnitude, one panel
 per commanded velocity, one line per run with its interquartile band — and, for
 a pair of runs, `difference`.
+
+The curve figures cut through six commands, chosen with `--curve-commands`. The
+default set is a forward ladder at 0.25, 0.5 and 0.75, one backwards ask, one
+lateral and one turn-while-walking. It does **not** include 1.0 m/s, for the
+reason in the next section.
 
 ## The whole comparison
 
@@ -837,6 +877,24 @@ card. The magnitude axis costs wall time and no memory, since it is one pass per
 value; the direction, phase and replica counts are what set the batch.
 
 ## Things to read before designing an experiment
+
+**A policy can refuse a command, and it does not look like failure.** Measured
+on both competence-trained policies, forward tracking is perfect up to 0.80 m/s
+commanded and collapses to 0.04 m/s delivered at 0.82 — one 0.02 m/s step. Above
+that boundary the robot marches in place: cadence 2.8 Hz, rms pitch down from
+0.120 to 0.020, min upright 0.998, zero falls, full twenty-second survival. It is
+not failing to walk fast; it is declining to walk at all, which is precisely the
+sandbagging `attain` exists to catch.
+
+This matters for reading the figures, because a refusal and a tracking collapse
+render identically: attainment near zero. They are opposite findings — one is a
+controller at its limit, the other a controller that never tried — and the
+disambiguator is the company attainment keeps. A refusal has *zero* falls and
+*full* survival; a collapse does not. Two consequences when designing a grid:
+put the boundary inside it if you want to find it, and do not compare
+controllers on a cell that some of them refuse, because the one without a
+refusal mode wins there by default while being the worse tracker everywhere
+else.
 
 **A push is a much smaller disturbance than it sounds.** The NUgus weighs
 6.68 kg, so the walk engine's envelope — around 0.3 m/s of free-body Δv walking

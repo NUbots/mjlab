@@ -13,6 +13,7 @@ import pytest
 import torch
 
 from mjlab.evaluation.competence import (
+  FELL_OVER_UPRIGHT,
   MIN_AXIS_COMMAND,
   MIN_COMMAND_NORM,
   WOBBLE_GRAVITY_XY,
@@ -21,10 +22,11 @@ from mjlab.evaluation.competence import (
   ShoveCfg,
   ShoveDriver,
   build_grid,
+  episode_end,
   projected_gravity_xy_norm,
   summarise_cells,
 )
-from mjlab.evaluation.metrics import EvalState
+from mjlab.evaluation.metrics import FALL_UPRIGHT_THRESHOLD, EvalState
 
 DT = 0.02
 MAX_STEPS = 50
@@ -395,3 +397,64 @@ def test_fall_rate_carries_a_binomial_interval():
 
   assert narrow["fell_rate"] == wide["fell_rate"] == 0.0
   assert narrow["fell_ci_high"] > wide["fell_ci_high"]
+
+
+# --------------------------------------------------------------------------
+# The termination rule, for harnesses with no termination manager
+# --------------------------------------------------------------------------
+
+
+def test_fall_bound_is_the_tasks_fifty_degrees_not_the_metrics_sixty():
+  """The two bounds answer different questions and must not be conflated.
+
+  ``FALL_UPRIGHT_THRESHOLD`` dates the moment a robot stopped walking, and is
+  deliberately generous. ``fell`` has to mean the episode the policy would have
+  been terminated for, or a scripted engine gets to tip ten degrees further
+  than a policy before it counts.
+  """
+  assert FELL_OVER_UPRIGHT == pytest.approx(math.cos(math.radians(50.0)))
+  assert FELL_OVER_UPRIGHT > FALL_UPRIGHT_THRESHOLD
+
+
+def test_a_tilt_between_the_two_bounds_is_a_fall_here():
+  """55 degrees: past the task's termination, short of the metrics' bound."""
+  step = torch.tensor([1])
+  done, fell = episode_end(state(quaternion=pitched(math.radians(55.0))), step, 100)
+
+  assert bool(fell.all())
+  assert bool(done.all())
+
+
+def test_a_tilt_inside_the_bound_is_not_a_fall():
+  step = torch.tensor([1])
+  done, fell = episode_end(state(quaternion=pitched(math.radians(45.0))), step, 100)
+
+  assert not bool(fell.any())
+  assert not bool(done.any())
+
+
+def test_reaching_the_episode_length_ends_it_without_a_fall():
+  done, fell = episode_end(state(), torch.tensor([100]), 100)
+
+  assert bool(done.all())
+  assert not bool(fell.any())
+
+
+def test_tipping_on_the_last_step_is_recorded_as_a_fall():
+  """Ordering matters: the termination manager resolves failure before timeout."""
+  done, fell = episode_end(
+    state(quaternion=pitched(math.radians(60.0))), torch.tensor([100]), 100
+  )
+
+  assert bool(done.all())
+  assert bool(fell.all())
+
+
+def test_environments_end_independently():
+  quats = torch.cat([pitched(math.radians(60.0)), pitched(0.0), pitched(0.0)])
+  done, fell = episode_end(
+    state(quaternion=quats, num_envs=3), torch.tensor([5, 100, 5]), 100
+  )
+
+  assert done.tolist() == [True, True, False]
+  assert fell.tolist() == [True, False, False]

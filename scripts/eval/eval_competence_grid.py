@@ -30,6 +30,10 @@ Examples::
     --tag history --task-id Mjlab-Velocity-Flat-Nubots-Nugus-History \\
     --checkpoint logs/.../history/model_34999.pt
 
+  # The quintic walk engine, measured by the same code. No checkpoint.
+  uv run python scripts/eval/eval_competence_grid.py --engine quintic \\
+    --num-envs 4096 --tag quintic
+
   # The other half of the 2x2.
   uv run python scripts/eval/eval_competence_grid.py --plant training ...
 """
@@ -39,6 +43,7 @@ from __future__ import annotations
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import tyro
 
@@ -49,8 +54,24 @@ from mjlab.evaluation.competence import (
   format_grid_summary,
   save_grid_run,
 )
-from mjlab.evaluation.harness import TASK_ID, EvalPlant, RlEvalHarness
+from mjlab.evaluation.harness import (
+  TASK_ID,
+  EvalPlant,
+  QuinticEvalHarness,
+  RlEvalHarness,
+  competence_episode_seconds,
+)
 from mjlab.utils.torch import configure_torch_backends
+
+Engine = Literal["rl", "quintic"]
+"""Controllers this grid can measure.
+
+The distilled policy is deliberately absent. It is a supervised copy of the
+quintic engine that reads nothing at all -- no sensors, no state -- so it cannot
+react to a shove, and a disturbance axis measures only how far the plant carries
+it before it walks back into the trajectory it would have played anyway. Its
+number would be a property of the robot's mass, not of a controller.
+"""
 
 
 @dataclass
@@ -107,16 +128,20 @@ class GridCfg:
 
 @dataclass
 class Args:
-  checkpoint: Path
-  """rsl-rl checkpoint to evaluate."""
+  engine: Engine = "rl"
+  """Which controller to drive."""
+  checkpoint: Path | None = None
+  """rsl-rl checkpoint. Required for ``--engine rl``, ignored otherwise."""
   task_id: str = TASK_ID
   """Registered task supplying the policy's observation, action and command
-  pipeline.
+  pipeline, and -- for either engine -- the episode length and the plant.
 
   A checkpoint only loads against the task it was trained on, so the policy
   that reads a window of past observations needs
   ``Mjlab-Velocity-Flat-Nubots-Nugus-History`` named here and the one that does
   not needs the default."""
+  balance: bool = True
+  """Quintic only: apply the FootController torso-orientation correction."""
   plant: EvalPlant = "eval"
   """Robot model: ``eval`` is the reference, ``training`` the model the policy
   was trained against."""
@@ -135,20 +160,22 @@ class Args:
   """Name for this run's output directory. Defaults to plant and time."""
 
 
-def main() -> None:
-  args = tyro.cli(Args, config=mjlab.TYRO_FLAGS)
-  configure_torch_backends()
+def build_harness(args: Args) -> RlEvalHarness | QuinticEvalHarness:
+  """The controller under test, built episodically.
 
-  if not args.checkpoint.exists():
-    raise FileNotFoundError(f"checkpoint not found: {args.checkpoint}")
-  if 0.0 not in args.grid.shoves:
-    raise ValueError(
-      "--grid.shoves must include 0.0: without the undisturbed row there is "
-      "nothing to read the disturbed rows against"
+  Both harnesses expose ``run_competence_grid``; what differs is that the
+  policy needs an environment with the task's terminations restored, while the
+  engine's harness applies the termination rule itself.
+  """
+  if args.engine == "quintic":
+    return QuinticEvalHarness(
+      plant=args.plant,
+      num_envs=args.num_envs,
+      device=args.device,
+      use_balance_control=args.balance,
     )
-
-  cfg = args.grid
-  harness = RlEvalHarness(
+  assert args.checkpoint is not None
+  return RlEvalHarness(
     checkpoint=args.checkpoint,
     plant=args.plant,
     num_envs=args.num_envs,
@@ -156,16 +183,36 @@ def main() -> None:
     task_id=args.task_id,
     episodic=True,
   )
+
+
+def main() -> None:
+  args = tyro.cli(Args, config=mjlab.TYRO_FLAGS)
+  configure_torch_backends()
+
+  if args.engine == "rl":
+    if args.checkpoint is None:
+      raise ValueError("--engine rl needs --checkpoint")
+    if not args.checkpoint.exists():
+      raise FileNotFoundError(f"checkpoint not found: {args.checkpoint}")
+  if 0.0 not in args.grid.shoves:
+    raise ValueError(
+      "--grid.shoves must include 0.0: without the undisturbed row there is "
+      "nothing to read the disturbed rows against"
+    )
+
+  cfg = args.grid
+  harness = build_harness(args)
   grid = build_grid(
     commands=cfg.commands(),
     shoves=cfg.shoves,
     num_envs=args.num_envs,
     device=args.device,
   )
-  episode_s = float(harness.env.max_episode_length) * harness.control_dt
-  onsets = cfg.shove.onsets(harness.control_dt, int(harness.env.max_episode_length))
+  episode_s = competence_episode_seconds(args.task_id)
+  max_episode_steps = int(round(episode_s / harness.control_dt))
+  onsets = cfg.shove.onsets(harness.control_dt, max_episode_steps)
 
-  print(f"\ncompetence grid on the {args.plant} plant")
+  print(f"\n{args.engine} competence grid on the {args.plant} plant")
   print(
     f"grid              : {len(cfg.commands())} commands x "
     f"{len(cfg.shoves)} shove bins = {cfg.num_cells} cells"
@@ -194,24 +241,41 @@ def main() -> None:
     )
 
   try:
-    table = harness.run_competence_grid(
-      grid,
-      episodes_per_cell=cfg.episodes_per_cell,
-      shove_cfg=cfg.shove,
-      seed=cfg.seed,
-      on_step=report,
-    )
+    # The policy's harness takes the episode length from the environment it
+    # built; the engine's has no environment, so it is passed the same number.
+    if isinstance(harness, RlEvalHarness):
+      table = harness.run_competence_grid(
+        grid,
+        episodes_per_cell=cfg.episodes_per_cell,
+        shove_cfg=cfg.shove,
+        seed=cfg.seed,
+        on_step=report,
+      )
+    else:
+      table = harness.run_competence_grid(
+        grid,
+        episodes_per_cell=cfg.episodes_per_cell,
+        shove_cfg=cfg.shove,
+        seed=cfg.seed,
+        episode_length_s=episode_s,
+        on_step=report,
+      )
   finally:
-    harness.close()
+    if isinstance(harness, RlEvalHarness):
+      harness.close()
   elapsed = time.time() - started
 
-  tag = args.tag or f"competence_{args.plant}_{time.strftime('%Y%m%d_%H%M%S')}"
+  tag = (
+    args.tag
+    or f"competence_{args.engine}_{args.plant}_{time.strftime('%Y%m%d_%H%M%S')}"
+  )
   output_dir = args.output_dir / tag
   run = {
-    "engine": "rl",
+    "engine": args.engine,
     "plant": args.plant,
     "task_id": args.task_id,
-    "checkpoint": str(args.checkpoint),
+    "checkpoint": None if args.checkpoint is None else str(args.checkpoint),
+    "balance": args.balance if args.engine == "quintic" else None,
     "num_envs": args.num_envs,
     "episode_length_s": round(episode_s, 3),
     "control_hz": round(1.0 / harness.control_dt, 3),

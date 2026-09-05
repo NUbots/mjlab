@@ -641,14 +641,23 @@ DEFAULT_CURVE_COMMANDS = (
   (0.25, 0.0, 0.0),
   (0.5, 0.0, 0.0),
   (0.75, 0.0, 0.0),
-  (1.0, 0.0, 0.0),
+  (-0.5, 0.0, 0.0),
   (0.0, 0.5, 0.0),
   (0.3, 0.0, 0.5),
 )
-"""Commands the curve figures cut through: a forward-speed ladder, one purely
-lateral ask, and one turn taken while walking. Six because that is how many
-distinguishable colours the house palette has, and a seventh line would have to
-reuse one."""
+"""Commands the curve figures cut through: a forward-speed ladder, one
+backwards ask, one purely lateral one, and one turn taken while walking. Six
+because that is how many distinguishable colours the house palette has, and a
+seventh line would have to reuse one.
+
+``vx = 1.0`` is deliberately absent. Measured on the competence-trained
+policies, both stop walking and march in place above roughly 0.81 m/s
+commanded -- perfect tracking at 0.80, 0.04 m/s delivered at 0.82 -- so a panel
+at 1.0 m/s puts a policy that refused the command beside one that attempted it
+and reads as a tracking collapse. That comparison is worth making, but it is a
+statement about where each controller's band ends, and the envelope heatmaps
+are where it belongs. Put a command back here only if every controller drawn
+actually attempts it."""
 
 
 def parse_commands(text: str | None) -> list[tuple[float, float, float]]:

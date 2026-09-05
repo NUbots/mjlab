@@ -68,6 +68,7 @@ from mjlab.evaluation.competence import (
   EpisodeTable,
   ShoveCfg,
   ShoveDriver,
+  episode_end,
 )
 from mjlab.evaluation.metrics import EvalState, VelocityTrace, WalkMetrics
 from mjlab.evaluation.push import PUSH_BODY, PushDriver, PushMetrics, PushPlan
@@ -107,6 +108,19 @@ environments a sample over models rather than over commands.
 """
 
 FOOT_BODY_NAMES = ("left_foot", "right_foot")
+
+
+def competence_episode_seconds(task_id: str = TASK_ID) -> float:
+  """The velocity task's training episode length, in seconds.
+
+  Read from the task rather than written down, and used by both competence
+  paths, so a policy's ``ep_len_frac`` and an engine's are fractions of the
+  same episode. The play config stretches the episode to 1e9 s, which is why
+  this asks for the training config.
+  """
+  from mjlab.tasks.registry import load_env_cfg
+
+  return float(load_env_cfg(task_id, play=False).episode_length_s)
 
 
 def _flat_env_cfg():
@@ -287,18 +301,42 @@ class WalkEvalHarness(Generic[ControllerT]):
 
   def reset(self) -> None:
     """Put every environment in the controller's stance, at its own origin."""
-    self.sim.reset()
-    self.scene.reset()
-    self.controller.reset()
+    self.reset_idx(None)
 
-    root_pose = self._stance_root_pose.unsqueeze(0).repeat(self.num_envs, 1)
-    root_pose[:, :3] = root_pose[:, :3] + self.scene.env_origins
-    self.robot.write_root_link_pose_to_sim(root_pose)
+  def reset_idx(self, env_ids: torch.Tensor | None) -> None:
+    """Put the given environments back in the controller's stance.
+
+    ``None`` resets all of them. A sweep, a profile and a push battery are one
+    long run and only ever reset everything at the start; a competence grid
+    samples episodes, so it resets the environments that just ended and leaves
+    the rest walking.
+
+    Ends with a ``forward()`` so the freshly written stance is reflected in the
+    derived quantities the controller reads on the next step -- the balance
+    correction and the planted-phase detector both do. That is a second forward
+    on any step where something reset, which is the price of not handing the
+    controller a stale pose.
+    """
+    count = self.num_envs if env_ids is None else len(env_ids)
+    if count == 0:
+      return
+    self.sim.reset(env_ids)
+    self.scene.reset(env_ids)
+    self.controller.reset(env_ids)
+
+    origins = self.scene.env_origins
+    if env_ids is not None:
+      origins = origins[env_ids]
+    root_pose = self._stance_root_pose.unsqueeze(0).repeat(count, 1)
+    root_pose[:, :3] = root_pose[:, :3] + origins
+    self.robot.write_root_link_pose_to_sim(root_pose, env_ids=env_ids)
     self.robot.write_root_link_velocity_to_sim(
-      torch.zeros(self.num_envs, 6, device=self.device)
+      torch.zeros(count, 6, device=self.device), env_ids=env_ids
     )
-    joint_pos = self._stance_joint_pos.unsqueeze(0).repeat(self.num_envs, 1)
-    self.robot.write_joint_state_to_sim(joint_pos, torch.zeros_like(joint_pos))
+    joint_pos = self._stance_joint_pos.unsqueeze(0).repeat(count, 1)
+    self.robot.write_joint_state_to_sim(
+      joint_pos, torch.zeros_like(joint_pos), env_ids=env_ids
+    )
     self.sim.forward()
     self.scene.update(dt=self.physics_dt)
 
@@ -426,6 +464,85 @@ class WalkEvalHarness(Generic[ControllerT]):
       # mid-push would keep shoving whatever ran next on this harness.
       driver.clear()
     return metrics
+
+  def run_competence_grid(
+    self,
+    grid: CompetenceGrid,
+    episodes_per_cell: int = 64,
+    shove_cfg: ShoveCfg = DEFAULT_SHOVE,
+    seed: int = 0,
+    episode_length_s: float | None = None,
+    max_steps: int | None = None,
+    on_step: Callable[[int, int], None] | None = None,
+  ) -> EpisodeTable:
+    """Run every cell of a command x disturbance grid until it has episodes.
+
+    The scripted-engine counterpart of
+    :meth:`RlEvalHarness.run_competence_grid`, and it has to be a separate loop
+    for one reason: a policy runs inside a ``ManagerBasedRlEnv``, which decides
+    when an episode ends and resets it in place, and an engine does not. So the
+    termination rule is applied here from raw state
+    (:func:`~mjlab.evaluation.competence.episode_end`, which reproduces the
+    task's own ``fell_over`` bound) and the reset is this harness's own.
+    Everything downstream of that -- the accumulators, the shove train, the
+    stopping rule, the table -- is the same code the policy runs through, which
+    is what makes an engine's competence numbers and a policy's comparable.
+
+    Args:
+      grid: Cell assignment, sized to this harness's batch.
+      episodes_per_cell: Episodes the worst-covered cell must reach.
+      shove_cfg: Onset timing of the shove train. Expressed in seconds, so the
+        shoves land at the same wall-clock times as they do for a policy even
+        though this harness runs at 100 Hz and the policy at 50.
+      seed: Seeds the shove headings.
+      episode_length_s: Episode length. Defaults to the velocity task's, so an
+        engine's ``ep_len_frac`` is a fraction of the same episode a policy's
+        is.
+      max_steps: Hard cap; defaults to what the timeout alone guarantees.
+      on_step: Called with the step index and the least-sampled cell's count.
+
+    Returns:
+      One row per completed episode.
+    """
+    if grid.num_envs != self.num_envs:
+      raise ValueError(
+        f"grid is for {grid.num_envs} environments, harness has {self.num_envs}"
+      )
+    if episode_length_s is None:
+      episode_length_s = competence_episode_seconds()
+    max_episode_steps = int(round(episode_length_s / self.control_dt))
+    if max_steps is None:
+      per_cell = int(grid.envs_per_cell().min())
+      rounds = -(-episodes_per_cell // per_cell)  # ceil
+      max_steps = (rounds + 1) * max_episode_steps
+
+    command = grid.command.to(self.device)
+    self.reset()
+    collector = EpisodeCompetence(grid, max_episode_steps, self.device)
+    generator = torch.Generator(device=self.device)
+    generator.manual_seed(seed)
+    driver = ShoveDriver(
+      magnitude=grid.shove.to(self.device),
+      robot=self.robot,
+      dt=self.control_dt,
+      max_episode_steps=max_episode_steps,
+      cfg=shove_cfg,
+      generator=generator,
+    )
+
+    for step in range(max_steps):
+      collector.note_shoves(driver.apply(collector.episode_step))
+      self.step(command)
+      state = self.state()
+      done, fell = episode_end(state, collector.episode_step + 1, max_episode_steps)
+      collector.record(state, done, fell)
+      # After the collector, which reads the terminal state this reset discards.
+      self.reset_idx(done.nonzero(as_tuple=False).squeeze(-1))
+      if on_step is not None:
+        on_step(step, collector.min_completed)
+      if collector.min_completed >= episodes_per_cell:
+        break
+    return collector.table()
 
   @property
   def engine_state(self) -> torch.Tensor:
