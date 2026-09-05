@@ -27,6 +27,7 @@ from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 BLUE = "#2a78d6"
 ORANGE = "#eb6834"
 AQUA = "#1baf7a"
+DAQUA = "#0e736f"
 PURPLE = "#7b5bd6"
 GOLD = "#b8860b"
 RED = "#d03b3b"
@@ -71,6 +72,38 @@ DIVERGING = LinearSegmentedColormap.from_list(
 
 
 def use_house_style() -> None:
+  plt.rcParams.update(
+    {
+      "figure.facecolor": SURFACE,
+      "axes.facecolor": SURFACE,
+      "savefig.facecolor": SURFACE,
+      "font.family": "sans-serif",
+      "font.sans-serif": ["DejaVu Sans"],
+      "font.size": 9,
+      "axes.titlesize": 10,
+      "axes.titleweight": "semibold",
+      "axes.titlecolor": INK,
+      "axes.labelsize": 9,
+      "axes.labelcolor": INK_2,
+      "axes.edgecolor": BASELINE,
+      "axes.linewidth": 0.8,
+      "axes.grid": True,
+      "axes.axisbelow": True,
+      "grid.color": GRID,
+      "grid.linewidth": 0.6,
+      "xtick.color": MUTED,
+      "ytick.color": MUTED,
+      "xtick.labelcolor": INK_2,
+      "ytick.labelcolor": INK_2,
+      "xtick.labelsize": 8,
+      "ytick.labelsize": 8,
+      "legend.frameon": False,
+      "legend.fontsize": 8,
+      "figure.dpi": 130,
+    }
+  )
+
+def use_nemo_style() -> None:
   plt.rcParams.update(
     {
       "figure.facecolor": SURFACE,
