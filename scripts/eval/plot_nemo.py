@@ -146,7 +146,7 @@ def yaw_cells(run: Run) -> list[dict]:
 
 
 QUANTITIES: tuple[tuple[str, str, str, bool], ...] = (
-  ("attain", "Attainment", "delivered / commanded", True),
+  ("attain_post", "Attainment", "delivered / promised displacement", True),
   ("wobble_lead", "Wobble lead", "seconds from 25 deg to the fall", True),
   ("fell", "fall rate", "episodes ending in a fall", False),
   ("ep_len_frac", "Survival", "ep. length / maximum", True),
@@ -176,7 +176,7 @@ def ramp(higher_is_better: bool):
 
 
 SPREAD_LABEL = {
-  "attain": "IQR of attainment",
+  "attain_post": "IQR of attainment",
   "wobble_lead": "IQR of wobble lead",
   "fell": "width of the 95% interval",
   "ep_len_frac": "IQR of survival",
@@ -476,7 +476,12 @@ def collate_nemo_results(run: Run):
   # Delivered = attain >= 0.7
 
   for cell in run.cells:
-    attain_median = (cell.get("attain")).get("median")
+    # attain_post, not attain: the whole-trial mean is dominated by the
+    # undisturbed walking before the push, and for a trial that falls it is
+    # almost entirely that. attain_post is travel along the command over what
+    # the command promised across the whole post-push window, so a fall reads
+    # as delivery lost rather than as a shorter average.
+    attain_median = (cell.get("attain_post")).get("median")
     fell_rate = cell.get("fell_rate")
     ep_len_frac_first_quartile = (cell.get("ep_len_frac")).get("q25")
     vx = cell.get("vx")

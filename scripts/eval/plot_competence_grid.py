@@ -151,15 +151,8 @@ def load_runs(input_dir: Path, wanted: str | None) -> list[Run]:
 DISPLACEMENT = "attain_displacement"
 """Cell key: how far a shove moved delivered speed, either way."""
 
-SURVIVED = "attain_survived"
-"""Cell key: attainment over the episodes that ran their full length."""
-
-EFFECTIVE = "attain_effective"
-"""Cell key: delivery over the whole nominal episode, a fall counting as zero.
-
-All three are derived here from the ``episodes.csv`` beside each
-``cells.json``, so they need no new data collection.
-"""
+"""Derived here from the ``episodes.csv`` beside each ``cells.json``, so it
+needs no new data collection."""
 
 
 def _quantile_record(values: list[float]) -> dict:
@@ -185,8 +178,8 @@ def attach_displacement(run: Run, directory: Path) -> bool:
   the shove moved delivered speed away from where it sits with no shove, in
   either direction.
 
-  This exists because the median of ``attain`` cannot answer "does a shove cost
-  tracking". Shove headings are drawn uniformly, so a shove along the command
+  This exists because the median of ``attain_post`` cannot answer "does a shove
+  cost tracking". Shove headings are drawn uniformly, so a shove along the command
   and one against it are equally likely and their effects cancel in any
   centre-of-distribution statistic. Measured over the 38 commands of one run,
   the median displacement rises monotonically with shove magnitude in 28 of
@@ -198,24 +191,10 @@ def attach_displacement(run: Run, directory: Path) -> bool:
   is most cells. Absolute deviation has an informative median everywhere and
   keeps the same quantile shape as every other quantity here.
 
-  Both are taken over the episodes that ran their full length, and this is the
-  important part. Attainment is a mean over the steps an episode actually had,
-  so an episode that falls is averaged over the run-up that preceded the shove
-  that killed it. The shoves land at fixed times -- 3, 7, 11 and 15 s of a 20 s
-  episode -- so a controller that goes over on the first one keeps only about
-  three seconds of undisturbed walking, and *that* is what its attainment
-  reports. Worse, the effect grows with the shove: harder pushes end episodes
-  sooner, so the fraction of each episode that predates any disturbance rises,
-  and the number drifts toward the undisturbed value exactly where the
-  controller is doing worst. Measured on the walk engine at ``vx=0.3, wz=0.5``,
-  the median episode at a 1.2 m/s shove is 3.66 s long, takes one shove and is
-  82% pre-shove samples -- so its "0.53 attainment" is mostly a measurement of
-  the three seconds before it was touched.
-
-  Restricting to full-length episodes removes that entirely: every one of them
-  took all four shoves over the same number of steps. The price is survivor
-  bias, and the honest reading is to keep the fall rate beside it -- a cell
-  where nothing survived reports no attainment at all, which is the truth.
+  Every trial counts, fallen ones included: ``attain_post`` divides by the
+  nominal window rather than the part of it the robot survived, so a fall is
+  already charged as delivery lost and needs no censoring or survivor
+  conditioning here.
 
   Returns whether the file was there to read.
   """
@@ -238,34 +217,27 @@ def attach_displacement(run: Run, directory: Path) -> bool:
         float(row["command_wz"]),
         float(row["shove"]),
       )
+      # attain_post where the run has it; the whole-trial attain only for runs
+      # collected before the post-push window existed.
       by_cell.setdefault(cell_key, []).append(
-        (float(row["attain"]), float(row["ep_len_frac"]), float(row["fell"]) < 0.5)
+        float(row.get("attain_post") or row["attain"])
       )
 
   # The undisturbed delivery for each command, which the shove is measured
   # against. It is a median over episodes that are near enough identical --
   # with no shove the protocol has no stochastic input at all.
   baseline: dict[tuple, float] = {}
-  for cell_key, episodes in by_cell.items():
+  for cell_key, values in by_cell.items():
     if _close(cell_key[3], 0.0):
-      survived = [a for a, _frac, ok in episodes if ok]
-      baseline[cell_key[:3]] = _quantile_record(survived)["median"]
+      baseline[cell_key[:3]] = _quantile_record(values)["median"]
 
   for cell in run.cells:
     cell_key = key(cell["vx"], cell["vy"], cell["wz"], cell["shove"])
-    episodes = by_cell.get(cell_key, [])
     clean = baseline.get(cell_key[:3], float("nan"))
-    survived = [a for a, _frac, ok in episodes if ok]
-
-    cell[SURVIVED] = _quantile_record(survived)
+    values = by_cell.get(cell_key, [])
     cell[DISPLACEMENT] = _quantile_record(
-      [abs(a - clean) for a in survived] if not math.isnan(clean) else []
+      [abs(a - clean) for a in values] if not math.isnan(clean) else []
     )
-    # Zero-fill: an episode that fell delivered nothing for the rest of its
-    # nominal length, so its mean over the sampled steps is scaled by the share
-    # of the episode it lasted. Every episode then has the same denominator and
-    # nothing is censored -- a fall costs delivery instead of hiding it.
-    cell[EFFECTIVE] = _quantile_record([a * frac for a, frac, _ok in episodes])
   return True
 
 
@@ -289,7 +261,7 @@ def yaw_cells(run: Run) -> list[dict]:
 
 
 QUANTITIES: tuple[tuple[str, str, str, bool], ...] = (
-  ("attain", "Attainment", "delivered / commanded", True),
+  ("attain_post", "Attainment", "delivered / promised displacement", True),
   ("wobble_lead", "Wobble lead", "seconds from 25 deg to the fall", True),
   ("fell", "fall rate", "episodes ending in a fall", False),
   ("ep_len_frac", "Survival", "ep. length / maximum", True),
@@ -319,7 +291,7 @@ def ramp(higher_is_better: bool):
 
 
 SPREAD_LABEL = {
-  "attain": "IQR of attainment",
+  "attain_post": "IQR of attainment",
   "wobble_lead": "IQR of wobble lead",
   "fell": "width of the 95% interval",
   "ep_len_frac": "IQR of survival",
@@ -907,26 +879,14 @@ def main() -> None:
   # from: it is the figure that answers whether a shove costs tracking at all,
   # which the attainment curve above cannot -- see attach_displacement.
   if any(DISPLACEMENT in cell for run in runs for cell in run.cells):
-    for quantity, title, unit in (
-      (
-        SURVIVED,
-        "Attainment, full-length episodes only",
-        "delivered / commanded",
-      ),
-      (
-        DISPLACEMENT,
-        "Attainment displacement",
-        "|attain - undisturbed attain|",
-      ),
-      (
-        EFFECTIVE,
-        "Effective delivery over the nominal episode",
-        "attain x share of episode survived",
-      ),
-    ):
-      curve_figure(
-        runs, quantity, title, unit, commands, output_dir / f"curves_{quantity}"
-      )
+    curve_figure(
+      runs,
+      DISPLACEMENT,
+      "Attainment displacement",
+      "|attain_post - undisturbed attain_post|",
+      commands,
+      output_dir / f"curves_{DISPLACEMENT}",
+    )
 
   if len(runs) == 2:
     difference_figure(runs[0], runs[1], output_dir / "difference")
