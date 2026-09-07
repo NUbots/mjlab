@@ -630,7 +630,7 @@ class ShoveCfg:
   landed.
   """
 
-  settle: float = 2.5
+  settle: float = 1.5
   """Seconds of undisturbed walking before the shove, so the robot is walking
   rather than still accelerating out of its reset pose."""
   period: float = 10.0

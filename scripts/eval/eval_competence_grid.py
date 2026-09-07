@@ -119,7 +119,7 @@ class GridCfg:
   kept."""
   shove: ShoveCfg = field(default_factory=ShoveCfg)
   """When the shove lands. See ``--grid.shove.help``."""
-  trial_length_s: float = 5.0
+  trial_length_s: float = 6.0
   """Length of one trial, in seconds.
 
   Short and single-push, which is what the push-recovery literature measures:
