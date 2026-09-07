@@ -14,6 +14,7 @@ import json
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,10 +22,9 @@ import tyro
 from figure_style import (
   AQUA,
   BLUE,
+  DAQUA,
   DIVERGING,
   GOLD,
-  ORANGE,
-  DAQUA,
   GRID,
   INK,
   INK_2,
@@ -447,8 +447,7 @@ def cells_at(run: Run, command: tuple[float, float, float]) -> list[dict]:
 
 NEMO_CATEGORIES: tuple[tuple[str, str], ...] = (
   ("Delivered", AQUA),
-  ("Degraded", DAQUA),
-  ("Reversed", ORANGE),
+  ("Degraded (15% < attain < 80%)", DAQUA),
   ("Refused", GOLD),
   ("Failed", RED),
   ("Other", BLUE),
@@ -470,11 +469,10 @@ def collate_nemo_results(run: Run):
   # For each run, collect the needed data and store for plotting onto a single plot
   print(f"Collating run information for run {run.name}")
 
-  # Categories: 
-  # Failed = fell > 0.3 & ep_len_frac < 0.7
-  # Reversed = attain < 0 and not failed
-  # Refused = attain < 0.3 & fell < 0.1 & ep_len_frac > 0.9
-  # Degraded = 0.15 <= attain <= 0.7
+  # Categories:
+  # Failed = fell > 0.4
+  # Refused = attain < 0.3 & fell <= 0.3 & ep_len_frac > 0.8
+  # Degraded = 0.15 <= attain <= 0.8
   # Delivered = attain >= 0.7
 
   for cell in run.cells:
@@ -486,26 +484,38 @@ def collate_nemo_results(run: Run):
     wz = cell.get("wz")
 
     # Failed
-    if (fell_rate > 0.4): # & (ep_len_frac_first_quartile < 0.7):
+    if fell_rate > 0.3:
       cell["category"] = "Failed"
-    # Reversed
-    # elif (attain_median < 0.0):
-    #   cell["category"] = "Reversed"
-    #   print("reversed attain median: ", attain_median)
     # Refused
-    elif ((np.abs(attain_median) < 0.3) and not (np.isnan(attain_median))) & (fell_rate <= 0.3) & (ep_len_frac_first_quartile > 0.8):
+    elif (
+      ((np.abs(attain_median) < 0.3) and not (np.isnan(attain_median)))
+      & (fell_rate <= 0.3)
+      & (ep_len_frac_first_quartile > 0.8)
+    ):
       cell["category"] = "Refused"
     # Degraded
-    elif (0.15 <= attain_median < 0.8):
-      cell["category"] = "Degraded"
+    elif 0.15 <= attain_median < 0.8:
+      cell["category"] = "Degraded (15% < attain < 80%)"
     # Delivered
-    elif ((attain_median >= 0.8) or (np.isnan(attain_median) and vx==0 and vy==0 and wz==0)):
+    elif (attain_median >= 0.8) or (
+      np.isnan(attain_median) and vx < 0.15 and vy < 0.15 and wz == 0
+    ):
       cell["category"] = "Delivered"
     # Other
     else:
       cell["category"] = "Other"
-      if ((cell.get("shove") == 0) or (cell.get("shove") == 0.8)):
-        print("Cell Category = other, vx = {:3.2f}, vy = {:3.2f}, wz = {:3.2f}, episodes = {:4.1f}, attain_median = {:5.4f}, fell_rate = {:6.5f}, ep_len_frac_first_quartile = {:4.3f}".format(cell.get("vx"), cell.get("vy"), cell.get("wz"), cell.get("episodes"), attain_median, fell_rate, ep_len_frac_first_quartile))
+      if (cell.get("shove") == 0) or (cell.get("shove") == 0.8):
+        print(
+          "Cell Category = other, vx = {:3.2f}, vy = {:3.2f}, wz = {:3.2f}, episodes = {:4.1f}, attain_median = {:5.4f}, fell_rate = {:6.5f}, ep_len_frac_first_quartile = {:4.3f}".format(
+            cell.get("vx"),
+            cell.get("vy"),
+            cell.get("wz"),
+            cell.get("episodes"),
+            attain_median,
+            fell_rate,
+            ep_len_frac_first_quartile,
+          )
+        )
 
 
 NEMO_SHOVES: tuple[float, ...] = (0.0, 0.8)
@@ -575,39 +585,105 @@ def draw_categories(
     hide(spine)
 
 
-def plot_nemo(runs: list[Run], output_dir: Path) -> None:
-  """One row per run, one column per shove level in :data:`NEMO_SHOVES`."""
+Orientation = Literal["vertical", "horizontal"]
+"""Which way the panel grid runs.
+
+``vertical`` stacks the runs down the page with the two shove levels side by
+side; ``horizontal`` transposes that, one column per run with the undisturbed
+row on top. The choice is not only cosmetic: whichever axis the runs lie along
+is the one where a controller swept over a different command range needs its
+own ticks, because two runs' panels are then adjacent along it.
+"""
+
+
+def plot_nemo(
+  runs: list[Run],
+  output_dir: Path,
+  orientation: Orientation = "vertical",
+) -> None:
+  """A categorical panel per run per shove level, in either orientation.
+
+  Panels are binned on each *run's* own command axis, because the controllers
+  are not all asked the same commands -- the walk engine is not swept to the
+  speeds a policy is. That makes the tick labels conditional: the far row and
+  column carry them for everyone, and any panel whose axis differs from those
+  keeps its own, or its cells would be read against numbers that are not
+  theirs.
+  """
+  horizontal = orientation == "horizontal"
+  shape = (len(NEMO_SHOVES), len(runs)) if horizontal else (len(runs), len(NEMO_SHOVES))
+  across = shape[1]
+  down = shape[0]
   fig, axes = plt.subplots(
-    len(runs),
-    len(NEMO_SHOVES),
-    figsize=(1.55 * len(NEMO_SHOVES) + 1.9, 1.7 * len(runs) + 0.9),
+    down,
+    across,
+    figsize=(1.55 * across + 1.9, 1.7 * down + 0.9),
     squeeze=False,
     layout="constrained",
   )
 
-  for row, run in enumerate(runs):
-    cells = plane_cells(run)
-    vxs = axis_values(cells, "vx")
-    vys = axis_values(cells, "vy")
-    for column, shove in enumerate(NEMO_SHOVES):
+  planes = [plane_cells(run) for run in runs]
+  vx_of = [axis_values(cells, "vx") for cells in planes]
+  vy_of = [axis_values(cells, "vy") for cells in planes]
+  # Only one of the two axes can be shared, and which one depends on the
+  # orientation. The runs lie along the rows when vertical, so panels beside
+  # each other belong to one run and share its vy -- but consecutive *rows* are
+  # different runs, so the forward axis is the one that can differ. Horizontal
+  # transposes exactly that.
+  #
+  # A panel draws its own ticks only when its axis differs from the *neighbour
+  # it would otherwise read against*: the row below, since forward ticks sit
+  # under a panel, or the column to the left, since lateral ones sit beside it.
+  # Comparing against the neighbour rather than against the far row or column
+  # is what stops a group of runs that share an axis from each drawing its own
+  # copy -- one narrow run at the edge would otherwise make every other run
+  # differ from the reference and label itself.
+  if horizontal:
+    own_ticks = [i == 0 or vy_of[i] != vy_of[i - 1] for i in range(len(runs))]
+  else:
+    last = len(runs) - 1
+    own_ticks = [i == last or vx_of[i] != vx_of[i + 1] for i in range(len(runs))]
+
+  for index, run in enumerate(runs):
+    vxs, vys = vx_of[index], vy_of[index]
+    for step, shove in enumerate(NEMO_SHOVES):
+      row, column = (step, index) if horizontal else (index, step)
       ax = axes[row][column]
       draw_categories(ax, category_grid(run, shove, vxs, vys), vxs, vys)
-      if row == 0:
-        ax.set_title(f"$|\\Delta v|$ = {shove:g} m/s", pad=6)
-      if column == 0:
-        # Wrapped, because a run name is a sentence and a panel is 1.7 inches
-        # tall: unwrapped they run into each other between rows.
-        ax.set_ylabel(textwrap.fill(run.label, 22), fontsize=8)
-      else:
-        ax.set_yticklabels([])
-      if row == len(runs) - 1:
-        ax.set_xlabel("$v_x$ (m/s)")
-      else:
-        ax.set_xticklabels([])
 
-  # One shared axis label rather than four, so each row's ylabel is free to
-  # carry the run's name.
-  fig.supylabel("$v_y$ (m/s)", fontsize=9, color=INK_2)
+      if row == 0:
+        # Wrapped: a run name is a sentence and a panel is 1.55 inches wide.
+        ax.set_title(
+          textwrap.fill(run.label, 22)
+          if horizontal
+          else f"$|\\Delta v|$ = {shove:g} m/s",
+          fontsize=11 if horizontal else None,
+          pad=6,
+        )
+      if column == 0:
+        ax.set_ylabel(
+          f"$|\\Delta v|$ = {shove:g} m/s"
+          if horizontal
+          else textwrap.fill(run.label, 22),
+          fontsize=11,
+        )
+      elif not horizontal or not own_ticks[index]:
+        ax.set_yticklabels([])
+
+      if row == down - 1:
+        ax.set_xlabel("$v_x$ (m/s)", fontsize=12,)
+      elif horizontal or not own_ticks[index]:
+        ax.set_xticklabels([])
+      # Whatever is left keeps the ticks draw_categories gave it: that panel's
+      # command axis is not the labelled one's, and reading its cells against
+      # those numbers would be reading them against another run's sweep.
+
+  # One shared name down the side, so each panel's own ylabel is free to carry
+  # an identity -- the run when vertical, the shove level when horizontal. The
+  # forward axis is named on the bottom row instead of shared, because an
+  # outside legend and a supxlabel both claim the bottom of the figure and land
+  # on top of each other.
+  fig.supylabel("$v_y$ (m/s)", fontsize=12, color=INK_2)
   # Colour is the only encoding here, so the legend is not optional.
   fig.legend(
     handles=[
@@ -617,7 +693,7 @@ def plot_nemo(runs: list[Run], output_dir: Path) -> None:
     loc="outside lower center",
     ncol=len(NEMO_CATEGORIES),
   )
-  save(fig, output_dir / "nemo_envelope")
+  save(fig, output_dir / f"nemo_envelope_{orientation}")
 
 
 # --------------------------------------------------------------------------
@@ -634,6 +710,12 @@ class Args:
   runs: str | None = None
   """Draw only these runs, in this order: a comma-separated list of directory
   names. Defaults to every run in the directory, in name order."""
+  orientation: Orientation = "vertical"
+  """Which way the panel grid runs.
+
+  ``vertical`` stacks the runs down the page with the two shove levels beside
+  each other; ``horizontal`` transposes it, one column per run with the
+  undisturbed row on top and the first run on the left."""
 
 
 def main() -> None:
@@ -647,7 +729,7 @@ def main() -> None:
   for run in runs:
     collate_nemo_results(run)
 
-  plot_nemo(runs, output_dir)
+  plot_nemo(runs, output_dir, args.orientation)
 
 
 if __name__ == "__main__":
