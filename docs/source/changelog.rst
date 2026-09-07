@@ -8,6 +8,34 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- A ``Mjlab-Velocity-Flat-Nubots-Nugus-V44`` task alongside the V57 one, and
+  a ``dcmotor`` plant the pair of them should be evaluated on. v44 is the
+  earlier ``clock_owned`` generation: the policy-owned gait clock without the
+  servo telemetry, scripted head, phase-delta clamp or observation window v57
+  later added, so its actor is a plain MLP over 72 dims. The shared half of
+  the two layouts now lives in one ``add_clock_owned_layout``.
+
+- ``mjlab.asset_zoo.robots.nugus.nugus_dcmotor`` builds the NUgus on the
+  DC-motor actuator model those policies trained against, rather than the
+  builtin position actuator the rest of this branch uses. This matters more
+  than it sounds: ``NUGUS_ACTION_SCALE`` is derived from each actuator's
+  effort limit, so the plant swap silently rescales every action a policy
+  emits, by about 18% on the MX64 groups. v57 absorbs it, but v44 on the
+  builtin plant stands within a few degrees of the fall bound and walks at
+  0.02 m/s against a 0.4 m/s command; on ``--plant dcmotor`` the same
+  checkpoint walks at 0.345 m/s with the torso barely off vertical. The
+  clock-owned tasks set the matching action scale, so pair them with
+  ``--plant dcmotor``.
+
+- ``scripts/eval/plot_command_plane.py`` draws tracking error over the
+  commanded velocity plane from a competence grid's ``cells.json``, one panel
+  per shove magnitude and one row per run on a shared colour scale. The grid
+  measures attainment, so the error plotted is the recoverable one -- the
+  shortfall along the command, ``|c| * (1 - attain)`` in m/s, or the
+  dimensionless ``1 - attain`` with ``--field shortfall``. It is deliberately
+  not a two-dimensional error: the component orthogonal to the command cannot
+  be recovered from a projection.
+
 - A ``Mjlab-Velocity-Flat-Nubots-Nugus-V57`` task, so a policy from the
   ``add-phase-clock`` branch's ``clock_owned`` generations can be measured by
   the same harness, on the same plant and against the same grid as the

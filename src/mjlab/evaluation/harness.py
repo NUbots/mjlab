@@ -76,10 +76,10 @@ from mjlab.scene import Scene
 from mjlab.sim import Simulation
 from mjlab.utils.lab_api.math import matrix_from_quat
 
-EvalPlant = Literal["eval", "training", "nubots-sim", "nubots-xml"]
+EvalPlant = Literal["eval", "training", "dcmotor", "nubots-sim", "nubots-xml"]
 """Robot models the evaluation can run on; see :data:`PLANTS`."""
 
-RL_PLANTS: tuple[str, ...] = ("eval", "training")
+RL_PLANTS: tuple[str, ...] = ("eval", "training", "dcmotor")
 """Plants the learned policy can be evaluated on.
 
 The policy's observations are wired to mjlab's sensor and site names, which the

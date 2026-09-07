@@ -7,6 +7,9 @@ from mjlab.asset_zoo.robots import (
   NUGUS_MOTOR_JOINT_REGEX,
   get_nugus_robot_cfg,
 )
+from mjlab.asset_zoo.robots.nugus.nugus_dcmotor import (
+  NUGUS_DCMOTOR_ACTION_SCALE,
+)
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import (
@@ -398,16 +401,21 @@ def nubots_nugus_flat_history_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
 
 
 ##
-# v57: the add-phase-clock "clock_owned" observation and action layout.
+# The add-phase-clock "clock_owned" generations (v44, v57).
 #
 # A checkpoint only loads against the task that builds its observation
-# vector, and the v57 generation was trained on the add-phase-clock branch
-# with four things this task does not otherwise have: a policy-owned gait
-# clock, a per-actuator current estimate, a shared-bus voltage estimate, and
-# a scripted head. The layout below reproduces that run's actor group
-# (112 dims), its 25-frame history window and its 21-dim action vector
-# exactly, so the trained policy can be measured by the same harness as
-# every other policy in the comparison.
+# vector, and these runs were trained on a branch with things this task
+# does not otherwise have. Both share a policy-owned gait clock: a
+# ``phase_delta`` action advances the phase and the observation reports
+# where the policy put it. v57 adds a per-actuator current estimate, a
+# shared-bus voltage estimate whose sag scales each servo's torque
+# authority, a scripted head, and a 25-frame observation window read by a
+# TCN inside the actor.
+#
+# The resulting layouts, both verified against the trained checkpoints:
+#
+#   v44  actor 72   action 21   plain MLP actor
+#   v57  actor 112  action 21   history 25x112, TCN encoder
 #
 # Deliberately NOT reproduced: the critic group. The evaluation harness
 # loads the actor only (``load_cfg={"actor": True}``), so the critic's
@@ -429,38 +437,86 @@ _NUGUS_CURRENT_KT: dict[str, float] = {
 _CURRENT_QUANTIZE_A = 0.00269
 """Dynamixel XH540-W270 "present current" unit: 2.69 mA per LSB."""
 
-_V57_HEAD_JOINTS = ("neck_yaw", "head_pitch")
-_V57_GAIT_PERIOD = 0.7
+_CLOCK_OWNED_HEAD_JOINTS = ("neck_yaw", "head_pitch")
+_CLOCK_OWNED_GAIT_PERIOD = 0.7
 _V57_PHASE_RAW_MIN = 0.35
 _V57_PHASE_RAW_MAX = 2.5
-"""Phase-delta bounds pinned by the v57 manifest (PHASE_RAW_MIN/MAX)."""
+"""v57's phase-delta clamp (PHASE_RAW_MIN/MAX in its manifest).
+
+v44 sets neither, and the action term treats that as unbounded. The clamp
+is the only thing that changed in the action between the two commits, so
+leaving it off is exactly what v44 trained against -- applying v57's bounds
+to v44 would drive its clock through a limiter it never saw.
+"""
 
 
-def add_v57_layout(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
-  """Rebuild the v57 observation and action layout on a finished config.
+def add_clock_owned_layout(
+  cfg: ManagerBasedRlEnvCfg,
+  *,
+  head_scripted: bool = False,
+  raw_min: float | None = None,
+  raw_max: float | None = None,
+) -> ManagerBasedRlEnvCfg:
+  """Add the ``clock_owned`` gait clock and phase-delta action.
 
-  Applied before :func:`add_actor_history`, which clones whatever the actor
-  group ends up holding -- the history window has to be the same 112 dims
-  the policy's TCN was trained on.
+  What every generation in that family shares: the policy advances its own
+  gait phase through a ``phase_delta`` action and the clock observation
+  reports where it put the phase, instead of reading episode time.
+
+  ``head_scripted`` adds the scripted head, which consumes no policy output
+  (zero action dims) but drives the head joints on a script. It is inserted
+  before ``phase_delta`` so the action dict matches the order the trained
+  policy was built with. ``raw_min``/``raw_max`` clamp the phase-delta
+  action; leave both ``None`` for a generation that trained unbounded.
   """
-  # Policy-owned gait clock: the phase_delta action advances the clock and
-  # this observation reports where the policy put it, rather than reading
-  # episode time.
   clock = ObservationTermCfg(
     func=mdp.gait_clock,
     params={
-      "period": _V57_GAIT_PERIOD,
+      "period": _CLOCK_OWNED_GAIT_PERIOD,
       "command_name": "twist",
       "command_threshold": 0.05,
       "phase_source": "policy",
     },
   )
+  # Assigning over the existing key keeps the clock in the position the base
+  # task gave it -- last in the actor group -- so anything appended after
+  # this lands where the trained vector expects it.
   cfg.observations["actor"].terms["gait_clock"] = clock
   cfg.observations["critic"].terms["gait_clock"] = clock
 
+  if head_scripted:
+    cfg.actions["scripted_head"] = ScriptedHeadActionCfg(
+      entity_name="robot",
+      joint_names=_CLOCK_OWNED_HEAD_JOINTS,
+    )
+  cfg.actions["phase_delta"] = PhaseDeltaActionCfg(
+    entity_name="robot",
+    period=_CLOCK_OWNED_GAIT_PERIOD,
+    command_name="twist",
+    command_threshold=0.05,
+    raw_min=raw_min,
+    raw_max=raw_max,
+  )
+
+  # The action scale follows the plant. These policies trained against the
+  # DC-motor actuator, whose effort limits imply a scale about 18% larger
+  # than the builtin actuator's; leaving the builtin scale in place would
+  # quietly rescale every joint target the policy emits. Pair this with
+  # ``--plant dcmotor``, which is the actuator these numbers come from.
+  joint_pos_action = cfg.actions["joint_pos"]
+  assert isinstance(joint_pos_action, JointPositionActionCfg)
+  joint_pos_action.scale = NUGUS_DCMOTOR_ACTION_SCALE
+  return cfg
+
+
+def add_servo_telemetry(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
+  """Add the per-actuator current and shared-bus voltage observations.
+
+  Appended after the gait clock, which is where the trained vector has
+  them. v57 has both; v44 has neither.
+  """
   # Estimated per-actuator electrical current (tau / Kt), quantized to the
-  # Dynamixel present-current resolution. Appended after the clock so the
-  # concatenation order matches the trained vector.
+  # Dynamixel present-current resolution.
   current = ObservationTermCfg(
     func=mdp.actuator_current,
     params={
@@ -490,24 +546,40 @@ def add_v57_layout(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
   )
   cfg.observations["actor"].terms["servo_voltage"] = voltage
   cfg.observations["critic"].terms["servo_voltage"] = voltage
+  return cfg
 
-  # Scripted head (zero action dims -- it overrides the head targets rather
-  # than consuming policy output) then the phase-delta action, in that
-  # order: the action vector is joint_pos(20) + scripted_head(0) +
-  # phase_delta(1) = 21.
-  cfg.actions["scripted_head"] = ScriptedHeadActionCfg(
-    entity_name="robot",
-    joint_names=_V57_HEAD_JOINTS,
-  )
-  cfg.actions["phase_delta"] = PhaseDeltaActionCfg(
-    entity_name="robot",
-    period=_V57_GAIT_PERIOD,
-    command_name="twist",
-    command_threshold=0.05,
+
+def add_v44_layout(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
+  """Rebuild the v44 observation and action layout on a finished config.
+
+  v44 is the ``clock_owned`` family without any of what v57 later added:
+  no servo telemetry, no scripted head, no phase-delta clamp, and no
+  observation window -- its actor is a plain MLP over 72 dims, and its
+  action vector is ``joint_pos(20) + phase_delta(1) = 21``.
+  """
+  return add_clock_owned_layout(cfg)
+
+
+def add_v57_layout(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
+  """Rebuild the v57 observation and action layout on a finished config.
+
+  Applied before :func:`add_actor_history`, which clones whatever the actor
+  group ends up holding -- the history window has to be the same 112 dims
+  the policy's TCN was trained on. The action vector is
+  ``joint_pos(20) + scripted_head(0) + phase_delta(1) = 21``.
+  """
+  add_clock_owned_layout(
+    cfg,
+    head_scripted=True,
     raw_min=_V57_PHASE_RAW_MIN,
     raw_max=_V57_PHASE_RAW_MAX,
   )
-  return cfg
+  return add_servo_telemetry(cfg)
+
+
+def nubots_nugus_flat_v44_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Flat terrain in the v44 layout. No history window: v44 has no encoder."""
+  return add_v44_layout(nubots_nugus_flat_env_cfg(play=play))
 
 
 def nubots_nugus_flat_v57_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:

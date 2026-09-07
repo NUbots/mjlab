@@ -58,7 +58,7 @@ class Args:
   a different observation layout -- one reading a window of past observations,
   say -- needs the task that builds that layout named here. The default is the
   task the plain policies train against."""
-  plant: Literal["eval", "training"] = "eval"
+  plant: Literal["eval", "training", "dcmotor"] = "eval"
   """Robot model. The NUbots MJCFs are quintic-only -- they do not carry the
   sensors and sites the policy's observations read."""
   num_envs: int = 512

@@ -36,6 +36,9 @@ import numpy as np
 import torch
 
 from mjlab.asset_zoo.robots.nugus.nugus_constants import get_nugus_robot_cfg
+from mjlab.asset_zoo.robots.nugus.nugus_dcmotor import (
+  get_nugus_dcmotor_robot_cfg,
+)
 from mjlab.asset_zoo.robots.nugus.nugus_eval_constants import get_nugus_eval_robot_cfg
 from mjlab.asset_zoo.robots.nugus.nugus_nubots_constants import (
   get_nugus_nubots_robot_cfg,
@@ -64,11 +67,12 @@ from mjlab.controllers.quintic_walk.walk_generator import (
 )
 from mjlab.entity import Entity, EntityCfg
 
-Plant = Literal["eval", "training", "nubots-sim", "nubots-xml"]
+Plant = Literal["eval", "training", "dcmotor", "nubots-sim", "nubots-xml"]
 
 PLANTS: dict[str, Callable[[], EntityCfg]] = {
   "eval": get_nugus_eval_robot_cfg,
   "training": get_nugus_robot_cfg,
+  "dcmotor": get_nugus_dcmotor_robot_cfg,
   "nubots-sim": get_nugus_nubots_sim_robot_cfg,
   "nubots-xml": get_nugus_nubots_robot_cfg,
 }
@@ -82,6 +86,12 @@ PLANTS: dict[str, Callable[[], EntityCfg]] = {
   The model policies are trained against: backlash on every servo, soft
   contacts, narrow RL joint clamps. The engine falls on this one, which is a
   fact about the model rather than about the engine.
+``dcmotor``
+  The same robot driven through the DC-motor actuator model the
+  ``add-phase-clock`` v-generations trained against, rather than the builtin
+  position actuator the rest of this branch uses. Torque saturates against a
+  speed-dependent envelope, and the implied action scale is ~18% larger. See
+  :mod:`mjlab.asset_zoo.robots.nugus.nugus_dcmotor`.
 ``nubots-sim``
   NUbots' simulation dynamics on mjlab's kinematic tree.
 ``nubots-xml``

@@ -4,6 +4,7 @@ from mjlab.tasks.velocity.rl import VelocityOnPolicyRunner
 from .env_cfgs import (
   nubots_nugus_flat_env_cfg,
   nubots_nugus_flat_history_env_cfg,
+  nubots_nugus_flat_v44_env_cfg,
   nubots_nugus_flat_v57_env_cfg,
   nubots_nugus_rough_env_cfg,
   nubots_nugus_rough_history_env_cfg,
@@ -62,5 +63,19 @@ register_mjlab_task(
   env_cfg=nubots_nugus_flat_v57_env_cfg(),
   play_env_cfg=nubots_nugus_flat_v57_env_cfg(play=True),
   rl_cfg=nubots_nugus_history_ppo_runner_cfg(),
+  runner_cls=VelocityOnPolicyRunner,
+)
+
+
+# v44, the earlier ``clock_owned`` generation: the policy-owned gait clock
+# without the servo telemetry, scripted head or observation window v57
+# added, so its actor is a plain MLP over 72 dims. Registered with the
+# plain runner config for that reason -- there is no history group for an
+# encoder to read.
+register_mjlab_task(
+  task_id="Mjlab-Velocity-Flat-Nubots-Nugus-V44",
+  env_cfg=nubots_nugus_flat_v44_env_cfg(),
+  play_env_cfg=nubots_nugus_flat_v44_env_cfg(play=True),
+  rl_cfg=nubots_nugus_ppo_runner_cfg(),
   runner_cls=VelocityOnPolicyRunner,
 )
