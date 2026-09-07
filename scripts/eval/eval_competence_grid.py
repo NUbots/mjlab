@@ -59,7 +59,6 @@ from mjlab.evaluation.harness import (
   EvalPlant,
   QuinticEvalHarness,
   RlEvalHarness,
-  competence_episode_seconds,
 )
 from mjlab.utils.torch import configure_torch_backends
 
@@ -84,7 +83,19 @@ class GridCfg:
   behaviour tree asks for, and the slice keeps yaw from going unmeasured.
   """
 
-  vx: tuple[float, ...] = (-1.67, -1.33, -1.0, -0.67, -0.33, 0.0, 0.33, 0.67, 1.0, 1.33, 1.67)
+  vx: tuple[float, ...] = (
+    -1.67,
+    -1.33,
+    -1.0,
+    -0.67,
+    -0.33,
+    0.0,
+    0.33,
+    0.67,
+    1.0,
+    1.33,
+    1.67,
+  )
   """Forward commands, in m/s. Spans the trained range."""
   vy: tuple[float, ...] = (-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0)
   """Lateral commands, in m/s."""
@@ -107,7 +118,23 @@ class GridCfg:
   buy identical rows. Harder commands move the cliff down, which is why 0.4 is
   kept."""
   shove: ShoveCfg = field(default_factory=ShoveCfg)
-  """When the shoves land. See ``--grid.shove.help``."""
+  """When the shove lands. See ``--grid.shove.help``."""
+  trial_length_s: float = 5.0
+  """Length of one trial, in seconds.
+
+  Short and single-push, which is what the push-recovery literature measures:
+  a trial settles, takes one shove, and the rest of it is the recovery window.
+  A long trial with several shoves makes the tracking average mostly
+  undisturbed walking, and for a trial that ends in a fall almost entirely the
+  run-up before the push that killed it -- the harder the push the shorter the
+  trial and the larger that share, so the number flatters exactly the cases
+  that went worst.
+
+  The settle has to be long enough that the robot is walking when the push
+  lands. Two and a half seconds is enough for the policies; the walk engine is
+  still accelerating at that point (it averages 0.179 m/s over its first 5 s
+  against a 0.219 steady state), so read its undisturbed row as the baseline
+  rather than assuming steady state."""
 
   episodes_per_cell: int = 64
   """Episodes the worst-covered cell must reach before the run stops. Enough to
@@ -208,7 +235,7 @@ def main() -> None:
     num_envs=args.num_envs,
     device=args.device,
   )
-  episode_s = competence_episode_seconds(args.task_id)
+  episode_s = cfg.trial_length_s
   max_episode_steps = int(round(episode_s / harness.control_dt))
   onsets = cfg.shove.onsets(harness.control_dt, max_episode_steps)
 
@@ -223,7 +250,7 @@ def main() -> None:
     f"{cfg.episodes_per_cell} episodes wanted per cell"
   )
   print(
-    f"episode           : {episode_s:.0f} s at "
+    f"trial             : {episode_s:g} s at "
     f"{1.0 / harness.control_dt:.0f} Hz, {len(onsets)} shoves at "
     f"{', '.join(f'{o * harness.control_dt:.0f}' for o in onsets)} s"
   )
@@ -278,6 +305,7 @@ def main() -> None:
     "balance": args.balance if args.engine == "quintic" else None,
     "num_envs": args.num_envs,
     "episode_length_s": round(episode_s, 3),
+    "trial_length_s": round(episode_s, 3),
     "control_hz": round(1.0 / harness.control_dt, 3),
     "device": args.device,
     "grid": asdict(cfg),

@@ -518,7 +518,10 @@ class WalkEvalHarness(Generic[ControllerT]):
 
     command = grid.command.to(self.device)
     self.reset()
-    collector = EpisodeCompetence(grid, max_episode_steps, self.control_dt, self.device)
+    onsets = shove_cfg.onsets(self.control_dt, max_episode_steps)
+    collector = EpisodeCompetence(
+      grid, max_episode_steps, self.control_dt, self.device, post_onset_step=onsets[0]
+    )
     generator = torch.Generator(device=self.device)
     generator.manual_seed(seed)
     driver = ShoveDriver(
@@ -796,6 +799,7 @@ def build_rl_env(
   device: str,
   task_id: str = TASK_ID,
   episodic: bool = False,
+  episode_length_s: float | None = None,
 ):
   """Build the velocity task environment for evaluation on one plant.
 
@@ -847,7 +851,11 @@ def build_rl_env(
     # The play config stretches the episode to 1e9 s so a run is never cut
     # short. Put the training length back: ep_len_frac is measured against it,
     # so a wrong denominator would silently rescale survival.
-    cfg.episode_length_s = load_env_cfg(task_id, play=False).episode_length_s
+    cfg.episode_length_s = (
+      load_env_cfg(task_id, play=False).episode_length_s
+      if episode_length_s is None
+      else episode_length_s
+    )
     cfg.curriculum = {}
     failures = [
       name
@@ -912,11 +920,19 @@ class RlEvalHarness:
     device: str = "cuda:0",
     task_id: str = TASK_ID,
     episodic: bool = False,
+    episode_length_s: float | None = None,
   ) -> None:
     self.plant: EvalPlant = plant
     self.num_envs = num_envs
     self.device = device
-    self.env = build_rl_env(plant, num_envs, device, task_id, episodic=episodic)
+    self.env = build_rl_env(
+      plant,
+      num_envs,
+      device,
+      task_id,
+      episodic=episodic,
+      episode_length_s=episode_length_s,
+    )
     self.wrapped, self.policy = load_policy(self.env, checkpoint, device, task_id)
     self.robot: Entity = self.env.scene["robot"]
     self.control_dt = float(self.env.step_dt)
@@ -1086,8 +1102,13 @@ class RlEvalHarness:
       prescribe_velocity_commands(self.env, grid.command.to(self.device))
       obs = self.wrapped.get_observations()
 
+      onsets = shove_cfg.onsets(self.control_dt, max_episode_steps)
       collector = EpisodeCompetence(
-        grid, max_episode_steps, self.control_dt, self.device
+        grid,
+        max_episode_steps,
+        self.control_dt,
+        self.device,
+        post_onset_step=onsets[0],
       )
       generator = torch.Generator(device=self.device)
       generator.manual_seed(seed)

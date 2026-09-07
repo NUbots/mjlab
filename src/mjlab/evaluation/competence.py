@@ -311,6 +311,24 @@ class EpisodeTable:
   num_wobble_steps: torch.Tensor
   """Steps of the episode tilted past 25 degrees, as a count rather than the
   fraction :attr:`wobble` reports."""
+  attain_post: torch.Tensor
+  """Attainment over the post-push window alone, NaN where it took no sample.
+
+  The reading to quote for tracking under a disturbance, and the one the
+  push-recovery literature reports (as a post-push RMS velocity error). An
+  average over the whole trial is dominated by the undisturbed walking before
+  the push, and for a trial that ends in a fall it is almost entirely that --
+  the harder the push, the shorter the trial and the larger that share, so the
+  whole-trial number flatters exactly the cases that went worst.
+  """
+  post_frac: torch.Tensor
+  """Share of the post-push window the trial survived, 0 to 1.
+
+  Multiply by :attr:`attain_post` for delivery over the whole window with a
+  fall counting as zero. Unlike scaling by ``ep_len_frac`` there is no floor
+  from the settle period: the window starts at the push, so a trial that goes
+  over immediately scores near zero rather than banking its run-up.
+  """
   wobble_steps_index: tuple[torch.Tensor, ...]
   """Which steps those were: one tensor per episode of 0-based step indices.
 
@@ -358,6 +376,7 @@ class EpisodeCompetence:
     max_episode_steps: int,
     step_dt: float,
     device: torch.device | str,
+    post_onset_step: int = 0,
   ) -> None:
     """
     Args:
@@ -367,12 +386,18 @@ class EpisodeCompetence:
       step_dt: Control period in seconds, which turns a step count into the
         ``ep_len`` an engine and a policy can be compared on.
       device: Device the accumulators live on.
+      post_onset_step: Step the shove lands on. Everything from it to the end
+        of the trial is the post-push window, which is where tracking under a
+        disturbance has to be measured -- an average over the whole trial is
+        mostly the undisturbed walking before the push, and for a controller
+        that falls it is *only* that. Zero measures the whole trial.
     """
     if max_episode_steps <= 0:
       raise ValueError(f"max_episode_steps must be positive, got {max_episode_steps}")
     self.grid = grid
     self.max_episode_steps = max_episode_steps
     self.step_dt = float(step_dt)
+    self.post_onset_step = int(post_onset_step)
     self.device = torch.device(device)
 
     n = grid.num_envs
@@ -399,6 +424,8 @@ class EpisodeCompetence:
     self._wobble_sum = zeros.clone()
     self._sample_steps = zeros.clone()
     self._shoves = zeros.clone()
+    self._post_sum = zeros.clone()
+    self._post_weight = zeros.clone()
     # Which steps of the current episode wobbled, as a bitmap rather than a
     # growing list per environment: one bool per env per step is a few megabytes
     # at any batch this pipeline runs, and it makes the per-episode extraction
@@ -453,6 +480,11 @@ class EpisodeCompetence:
     sampled = weight * self._meaningful.float()
     self._attain_sum += sampled * attain
     self._attain_weight += sampled
+    # The shove is written before the step at ``post_onset_step``, so the first
+    # sample carrying it is the one recorded when episode_step passes it.
+    post = sampled * (self.episode_step > self.post_onset_step).float()
+    self._post_sum += post * attain
+    self._post_weight += post
 
     # Per-axis: achieved/commanded, signed, so backpedalling reads negative.
     # The clamp only guards the masked-out lanes; where the mask holds,
@@ -500,6 +532,11 @@ class EpisodeCompetence:
         "steps": steps,
         "ep_len": self.episode_step[ids].float() * self.step_dt,
         "num_wobble_steps": self._wobble_sum[ids],
+        "attain_post": ratio(self._post_sum, self._post_weight),
+        "post_frac": (
+          (self.episode_step[ids] - self.post_onset_step).clamp(min=0).float()
+          / max(1, self.max_episode_steps - self.post_onset_step)
+        ).clamp(max=1.0),
         "wobble_lead": self._wobble_lead(ids, fell[ids]),
       }
     )
@@ -522,6 +559,8 @@ class EpisodeCompetence:
     self._wobble_sum[ids] = 0.0
     self._sample_steps[ids] = 0.0
     self._shoves[ids] = 0.0
+    self._post_sum[ids] = 0.0
+    self._post_weight[ids] = 0.0
     self._wobble_mask[ids] = False
 
   def _wobble_lead(self, ids: torch.Tensor, fell: torch.Tensor) -> torch.Tensor:
@@ -591,15 +630,16 @@ class ShoveCfg:
   landed.
   """
 
-  settle: float = 3.0
-  """Seconds of undisturbed walking before the first shove, so the robot is at
-  steady state rather than still accelerating out of its reset pose."""
-  period: float = 4.0
-  """Seconds between shoves. Comfortably longer than the recovery the training
-  tracker measures, so one event is over before the next arrives."""
-  tail: float = 2.0
-  """Seconds at the end of the episode with no shove, so the last event has
-  room to resolve inside the episode that owns it."""
+  settle: float = 2.5
+  """Seconds of undisturbed walking before the shove, so the robot is walking
+  rather than still accelerating out of its reset pose."""
+  period: float = 10.0
+  """Seconds between shoves. Longer than the trial by default, which is how a
+  trial gets exactly one: the push-recovery literature measures a single event
+  per trial, so the window after it is uncontaminated by the next one."""
+  tail: float = 0.0
+  """Seconds at the end with no shove. Zero because with one push per trial
+  everything after the onset *is* the measurement window."""
 
   def onsets(self, dt: float, max_episode_steps: int) -> tuple[int, ...]:
     """Episode step indices at which a shove lands."""
@@ -731,6 +771,8 @@ def _wilson(successes: int, trials: int, z: float = 1.96) -> tuple[float, float]
 
 
 CELL_METRICS: tuple[str, ...] = (
+  "attain_post",
+  "post_frac",
   "attain",
   "attain_x",
   "attain_y",
@@ -789,7 +831,7 @@ def format_grid_summary(grid: CompetenceGrid, records: list[dict]) -> str:
   """One-screen rendering of the grid: one line per cell."""
   header = (
     f"{'vx':>6} {'vy':>6} {'wz':>6} {'dv':>5} {'eps':>5} "
-    f"{'attain':>18} {'wobble lead (s)':>18} {'fell':>17} {'ep_len':>18}"
+    f"{'attain post':>18} {'wobble lead (s)':>18} {'fell':>17} {'ep_len':>18}"
   )
   lines = [
     f"cells {len(grid.cells)}, episodes {sum(r['episodes'] for r in records)}",
@@ -810,7 +852,7 @@ def format_grid_summary(grid: CompetenceGrid, records: list[dict]) -> str:
     lines.append(
       f"{record['vx']:>6.2f} {record['vy']:>6.2f} {record['wz']:>6.2f} "
       f"{record['shove']:>5.2f} {record['episodes']:>5d} "
-      f"{band(record['attain'])} {band(record['wobble_lead'])} {fell} "
+      f"{band(record['attain_post'])} {band(record['wobble_lead'])} {fell} "
       f"{band(record['ep_len_frac'])}"
     )
   return "\n".join(lines)
