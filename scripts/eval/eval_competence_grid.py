@@ -137,15 +137,16 @@ class GridCfg:
   rather than assuming steady state."""
 
   episodes_per_cell: int = 128
-  """Trials per cell. The run stops once the worst-covered cell reaches this,
-  and every cell is then trimmed to exactly it -- cells that fall often end
-  their trials early and start the next, so without the trim they finish with
-  several times the trials of the cells that never fall and a cell's spread
-  would be read against a sample size that varied with how badly it did.
+  """Trials the worst-covered cell must reach before the run stops.
+
+  A floor, not a quota: cells that fall often end their trials early and start
+  the next, so they finish with several times this many and nothing is thrown
+  away to even it out. Every cell records its own ``n``, which is what to read
+  its spread against.
 
   The only stochastic input is the shove heading, drawn uniformly on the
-  horizontal circle, so this is the number of directions each cell is sampled
-  from."""
+  horizontal circle, so this is the number of directions the least-sampled cell
+  is measured over."""
   seed: int = 0
   """Seeds the shove headings, the protocol's only stochastic input."""
 

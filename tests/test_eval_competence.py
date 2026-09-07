@@ -716,18 +716,3 @@ def test_attain_post_is_undefined_only_when_the_command_is_too_small():
   competence = collector(((0.4, 0.0, 0.0),))
   run(competence, 10, lin_vel_b=torch.zeros(1, 3))
   assert float(competence.table().attain_post[0]) == pytest.approx(0.0)
-
-
-def test_cells_are_trimmed_to_the_same_number_of_trials():
-  """A cell that falls often starts more trials; the spread of two cells has to
-  be read against the same sample size."""
-  competence = collector(((0.4, 0.0, 0.0), (0.5, 0.0, 0.0)))
-  for step in range(12):
-    # The first environment ends a trial every 3 steps, the second every 6.
-    done = torch.tensor([(step + 1) % 3 == 0, (step + 1) % 6 == 0])
-    competence.record(state(num_envs=2), done, torch.zeros(2, dtype=torch.bool))
-
-  assert competence.completed_per_cell.tolist() == [4, 2]
-  trimmed = competence.table(limit_per_cell=2)
-  assert sorted(trimmed.cell.tolist()) == [0.0, 0.0, 1.0, 1.0]
-  assert competence.table().num_episodes == 6

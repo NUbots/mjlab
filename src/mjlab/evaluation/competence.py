@@ -617,19 +617,20 @@ class EpisodeCompetence:
     """Episodes closed in the least-sampled cell. The run's stopping test."""
     return int(self._completed.min())
 
-  def table(self, limit_per_cell: int | None = None) -> EpisodeTable:
+  def table(self) -> EpisodeTable:
     """Concatenate the closed episodes. Episodes still in flight are dropped.
 
     Dropping them is the point: an episode truncated by the end of the run has
     a censored length and a partial dose of shoves, and counting it would pull
     ``ep_len_frac`` down for reasons that have nothing to do with the robot.
 
-    ``limit_per_cell`` trims each cell to its first that many trials. The run
-    stops when the *worst*-covered cell is full, so cells that fall often --
-    which end their trials early and start the next -- would otherwise finish
-    with several times the trials of the cells that never fall, and a cell's
-    spread would be read against a sample size that varied with how badly it
-    did.
+    Cells end up with different numbers of trials, and deliberately so: the run
+    stops when the *worst*-covered cell reaches its target, and a cell that
+    falls often ends its trials early and starts the next, so it accumulates
+    several times the trials of a cell that never falls. Nothing is discarded
+    to even that out -- the extra trials were paid for and they tighten those
+    cells' quantiles. Every cell records its own ``n``, which is what to read
+    a spread against.
     """
     names = [f.name for f in fields(EpisodeTable) if f.name != "wobble_steps_index"]
     if not self._rows:
@@ -639,21 +640,7 @@ class EpisodeCompetence:
       name: torch.cat([row[name].float() for row in self._rows]) for name in names
     }
     assert len(self._wobble_indices) == len(columns["cell"])
-    table = EpisodeTable(**columns, wobble_steps_index=tuple(self._wobble_indices))
-    if limit_per_cell is None:
-      return table
-    keep: list[int] = []
-    seen: dict[int, int] = {}
-    for index, cell in enumerate(table.cell.tolist()):
-      count = seen.get(int(cell), 0)
-      if count < limit_per_cell:
-        seen[int(cell)] = count + 1
-        keep.append(index)
-    picked = torch.tensor(keep, dtype=torch.long, device=self.device)
-    return EpisodeTable(
-      **{name: getattr(table, name)[picked] for name in names},
-      wobble_steps_index=tuple(table.wobble_steps_index[i] for i in keep),
-    )
+    return EpisodeTable(**columns, wobble_steps_index=tuple(self._wobble_indices))
 
 
 @dataclass(frozen=True)
