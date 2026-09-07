@@ -312,7 +312,18 @@ class EpisodeTable:
   """Steps of the episode tilted past 25 degrees, as a count rather than the
   fraction :attr:`wobble` reports."""
   attain_post: torch.Tensor
-  """Attainment over the post-push window alone, NaN where it took no sample.
+  """Displacement along the command over the post-push window, over what the
+  command promised across the *whole* window.
+
+  ``(travel along the command direction) / (commanded speed x window length)``,
+  accumulated as the integral of the projected body-frame velocity so a turning
+  command is followed rather than fixed at the heading it started on.
+
+  The denominator is the nominal window, never the part of it the robot
+  survived. That is the whole point: a trial that goes over stops accruing
+  displacement while the promise keeps running, so a fall reads as delivery
+  lost rather than as a shorter average. It needs no zero-fill and no survivor
+  conditioning -- both fall out of dividing by a fixed T.
 
   The reading to quote for tracking under a disturbance, and the one the
   push-recovery literature reports (as a post-push RMS velocity error). An
@@ -532,7 +543,11 @@ class EpisodeCompetence:
         "steps": steps,
         "ep_len": self.episode_step[ids].float() * self.step_dt,
         "num_wobble_steps": self._wobble_sum[ids],
-        "attain_post": ratio(self._post_sum, self._post_weight),
+        "attain_post": torch.where(
+          self._meaningful[ids],
+          self._post_sum[ids] / max(1, self.max_episode_steps - self.post_onset_step),
+          nan,
+        ),
         "post_frac": (
           (self.episode_step[ids] - self.post_onset_step).clamp(min=0).float()
           / max(1, self.max_episode_steps - self.post_onset_step)
@@ -602,12 +617,19 @@ class EpisodeCompetence:
     """Episodes closed in the least-sampled cell. The run's stopping test."""
     return int(self._completed.min())
 
-  def table(self) -> EpisodeTable:
+  def table(self, limit_per_cell: int | None = None) -> EpisodeTable:
     """Concatenate the closed episodes. Episodes still in flight are dropped.
 
     Dropping them is the point: an episode truncated by the end of the run has
     a censored length and a partial dose of shoves, and counting it would pull
     ``ep_len_frac`` down for reasons that have nothing to do with the robot.
+
+    ``limit_per_cell`` trims each cell to its first that many trials. The run
+    stops when the *worst*-covered cell is full, so cells that fall often --
+    which end their trials early and start the next -- would otherwise finish
+    with several times the trials of the cells that never fall, and a cell's
+    spread would be read against a sample size that varied with how badly it
+    did.
     """
     names = [f.name for f in fields(EpisodeTable) if f.name != "wobble_steps_index"]
     if not self._rows:
@@ -617,7 +639,21 @@ class EpisodeCompetence:
       name: torch.cat([row[name].float() for row in self._rows]) for name in names
     }
     assert len(self._wobble_indices) == len(columns["cell"])
-    return EpisodeTable(**columns, wobble_steps_index=tuple(self._wobble_indices))
+    table = EpisodeTable(**columns, wobble_steps_index=tuple(self._wobble_indices))
+    if limit_per_cell is None:
+      return table
+    keep: list[int] = []
+    seen: dict[int, int] = {}
+    for index, cell in enumerate(table.cell.tolist()):
+      count = seen.get(int(cell), 0)
+      if count < limit_per_cell:
+        seen[int(cell)] = count + 1
+        keep.append(index)
+    picked = torch.tensor(keep, dtype=torch.long, device=self.device)
+    return EpisodeTable(
+      **{name: getattr(table, name)[picked] for name in names},
+      wobble_steps_index=tuple(table.wobble_steps_index[i] for i in keep),
+    )
 
 
 @dataclass(frozen=True)
@@ -640,13 +676,17 @@ class ShoveCfg:
   tail: float = 0.0
   """Seconds at the end with no shove. Zero because with one push per trial
   everything after the onset *is* the measurement window."""
+  max_shoves: int = 1
+  """Shoves per trial. One is the push-recovery convention and what the
+  post-push window assumes: a second event inside the window would be measured
+  as part of the recovery from the first."""
 
   def onsets(self, dt: float, max_episode_steps: int) -> tuple[int, ...]:
     """Episode step indices at which a shove lands."""
     first = int(round(self.settle / dt))
     stride = max(1, int(round(self.period / dt)))
     last = max_episode_steps - int(round(self.tail / dt))
-    return tuple(range(first, last, stride))
+    return tuple(range(first, last, stride))[: max(1, self.max_shoves)]
 
 
 DEFAULT_SHOVE = ShoveCfg()

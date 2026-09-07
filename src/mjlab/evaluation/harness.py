@@ -545,7 +545,7 @@ class WalkEvalHarness(Generic[ControllerT]):
         on_step(step, collector.min_completed)
       if collector.min_completed >= episodes_per_cell:
         break
-    return collector.table()
+    return collector.table(limit_per_cell=episodes_per_cell)
 
   @property
   def engine_state(self) -> torch.Tensor:
@@ -1134,7 +1134,7 @@ class RlEvalHarness:
           on_step(step, collector.min_completed)
         if collector.min_completed >= episodes_per_cell:
           break
-    return collector.table()
+    return collector.table(limit_per_cell=episodes_per_cell)
 
   def close(self) -> None:
     self.env.close()

@@ -305,7 +305,8 @@ class StubRobot:
 
 
 def test_onsets_settle_first_and_leave_a_tail():
-  cfg = ShoveCfg(settle=3.0, period=4.0, tail=2.0)
+  # max_shoves lifted, since this is about where a train of them would land.
+  cfg = ShoveCfg(settle=3.0, period=4.0, tail=2.0, max_shoves=99)
   onsets = cfg.onsets(dt=0.02, max_episode_steps=1000)
 
   assert onsets == (150, 350, 550, 750)
@@ -661,3 +662,72 @@ def test_lead_time_reaches_the_csv():
   assert "wobble_lead" in columns
   values = competence.table().rows()[0]
   assert values[columns.index("wobble_lead")] == pytest.approx(5 * DT)
+
+
+# --------------------------------------------------------------------------
+# One shove per trial, and a window that measures displacement
+# --------------------------------------------------------------------------
+
+
+def test_a_trial_takes_one_shove():
+  """The post-push window assumes it: a second event inside it would be
+  measured as part of the recovery from the first."""
+  cfg = ShoveCfg(settle=1.5, period=10.0, tail=0.0)
+  assert cfg.onsets(dt=0.02, max_episode_steps=500) == (75,)
+  # Even a period that would otherwise fit several.
+  assert ShoveCfg(settle=1.0, period=1.0, tail=0.0).onsets(0.02, 500) == (50,)
+  assert (
+    len(ShoveCfg(settle=1.0, period=1.0, tail=0.0, max_shoves=3).onsets(0.02, 500)) == 3
+  )
+
+
+def test_attain_post_divides_by_the_whole_window_not_the_part_survived():
+  """A trial that falls stops accruing displacement while the promise runs on.
+
+  Half the window at full delivery, then a fall, has to read one half -- not
+  one, which is what averaging over the steps it survived would give.
+  """
+  competence = EpisodeCompetence(
+    build_grid(((0.4, 0.0, 0.0),), (0.0,), num_envs=1),
+    max_episode_steps=20,
+    step_dt=DT,
+    device="cpu",
+    post_onset_step=10,
+  )
+  # Delivers exactly the command from the onset, then falls halfway through.
+  for step in range(15):
+    done = torch.tensor([step == 14])
+    competence.record(state(lin_vel_b=torch.tensor([[0.4, 0.0, 0.0]])), done, done)
+
+  table = competence.table()
+  assert float(table.fell[0]) == 1.0
+  # Window is steps 10..19; it delivered on 10..13 of the 10 promised.
+  assert float(table.attain_post[0]) == pytest.approx(4 / 10)
+  # The old whole-window mean over sampled steps would have read ~1.0.
+  assert float(table.attain[0]) == pytest.approx(1.0)
+
+
+def test_attain_post_is_undefined_only_when_the_command_is_too_small():
+  """Zero means it delivered nothing; NaN means nothing was measured."""
+  competence = collector(((MIN_COMMAND_NORM - 0.01, 0.0, 0.0),))
+  run(competence, 10)
+  assert bool(competence.table().attain_post.isnan().all())
+
+  competence = collector(((0.4, 0.0, 0.0),))
+  run(competence, 10, lin_vel_b=torch.zeros(1, 3))
+  assert float(competence.table().attain_post[0]) == pytest.approx(0.0)
+
+
+def test_cells_are_trimmed_to_the_same_number_of_trials():
+  """A cell that falls often starts more trials; the spread of two cells has to
+  be read against the same sample size."""
+  competence = collector(((0.4, 0.0, 0.0), (0.5, 0.0, 0.0)))
+  for step in range(12):
+    # The first environment ends a trial every 3 steps, the second every 6.
+    done = torch.tensor([(step + 1) % 3 == 0, (step + 1) % 6 == 0])
+    competence.record(state(num_envs=2), done, torch.zeros(2, dtype=torch.bool))
+
+  assert competence.completed_per_cell.tolist() == [4, 2]
+  trimmed = competence.table(limit_per_cell=2)
+  assert sorted(trimmed.cell.tolist()) == [0.0, 0.0, 1.0, 1.0]
+  assert competence.table().num_episodes == 6

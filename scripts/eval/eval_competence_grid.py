@@ -119,7 +119,7 @@ class GridCfg:
   kept."""
   shove: ShoveCfg = field(default_factory=ShoveCfg)
   """When the shove lands. See ``--grid.shove.help``."""
-  trial_length_s: float = 6.0
+  trial_length_s: float = 10.0
   """Length of one trial, in seconds.
 
   Short and single-push, which is what the push-recovery literature measures:
@@ -136,10 +136,16 @@ class GridCfg:
   against a 0.219 steady state), so read its undisturbed row as the baseline
   rather than assuming steady state."""
 
-  episodes_per_cell: int = 64
-  """Episodes the worst-covered cell must reach before the run stops. Enough to
-  report quartiles rather than a mean; the interesting cells are the
-  high-variance ones and a mean cannot show that."""
+  episodes_per_cell: int = 128
+  """Trials per cell. The run stops once the worst-covered cell reaches this,
+  and every cell is then trimmed to exactly it -- cells that fall often end
+  their trials early and start the next, so without the trim they finish with
+  several times the trials of the cells that never fall and a cell's spread
+  would be read against a sample size that varied with how badly it did.
+
+  The only stochastic input is the shove heading, drawn uniformly on the
+  horizontal circle, so this is the number of directions each cell is sampled
+  from."""
   seed: int = 0
   """Seeds the shove headings, the protocol's only stochastic input."""
 
