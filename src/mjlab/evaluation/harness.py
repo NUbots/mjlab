@@ -896,6 +896,9 @@ def load_policy(env, checkpoint: Path, device: str, task_id: str = TASK_ID):
     policy, which is why the checkpoint is loaded through the runner rather
     than by reading the state dict.
   """
+  import tempfile
+
+  from mjlab.evaluation.rma_checkpoint import is_rma_actor, translate_checkpoint
   from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
   from mjlab.tasks.registry import load_rl_cfg, load_runner_cls
 
@@ -903,9 +906,21 @@ def load_policy(env, checkpoint: Path, device: str, task_id: str = TASK_ID):
   wrapped = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
   runner_cls = load_runner_cls(task_id) or MjlabOnPolicyRunner
   runner = runner_cls(wrapped, asdict(agent_cfg), device=device)
-  runner.load(
-    str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device
-  )
+
+  # A checkpoint from the training branch's two-latent RMA model names the
+  # student TCN ``estimator`` and carries a privileged teacher this branch
+  # does not build. Rewrite it to this branch's names first, so the load
+  # below can stay strict and still catch a real layout mismatch. See
+  # :mod:`mjlab.evaluation.rma_checkpoint`.
+  actor_state = torch.load(checkpoint, map_location="cpu", weights_only=False)[
+    "actor_state_dict"
+  ]
+  with tempfile.TemporaryDirectory() as tmp:
+    if is_rma_actor(actor_state):
+      checkpoint = translate_checkpoint(checkpoint, Path(tmp) / checkpoint.name)
+    runner.load(
+      str(checkpoint), load_cfg={"actor": True}, strict=True, map_location=device
+    )
   return wrapped, runner.get_inference_policy(device=device)
 
 

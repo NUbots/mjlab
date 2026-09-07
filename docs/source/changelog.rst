@@ -8,6 +8,33 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- A ``Mjlab-Velocity-Flat-Nubots-Nugus-V57`` task, so a policy from the
+  ``add-phase-clock`` branch's ``clock_owned`` generations can be measured by
+  the same harness, on the same plant and against the same grid as the
+  competence policies already here. A checkpoint only loads against the task
+  that builds its observation vector, and that run's actor is 112 dims against
+  this task's 71: it adds a policy-owned gait clock (the ``phase_delta`` action
+  advances the phase and the observation reports where the policy put it),
+  a per-actuator electrical current estimate, and a shared-bus voltage
+  estimate whose sag scales each servo's torque authority. Ported with it: the
+  ``phase_delta`` and ``scripted_head`` action terms, the ``bus_voltage``
+  plant model, and ``actuator_current`` with its calibration buffers -- which
+  stay at identity here, since an evaluation drops the randomization that
+  would move them.
+
+- ``mjlab.evaluation.rma_checkpoint`` translates a checkpoint from that
+  branch's two-latent RMA model onto this branch's history actor. Those runs
+  train a privileged teacher over the domain-randomization group alongside the
+  TCN student over the observation window, but set ``RMA_E2E=1``, whose
+  inference path is student-only -- so every tensor the policy actually
+  evaluates exists here at the same shape, and only the name differs (a model
+  with one latent producer calls it ``encoder``; one with two calls the student
+  ``estimator``). The translation renames the student, drops the teacher, and
+  refuses outright any checkpoint whose ``zhat_mix`` is non-zero, because such
+  a policy's actions depend on privileged inputs this branch cannot supply.
+  ``load_policy`` applies it automatically when it recognises the layout, so
+  the load underneath stays strict and a genuine mismatch still fails loudly.
+
 - ``scripts/eval/eval_competence_grid.py`` gained ``--engine quintic``: the
   ported walk engine now runs the same competence grid a policy does, through
   the same collector, shove train, stopping rule and output format. The two

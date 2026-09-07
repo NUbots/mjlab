@@ -34,3 +34,13 @@ from mjlab.envs.mdp.actions.differential_ik import (
 from mjlab.envs.mdp.actions.differential_ik import (
   DifferentialIKActionCfg as DifferentialIKActionCfg,
 )
+from mjlab.envs.mdp.actions.phase_delta import PhaseDeltaAction as PhaseDeltaAction
+from mjlab.envs.mdp.actions.phase_delta import (
+  PhaseDeltaActionCfg as PhaseDeltaActionCfg,
+)
+from mjlab.envs.mdp.actions.scripted_head import (
+  ScriptedHeadAction as ScriptedHeadAction,
+)
+from mjlab.envs.mdp.actions.scripted_head import (
+  ScriptedHeadActionCfg as ScriptedHeadActionCfg,
+)

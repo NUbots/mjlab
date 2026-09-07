@@ -9,7 +9,11 @@ from mjlab.asset_zoo.robots import (
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
-from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.envs.mdp.actions import (
+  JointPositionActionCfg,
+  PhaseDeltaActionCfg,
+  ScriptedHeadActionCfg,
+)
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import (
   ObservationGroupCfg,
@@ -391,3 +395,121 @@ def nubots_nugus_rough_history_env_cfg(play: bool = False) -> ManagerBasedRlEnvC
 def nubots_nugus_flat_history_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Flat terrain, with the actor observation window published."""
   return add_actor_history(nubots_nugus_flat_env_cfg(play=play))
+
+
+##
+# v57: the add-phase-clock "clock_owned" observation and action layout.
+#
+# A checkpoint only loads against the task that builds its observation
+# vector, and the v57 generation was trained on the add-phase-clock branch
+# with four things this task does not otherwise have: a policy-owned gait
+# clock, a per-actuator current estimate, a shared-bus voltage estimate, and
+# a scripted head. The layout below reproduces that run's actor group
+# (112 dims), its 25-frame history window and its 21-dim action vector
+# exactly, so the trained policy can be measured by the same harness as
+# every other policy in the comparison.
+#
+# Deliberately NOT reproduced: the critic group. The evaluation harness
+# loads the actor only (``load_cfg={"actor": True}``), so the critic's
+# privileged terms -- a height scan and the two domain-randomization
+# vectors -- would be ported for nothing. The critic here is whatever the
+# base task builds and is never read.
+##
+
+_NUGUS_CURRENT_KT: dict[str, float] = {
+  r"(shoulder|elbow|neck|head)": 1.5,
+  # Back-EMF constant measured by sysid on hardware walking data: pooled
+  # 2.68 Nm/A over the XH540 legs. The spec-sheet ~2.0 is the stall-derived
+  # effective constant, which bakes in gear losses; hardware present-current
+  # reads electrical current, so the observation model uses the electrical
+  # constant. Copied from the training branch, where it also sets the
+  # torque authority the bus-voltage model scales.
+  "default": 2.68,
+}
+_CURRENT_QUANTIZE_A = 0.00269
+"""Dynamixel XH540-W270 "present current" unit: 2.69 mA per LSB."""
+
+_V57_HEAD_JOINTS = ("neck_yaw", "head_pitch")
+_V57_GAIT_PERIOD = 0.7
+_V57_PHASE_RAW_MIN = 0.35
+_V57_PHASE_RAW_MAX = 2.5
+"""Phase-delta bounds pinned by the v57 manifest (PHASE_RAW_MIN/MAX)."""
+
+
+def add_v57_layout(cfg: ManagerBasedRlEnvCfg) -> ManagerBasedRlEnvCfg:
+  """Rebuild the v57 observation and action layout on a finished config.
+
+  Applied before :func:`add_actor_history`, which clones whatever the actor
+  group ends up holding -- the history window has to be the same 112 dims
+  the policy's TCN was trained on.
+  """
+  # Policy-owned gait clock: the phase_delta action advances the clock and
+  # this observation reports where the policy put it, rather than reading
+  # episode time.
+  clock = ObservationTermCfg(
+    func=mdp.gait_clock,
+    params={
+      "period": _V57_GAIT_PERIOD,
+      "command_name": "twist",
+      "command_threshold": 0.05,
+      "phase_source": "policy",
+    },
+  )
+  cfg.observations["actor"].terms["gait_clock"] = clock
+  cfg.observations["critic"].terms["gait_clock"] = clock
+
+  # Estimated per-actuator electrical current (tau / Kt), quantized to the
+  # Dynamixel present-current resolution. Appended after the clock so the
+  # concatenation order matches the trained vector.
+  current = ObservationTermCfg(
+    func=mdp.actuator_current,
+    params={
+      "asset_cfg": SceneEntityCfg("robot"),
+      "kt": _NUGUS_CURRENT_KT,
+      "quantize": _CURRENT_QUANTIZE_A,
+    },
+    noise=Gnoise(mean=0.02, std=0.25),
+  )
+  cfg.observations["actor"].terms["actuator_current"] = current
+  cfg.observations["critic"].terms["actuator_current"] = current
+
+  # Shared-bus voltage: per-servo supply sags with fleet current and chain
+  # position, scaling each servo's torque authority. The step event is the
+  # plant model, not a randomization -- the policy was trained against a
+  # robot whose torque authority moves with load, so an evaluation that
+  # dropped it would measure a different machine.
+  cfg.events["bus_voltage"] = EventTermCfg(
+    mode="step",
+    func=mdp.bus_voltage_step,
+    params={"kt": _NUGUS_CURRENT_KT, "asset_cfg": SceneEntityCfg("robot")},
+  )
+  voltage = ObservationTermCfg(
+    func=mdp.servo_voltage,
+    params={"kt": _NUGUS_CURRENT_KT},
+    noise=Gnoise(mean=0.0, std=0.1),
+  )
+  cfg.observations["actor"].terms["servo_voltage"] = voltage
+  cfg.observations["critic"].terms["servo_voltage"] = voltage
+
+  # Scripted head (zero action dims -- it overrides the head targets rather
+  # than consuming policy output) then the phase-delta action, in that
+  # order: the action vector is joint_pos(20) + scripted_head(0) +
+  # phase_delta(1) = 21.
+  cfg.actions["scripted_head"] = ScriptedHeadActionCfg(
+    entity_name="robot",
+    joint_names=_V57_HEAD_JOINTS,
+  )
+  cfg.actions["phase_delta"] = PhaseDeltaActionCfg(
+    entity_name="robot",
+    period=_V57_GAIT_PERIOD,
+    command_name="twist",
+    command_threshold=0.05,
+    raw_min=_V57_PHASE_RAW_MIN,
+    raw_max=_V57_PHASE_RAW_MAX,
+  )
+  return cfg
+
+
+def nubots_nugus_flat_v57_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Flat terrain in the v57 layout, with the observation window published."""
+  return add_actor_history(add_v57_layout(nubots_nugus_flat_env_cfg(play=play)))

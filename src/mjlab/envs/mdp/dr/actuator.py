@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
+from weakref import WeakKeyDictionary
 
 import torch
 
@@ -196,3 +197,44 @@ def effort_limits(
         f"XmlActuator (position), and IdealPdActuator, "
         f"got {type(actuator).__name__}"
       )
+
+
+# Per-(env, asset) current-sensor calibration buffers, shared between the
+# ``actuator_current`` observation and any event that randomizes them. Ported
+# from the add-phase-clock training branch so a policy trained with the
+# current observation can be evaluated here; evaluation drops domain
+# randomization, so these stay at their identity defaults.
+_CURRENT_SENSOR_BUFFERS: WeakKeyDictionary = WeakKeyDictionary()
+
+
+def _resolve_actuator_ids(
+  asset: Entity, asset_cfg: SceneEntityCfg, device: str
+) -> torch.Tensor:
+  """Resolve an asset_cfg's actuator selection to a long tensor of indices."""
+  ids = asset_cfg.actuator_ids
+  if isinstance(ids, slice):
+    return torch.arange(asset.num_actuators, device=device, dtype=torch.long)
+  return torch.tensor(ids, device=device, dtype=torch.long)
+
+
+def get_current_sensor_buffers(
+  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+  """Return the (gain, offset, actuator_ids) current-sensor buffers.
+
+  Lazily allocates identity buffers (gain=1, offset=0) on first access, so the
+  observation reads a no-op calibration. The training branch randomizes these
+  from a reset event; an evaluation run has no such event and measures the
+  nominal sensor.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  actuator_ids = _resolve_actuator_ids(asset, asset_cfg, env.device)
+  n = int(actuator_ids.numel())
+  store = _CURRENT_SENSOR_BUFFERS.setdefault(env, {})
+  entry = store.get(asset_cfg.name)
+  if entry is None or entry[0].shape != (env.num_envs, n):
+    gain = torch.ones(env.num_envs, n, device=env.device)
+    offset = torch.zeros(env.num_envs, n, device=env.device)
+    entry = (gain, offset, actuator_ids)
+    store[asset_cfg.name] = entry
+  return entry

@@ -173,7 +173,11 @@ class Args:
   A checkpoint only loads against the task it was trained on, so the policy
   that reads a window of past observations needs
   ``Mjlab-Velocity-Flat-Nubots-Nugus-History`` named here and the one that does
-  not needs the default."""
+  not needs the default. A policy from the add-phase-clock branch's
+  ``clock_owned`` generations (v57 and its neighbours) needs
+  ``Mjlab-Velocity-Flat-Nubots-Nugus-V57``, which adds the policy-owned gait
+  clock, the per-actuator current and bus-voltage observations and the
+  scripted head that run was trained with."""
   balance: bool = True
   """Quintic only: apply the FootController torso-orientation correction."""
   plant: EvalPlant = "eval"
