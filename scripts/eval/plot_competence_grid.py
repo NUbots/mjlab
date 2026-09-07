@@ -37,7 +37,9 @@ Figures land in ``<input-dir>/figures`` as PNG (300 dpi) and PDF:
 
 from __future__ import annotations
 
+import csv
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -129,14 +131,14 @@ def load_runs(input_dir: Path, wanted: str | None) -> list[Run]:
   for index, directory in enumerate(found):
     with (directory / "cells.json").open() as handle:
       summary = json.load(handle)
-    runs.append(
-      Run(
-        name=directory.name,
-        colour=PALETTE[index % len(PALETTE)],
-        cells=summary["cells"],
-        meta=summary.get("run", {}),
-      )
+    run = Run(
+      name=directory.name,
+      colour=PALETTE[index % len(PALETTE)],
+      cells=summary["cells"],
+      meta=summary.get("run", {}),
     )
+    attach_displacement(run, directory)
+    runs.append(run)
   if wanted is None:
     return runs
   by_name = {run.name: run for run in runs}
@@ -144,6 +146,127 @@ def load_runs(input_dir: Path, wanted: str | None) -> list[Run]:
   if missing:
     raise KeyError(f"no such run: {', '.join(missing)}; have {list(by_name)}")
   return [by_name[name] for name in wanted.split(",")]
+
+
+DISPLACEMENT = "attain_displacement"
+"""Cell key: how far a shove moved delivered speed, either way."""
+
+SURVIVED = "attain_survived"
+"""Cell key: attainment over the episodes that ran their full length."""
+
+EFFECTIVE = "attain_effective"
+"""Cell key: delivery over the whole nominal episode, a fall counting as zero.
+
+All three are derived here from the ``episodes.csv`` beside each
+``cells.json``, so they need no new data collection.
+"""
+
+
+def _quantile_record(values: list[float]) -> dict:
+  """The five numbers ``summarise_cells`` reports, over a list of episodes."""
+  finite = [v for v in values if not math.isnan(v)]
+  if not finite:
+    nan = float("nan")
+    return {"n": 0, "median": nan, "q25": nan, "q75": nan, "iqr": nan}
+  q25, median, q75 = (float(v) for v in np.percentile(finite, [25, 50, 75]))
+  return {
+    "n": len(finite),
+    "median": median,
+    "q25": q25,
+    "q75": q75,
+    "iqr": q75 - q25,
+  }
+
+
+def attach_displacement(run: Run, directory: Path) -> bool:
+  """Add :data:`DISPLACEMENT` to a run's cells, from its ``episodes.csv``.
+
+  Per episode, ``|attain - undisturbed attain at the same command|``: how far
+  the shove moved delivered speed away from where it sits with no shove, in
+  either direction.
+
+  This exists because the median of ``attain`` cannot answer "does a shove cost
+  tracking". Shove headings are drawn uniformly, so a shove along the command
+  and one against it are equally likely and their effects cancel in any
+  centre-of-distribution statistic. Measured over the 38 commands of one run,
+  the median displacement rises monotonically with shove magnitude in 28 of
+  them; the shift in the median attainment does so in 7. The effect was always
+  in the data -- it lives in the spread, and a median throws the spread away.
+
+  Displacement rather than a one-sided shortfall because the median of a
+  one-sided quantity floors at zero whenever most episodes are unharmed, which
+  is most cells. Absolute deviation has an informative median everywhere and
+  keeps the same quantile shape as every other quantity here.
+
+  Both are taken over the episodes that ran their full length, and this is the
+  important part. Attainment is a mean over the steps an episode actually had,
+  so an episode that falls is averaged over the run-up that preceded the shove
+  that killed it. The shoves land at fixed times -- 3, 7, 11 and 15 s of a 20 s
+  episode -- so a controller that goes over on the first one keeps only about
+  three seconds of undisturbed walking, and *that* is what its attainment
+  reports. Worse, the effect grows with the shove: harder pushes end episodes
+  sooner, so the fraction of each episode that predates any disturbance rises,
+  and the number drifts toward the undisturbed value exactly where the
+  controller is doing worst. Measured on the walk engine at ``vx=0.3, wz=0.5``,
+  the median episode at a 1.2 m/s shove is 3.66 s long, takes one shove and is
+  82% pre-shove samples -- so its "0.53 attainment" is mostly a measurement of
+  the three seconds before it was touched.
+
+  Restricting to full-length episodes removes that entirely: every one of them
+  took all four shoves over the same number of steps. The price is survivor
+  bias, and the honest reading is to keep the fall rate beside it -- a cell
+  where nothing survived reports no attainment at all, which is the truth.
+
+  Returns whether the file was there to read.
+  """
+  path = directory / "episodes.csv"
+  if not path.exists():
+    return False
+
+  # Rounded so a cell written as 0.4 and an episode written as
+  # 0.4000000059604645 -- the float32 the table was built from -- land on one
+  # key. Six places is far finer than any command this grid sweeps.
+  def key(vx: float, vy: float, wz: float, shove: float) -> tuple:
+    return tuple(round(v, 6) for v in (vx, vy, wz, shove))
+
+  by_cell: dict[tuple, list[float]] = {}
+  with path.open() as handle:
+    for row in csv.DictReader(handle):
+      cell_key = key(
+        float(row["command_vx"]),
+        float(row["command_vy"]),
+        float(row["command_wz"]),
+        float(row["shove"]),
+      )
+      by_cell.setdefault(cell_key, []).append(
+        (float(row["attain"]), float(row["ep_len_frac"]), float(row["fell"]) < 0.5)
+      )
+
+  # The undisturbed delivery for each command, which the shove is measured
+  # against. It is a median over episodes that are near enough identical --
+  # with no shove the protocol has no stochastic input at all.
+  baseline: dict[tuple, float] = {}
+  for cell_key, episodes in by_cell.items():
+    if _close(cell_key[3], 0.0):
+      survived = [a for a, _frac, ok in episodes if ok]
+      baseline[cell_key[:3]] = _quantile_record(survived)["median"]
+
+  for cell in run.cells:
+    cell_key = key(cell["vx"], cell["vy"], cell["wz"], cell["shove"])
+    episodes = by_cell.get(cell_key, [])
+    clean = baseline.get(cell_key[:3], float("nan"))
+    survived = [a for a, _frac, ok in episodes if ok]
+
+    cell[SURVIVED] = _quantile_record(survived)
+    cell[DISPLACEMENT] = _quantile_record(
+      [abs(a - clean) for a in survived] if not math.isnan(clean) else []
+    )
+    # Zero-fill: an episode that fell delivered nothing for the rest of its
+    # nominal length, so its mean over the sampled steps is scaled by the share
+    # of the episode it lasted. Every episode then has the same denominator and
+    # nothing is censored -- a fall costs delivery instead of hiding it.
+    cell[EFFECTIVE] = _quantile_record([a * frac for a, frac, _ok in episodes])
+  return True
 
 
 # --------------------------------------------------------------------------
@@ -372,7 +495,7 @@ def plane_figure(
 
   fig.suptitle(
     f"{run.label} — Competence Envelope",
-    fontsize=11,
+    fontsize=15,
     color=INK,
     fontweight="semibold",
     x=0.5,
@@ -381,8 +504,7 @@ def plane_figure(
   scale = "Darker is better" if statistic == "median" else "Darker is a wider spread"
   note(
     fig,
-    f"{scale}. Hatched: nothing to measure -- no attainment sample below a "
-    "commanded 0.15 m/s, no wobble lead where nothing fell.",
+    f"{scale}",
   )
   save(fig, path)
 
@@ -590,13 +712,15 @@ def curve_figure(
     axes[index // columns][index % columns].set_visible(False)
 
   if len(runs) > 1:
-    # From a panel that actually drew lines: the first one need not have, if a
-    # run is missing that command.
+    # Gathered over every panel, not taken from the best single one: the runs
+    # are not swept over one command grid, so a run can be absent from the
+    # panel that drew the most lines and would go unnamed.
     handles, labels = [], []
     for ax in axes.ravel():
-      found, names = ax.get_legend_handles_labels()
-      if len(names) > len(labels):
-        handles, labels = found, names
+      for handle, name in zip(*ax.get_legend_handles_labels(), strict=True):
+        if name not in labels:
+          handles.append(handle)
+          labels.append(name)
     fig.legend(handles, labels, loc="outside lower center", ncol=min(len(runs), 4))
   fig.suptitle(
     f"{title} against shove magnitude — median and interquartile range",
@@ -672,32 +796,68 @@ def difference_figure(before: Run, after: Run, path: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-DEFAULT_CURVE_COMMANDS = (
-  (0.25, 0.0, 0.0),
-  (0.5, 0.0, 0.0),
-  (0.75, 0.0, 0.0),
-  (-0.5, 0.0, 0.0),
-  (0.0, 0.5, 0.0),
-  (0.3, 0.0, 0.5),
-)
-"""Commands the curve figures cut through: a forward-speed ladder, one
-backwards ask, one purely lateral one, and one turn taken while walking. Six
-because that is how many distinguishable colours the house palette has, and a
-seventh line would have to reuse one.
+def default_curve_commands(
+  runs: list[Run], forward: int = 4
+) -> list[tuple[float, float, float]]:
+  """Commands to cut the curve figures through, read off the data.
 
-``vx = 1.0`` is deliberately absent. Measured on the competence-trained
-policies, both stop walking and march in place above roughly 0.81 m/s
-commanded -- perfect tracking at 0.80, 0.04 m/s delivered at 0.82 -- so a panel
-at 1.0 m/s puts a policy that refused the command beside one that attempted it
-and reads as a tracking collapse. That comparison is worth making, but it is a
-statement about where each controller's band ends, and the envelope heatmaps
-are where it belongs. Put a command back here only if every controller drawn
-actually attempts it."""
+  A hardcoded ladder cannot work here, because the runs are not swept over one
+  command grid: the walk engine is stepped in 0.1 m/s out to 0.5, a policy in
+  0.33 out to 1.67, and the only forward speed the two share is zero. Fixed
+  speeds then land between the values a dataset actually holds and their panels
+  come out empty, while the ones that do land sit in the middle of the range
+  where nothing interesting happens.
+
+  So the ladder is taken from the widest forward sweep any run has, spread
+  across it with both ends included, and the lateral and turning probes from
+  the largest each dataset holds. A run that was not asked a command simply has
+  no line in that panel; the legend is built from the runs that drew.
+  """
+  widest: list[float] = []
+  for run in runs:
+    vxs = sorted(
+      {c["vx"] for c in run.cells if _close(c["vy"], 0.0) and _close(c["wz"], 0.0)}
+    )
+    if len(vxs) >= 2 and (not widest or vxs[-1] - vxs[0] > widest[-1] - widest[0]):
+      widest = vxs
+
+  commands: list[tuple[float, float, float]] = []
+  if widest:
+    picks = sorted(
+      {
+        int(round(i))
+        for i in np.linspace(0, len(widest) - 1, min(forward, len(widest)))
+      }
+    )
+    commands = [(widest[i], 0.0, 0.0) for i in picks]
+
+  # One lateral and one turning probe, so the figure keeps asking the two
+  # questions a forward ladder cannot.
+  lateral = max(
+    (
+      c["vy"]
+      for run in runs
+      for c in run.cells
+      if _close(c["vx"], 0.0) and _close(c["wz"], 0.0)
+    ),
+    default=0.0,
+  )
+  if lateral > 0.0:
+    commands.append((0.0, lateral, 0.0))
+  turning = max(
+    ((c["wz"], c["vx"]) for run in runs for c in run.cells if not _close(c["wz"], 0.0)),
+    default=None,
+  )
+  if turning is not None:
+    commands.append((turning[1], 0.0, turning[0]))
+  return commands
 
 
-def parse_commands(text: str | None) -> list[tuple[float, float, float]]:
+def parse_commands(
+  text: str | None, runs: list[Run]
+) -> list[tuple[float, float, float]]:
   if text is None:
-    return list(DEFAULT_CURVE_COMMANDS)
+    return default_curve_commands(runs)
   commands = []
   for chunk in text.split(";"):
     parts = [float(value) for value in chunk.split(",")]
@@ -719,7 +879,8 @@ class Args:
   curve_commands: str | None = None
   """Commands the curve figures cut through, as ``vx,vy,wz`` triples separated
   by semicolons, e.g. ``0.5,0,0;0,0.5,0``. Defaults to a forward-speed ladder
-  plus one lateral and one turning command."""
+  spanning the widest sweep in the data, plus the largest lateral and turning
+  commands it holds -- see :func:`default_curve_commands`."""
 
 
 def main() -> None:
@@ -728,7 +889,7 @@ def main() -> None:
 
   runs = load_runs(args.input_dir, args.runs)
   output_dir = args.output_dir or args.input_dir / "figures"
-  commands = parse_commands(args.curve_commands)
+  commands = parse_commands(args.curve_commands, runs)
   print(f"drawing {len(runs)} run(s): {', '.join(run.name for run in runs)}")
 
   for run in runs:
@@ -741,6 +902,31 @@ def main() -> None:
     curve_figure(
       runs, quantity, title, unit, commands, output_dir / f"curves_{quantity}"
     )
+
+  # Drawn only as a curve, and only when the episodes were on disk to derive it
+  # from: it is the figure that answers whether a shove costs tracking at all,
+  # which the attainment curve above cannot -- see attach_displacement.
+  if any(DISPLACEMENT in cell for run in runs for cell in run.cells):
+    for quantity, title, unit in (
+      (
+        SURVIVED,
+        "Attainment, full-length episodes only",
+        "delivered / commanded",
+      ),
+      (
+        DISPLACEMENT,
+        "Attainment displacement",
+        "|attain - undisturbed attain|",
+      ),
+      (
+        EFFECTIVE,
+        "Effective delivery over the nominal episode",
+        "attain x share of episode survived",
+      ),
+    ):
+      curve_figure(
+        runs, quantity, title, unit, commands, output_dir / f"curves_{quantity}"
+      )
 
   if len(runs) == 2:
     difference_figure(runs[0], runs[1], output_dir / "difference")
