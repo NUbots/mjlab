@@ -147,10 +147,10 @@ def figure_command_plane(
   """One row per run, one column per shove magnitude, one shared scale."""
   rows, cols = len(runs), len(shoves)
   height = HEADER_IN + FOOTER_IN + PANEL_IN * rows
-  width = 2.6 + PANEL_IN * cols
+  width = 3.0 + PANEL_IN * cols
   fig, axes = plt.subplots(rows, cols, figsize=(width, height), squeeze=False)
   fig.subplots_adjust(
-    left=1.05 / width,
+    left=1.45 / width,
     right=1.0 - 1.55 / width,
     top=1.0 - HEADER_IN / height,
     bottom=FOOTER_IN / height,
@@ -189,20 +189,28 @@ def figure_command_plane(
         ax.set_xlabel("$v_x$ command (m/s)", color=INK_2)
       if col == 0:
         ax.set_ylabel("$v_y$ command (m/s)", color=INK_2)
-        ax.text(
-          -0.42,
-          0.5,
-          run.label,
-          transform=ax.transAxes,
-          rotation=90,
-          va="center",
-          ha="center",
-          color=INK,
-          fontsize=11,
-        )
       despine(ax)
 
   assert mesh is not None
+
+  # Row labels are placed from the drawn axes positions, not in axes
+  # coordinates: ``set_aspect("equal")`` resizes each panel's box at draw
+  # time, so a label offset in axes fractions lands somewhere different for
+  # every grid shape -- and off the figure entirely for a wide one.
+  fig.canvas.draw()
+  for row, run in enumerate(runs):
+    box = axes[row][0].get_position()
+    fig.text(
+      box.x0 - 0.082,
+      box.y0 + box.height / 2,
+      run.label,
+      rotation=90,
+      va="center",
+      ha="center",
+      color=INK,
+      fontsize=11,
+    )
+
   # Placed at figure coordinates, vertically centred on the panel block, with
   # the right margin above sized to leave room for its label.
   panels_bottom = FOOTER_IN / height
