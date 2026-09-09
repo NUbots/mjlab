@@ -31,7 +31,10 @@ PURPLE = "#7b5bd6"
 GOLD = "#b8860b"
 RED = "#d03b3b"
 
-SURFACE = "#fcfcfb"
+SURFACE = "#ffffff"
+"""The paper. Backgrounds, and anything drawn as a hole punched through to it:
+marker knockouts, the zero lines over a colour map. Never a series colour."""
+
 INK = "#0b0b0b"
 INK_2 = "#52514e"
 MUTED = "#898781"

@@ -1149,7 +1149,9 @@ def battery_caption(
   vx, _, _ = walking.command
   return "\n".join(
     ([lead] if lead else [])
-    + ["",]
+    + [
+      "",
+    ]
   )
 
 
@@ -1164,9 +1166,7 @@ def figure_push_envelope(
   trials in that direction end on the floor, interpolated from the survival
   curve rather than rounded to the nearest magnitude tested.
   """
-  fig, axes = plt.subplots(
-    1, 2, figsize=(9.5, 5.9), subplot_kw={"projection": "polar"}
-  )
+  fig, axes = plt.subplots(1, 2, figsize=(9.5, 5.9), subplot_kw={"projection": "polar"})
   ceiling = 0.0
   for key in BATTERY_KEYS:
     for controller in controllers:
@@ -1230,7 +1230,9 @@ def figure_push_envelope(
         markeredgewidth=1.3,
         zorder=4,
       )
-    ax.set_title(BATTERY_TITLE[key], loc="center", y=-0.20, pad=18, color=INK, fontsize=12)
+    ax.set_title(
+      BATTERY_TITLE[key], loc="center", y=-0.20, pad=18, color=INK, fontsize=12
+    )
 
   handles = [
     Line2D([], [], color=controller.colour, linewidth=2.4, label=controller.label)
@@ -1242,7 +1244,7 @@ def figure_push_envelope(
     bbox_to_anchor=(0.5, 0.955),
     ncol=min(len(handles), 3),
     columnspacing=3.0,
-    fontsize=11
+    fontsize=11,
   )
   fig.suptitle(
     "Push Survival Envelope",
