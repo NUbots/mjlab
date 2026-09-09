@@ -751,6 +751,81 @@ def _edges(values: np.ndarray) -> np.ndarray:
   )
 
 
+PLANE_LABEL = {
+  "tracking_error": "Planar Velocity Error (m/s)",
+  "abs_error_wz": "Yaw Rate Error (rad/s)",
+  "normalised_error": "Command Error (fraction of commanded range)",
+  "time_upright": "Time Upright (s)",
+}
+
+
+def command_scales(
+  controllers: list[Controller], sweeps: dict[str, dict[str, Sweep]]
+) -> dict[str, float]:
+  """Per-axis reference spans for the normalised error.
+
+  The largest magnitude the collection commanded on each axis, over every grid
+  and every controller. Taken over the whole figure rather than per panel, so a
+  cell means the same thing in all three planes, and over the *commands* rather
+  than the errors, so the scale is a property of the battery and not of
+  whichever controller tracked it worst.
+  """
+  scales: dict[str, float] = {}
+  for axis in ("vx", "vy", "wz"):
+    largest = 0.0
+    for controller in controllers:
+      for _, _, key in GRID_PAIRS:
+        column = sweeps[controller.name][key].data[f"command_{axis}"]
+        largest = max(largest, float(np.abs(column).max()))
+    # An axis no grid moved would divide its error by zero. Leaving the scale at
+    # one keeps that error in its own units instead of turning every cell into
+    # an infinity.
+    scales[axis] = largest or 1.0
+  return scales
+
+
+def plane_values(sweep: Sweep, field: str, scales: dict[str, float]) -> np.ndarray:
+  """The column a command plane draws, computed when the CSV has no such column.
+
+  The per-axis errors are in the CSV and the norm over the planar pair is too,
+  but yaw is in rad/s and the planar error in m/s, so there is no length that
+  makes the three commensurable without inventing one: the only real moment arm
+  on this robot is the hip half-separation, which is small enough to erase yaw
+  from the map. ``normalised_error`` divides each axis by what was commanded on
+  it instead, which is dimensionless and comparable within one collection --
+  and, because the spans come from the grids, not comparable across two
+  collections swept over different ranges.
+  """
+  if field == "time_upright":
+    return np.where(
+      np.isnan(sweep.data["fall_time"]), sweep.duration, sweep.data["fall_time"]
+    )
+  if field == "abs_error_wz":
+    # Signed in the CSV -- over- and under-rotation are different failures --
+    # but the map is a magnitude, like the planar one next to it.
+    return np.abs(sweep.data["error_wz"])
+  if field == "normalised_error":
+    # Root mean square rather than the Euclidean norm the planar error uses: a
+    # norm over three axes each running to one would reach root three, and the
+    # point of this map is that a cell reads as a fraction. An axis tracked
+    # perfectly contributes zero, an axis missed by the full commanded span
+    # contributes one, and the three average to something on the same scale as
+    # any one of them.
+    return np.sqrt(
+      np.mean(
+        np.stack(
+          [
+            (sweep.data[f"error_{axis}"] / scales[axis]) ** 2
+            for axis in ("vx", "vy", "wz")
+          ],
+          axis=-1,
+        ),
+        axis=-1,
+      )
+    )
+  return sweep.data[field]
+
+
 def figure_command_plane(
   controllers: list[Controller],
   sweeps: dict[str, dict[str, Sweep]],
@@ -773,21 +848,30 @@ def figure_command_plane(
   fig.subplots_adjust(
     left=0.072, right=0.895, top=top, bottom=bottom, wspace=0.40, hspace=0.50
   )
-  if field == "tracking_error":
+  scales = command_scales(controllers, sweeps)
+  if field == "time_upright":
+    duration = sweeps[controllers[0].name][GRID_PAIRS[0][2]].duration
+    norm = Normalize(vmin=0.0, vmax=duration)
+  elif field == "normalised_error":
+    # Fixed rather than read off the data: the whole point of dividing by the
+    # commanded span is that one is a meaningful number -- the controller missed
+    # by everything it was asked for -- and a percentile scale would move that
+    # anchor from figure to figure. A cell past one, which is a robot going the
+    # other way on a full-scale command, clips to the top of the ramp.
+    norm = Normalize(vmin=0.0, vmax=1.0)
+  else:
+    # One scale over every panel of the figure, so the controllers are
+    # comparable and the top two percent clip rather than washing the map out.
+    # Taken over the derived values, because a normalised error is not a column
+    # any CSV holds.
     vmax = 0.0
     for controller in controllers:
       for _, _, key in GRID_PAIRS:
-        vmax = max(
-          vmax, float(np.nanpercentile(sweeps[controller.name][key].data[field], 98))
-        )
+        values = plane_values(sweeps[controller.name][key], field, scales)
+        vmax = max(vmax, float(np.nanpercentile(values, 98)))
     norm = Normalize(vmin=0.0, vmax=vmax)
-    cmap = SEQUENTIAL
-    label = "Planar Velocity Error (m/s)"
-  else:
-    duration = sweeps[controllers[0].name][GRID_PAIRS[0][2]].duration
-    norm = Normalize(vmin=0.0, vmax=duration)
-    cmap = SEQUENTIAL
-    label = "time upright (s)"
+  cmap = SEQUENTIAL
+  label = PLANE_LABEL[field]
 
   mesh = None
   for row, controller in enumerate(controllers):
@@ -796,17 +880,11 @@ def figure_command_plane(
       despine(ax)
       ax.grid(False)
       sweep = sweeps[controller.name][key]
-      if field == "time_upright":
-        values = np.where(
-          np.isnan(sweep.data["fall_time"]),
-          sweep.duration,
-          sweep.data["fall_time"],
-        )
-        source = Sweep(
-          controller, {**sweep.data, "time_upright": values}, sweep.summary
-        )
-      else:
-        source = sweep
+      source = Sweep(
+        controller,
+        {**sweep.data, field: plane_values(sweep, field, scales)},
+        sweep.summary,
+      )
       xs, ys, field_values = grid_field(source, x, y, field)
       mesh = _pcolor(ax, xs, ys, field_values, cmap=cmap, norm=norm)
 
@@ -1530,6 +1608,32 @@ def main() -> None:
     sweeps,
     out / "fig3_tracking_plane",
     field="tracking_error",
+    title="",
+    subtitle=(""),
+  )
+  figure_command_plane(
+    controllers,
+    sweeps,
+    out / "fig3b_yaw_error_plane",
+    field="abs_error_wz",
+    # Titled like fig3, which is to say not at all: these are siblings on the
+    # same page and the caption belongs in the document. What a reader needs to
+    # be told is that this is |achieved - commanded| yaw rate in rad/s, drawn
+    # on its own because no moment arm on this robot makes rad/s and m/s
+    # commensurable without choosing one to suit the picture.
+    title="",
+    subtitle=(""),
+  )
+  figure_command_plane(
+    controllers,
+    sweeps,
+    out / "fig3c_normalised_error_plane",
+    field="normalised_error",
+    # As fig3b. The caption this one needs: each axis' error divided by the
+    # largest magnitude commanded on it in this collection, then combined --
+    # dimensionless, so yaw sits beside the planar axes, and comparable between
+    # the controllers here but NOT against a collection swept over different
+    # ranges.
     title="",
     subtitle=(""),
   )
