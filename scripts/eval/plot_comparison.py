@@ -782,7 +782,7 @@ def figure_command_plane(
         )
     norm = Normalize(vmin=0.0, vmax=vmax)
     cmap = SEQUENTIAL
-    label = "planar velocity error (m/s)"
+    label = "Planar Velocity Error (m/s)"
   else:
     duration = sweeps[controllers[0].name][GRID_PAIRS[0][2]].duration
     norm = Normalize(vmin=0.0, vmax=duration)
@@ -833,8 +833,8 @@ def figure_command_plane(
           )
       ax.axhline(0.0, color=SURFACE, linewidth=0.6, alpha=0.6)
       ax.axvline(0.0, color=SURFACE, linewidth=0.6, alpha=0.6)
-      ax.set_xlabel(f"commanded {AXIS_LABEL[x]} ({AXIS_UNIT[x]})")
-      ax.set_ylabel(f"commanded {AXIS_LABEL[y]} ({AXIS_UNIT[y]})")
+      ax.set_xlabel(f"{AXIS_LABEL[x]} ({AXIS_UNIT[x]})", fontsize=14)
+      ax.set_ylabel(f"{AXIS_LABEL[y]} ({AXIS_UNIT[y]})", fontsize=14)
       ax.set_title(f"{AXIS_LABEL[x]} × {AXIS_LABEL[y]}", loc="left", pad=6, color=INK)
     # Read off the row's own panels rather than from a table of positions, so
     # the label follows the panels however many rows there are.
@@ -842,26 +842,26 @@ def figure_command_plane(
       0.072,
       axes[row, 0].get_position().y1 + 0.28 / height,
       controller.label,
-      fontsize=11,
+      fontsize=15,
       fontweight="bold",
       color=controller.colour,
     )
 
   assert mesh is not None
   bar = fig.colorbar(mesh, cax=fig.add_axes((0.918, bottom, 0.014, top - bottom)))
-  bar.set_label(label, color=INK_2, fontsize=8.5)
+  bar.set_label(label, color=INK_2, fontsize=15)
   hide(bar.outline)
-  bar.ax.tick_params(colors=MUTED, labelsize=8)
+  bar.ax.tick_params(colors=MUTED, labelsize=15)
   fig.suptitle(
     title,
     x=0.008,
     y=1.0 - 0.18 / height,
     ha="left",
-    fontsize=12,
+    fontsize=15,
     fontweight="bold",
     color=INK,
   )
-  fig.text(0.008, 0.13 / height, subtitle, fontsize=7.5, color=MUTED)
+  fig.text(0.008, 0.13 / height, subtitle, fontsize=12, color=MUTED)
   save(fig, path, tight=False)
 
 
@@ -1149,15 +1149,7 @@ def battery_caption(
   vx, _, _ = walking.command
   return "\n".join(
     ([lead] if lead else [])
-    + [
-      f"Evaluation plant, shoved through the torso for "
-      f"{walking.summary['run']['push']['duration']:.2f} s while walking at "
-      f"{vx:.2f} m/s ({places[0]}) and at a stand ({places[1]}).",
-      f"Magnitude is the velocity change the impulse would give a free body of "
-      f"the robot's {walking.mass:.2f} kg: 1.0 m/s is {walking.mass:.1f} N s.",
-      f"Every point averages {standing.trials_per_cell} trials spread over the "
-      f"gait cycle.",
-    ]
+    + ["",]
   )
 
 
@@ -1173,7 +1165,7 @@ def figure_push_envelope(
   curve rather than rounded to the nearest magnitude tested.
   """
   fig, axes = plt.subplots(
-    1, 2, figsize=(11.5, 5.9), subplot_kw={"projection": "polar"}
+    1, 2, figsize=(9.5, 5.9), subplot_kw={"projection": "polar"}
   )
   ceiling = 0.0
   for key in BATTERY_KEYS:
@@ -1189,7 +1181,7 @@ def figure_push_envelope(
     ax.set_rlabel_position(22.5)
     ax.tick_params(colors=MUTED, labelsize=7.5)
     ax.set_xticks(np.deg2rad([0, 90, 180, 270]))
-    ax.set_xticklabels(["forwards", "left", "backwards", "right"], fontsize=8.5)
+    ax.set_xticklabels(["forwards", "left", "backwards", "right"], fontsize=10)
 
     for controller in controllers:
       envelope = batteries[controller.name][key].envelope
@@ -1238,37 +1230,26 @@ def figure_push_envelope(
         markeredgewidth=1.3,
         zorder=4,
       )
-    ax.set_title(BATTERY_TITLE[key], loc="left", pad=18, color=INK)
+    ax.set_title(BATTERY_TITLE[key], loc="center", y=-0.20, pad=18, color=INK, fontsize=12)
 
   handles = [
     Line2D([], [], color=controller.colour, linewidth=2.4, label=controller.label)
     for controller in controllers
   ]
-  handles.append(
-    Line2D(
-      [],
-      [],
-      color=INK_2,
-      linestyle="none",
-      marker="^",
-      markersize=6,
-      markerfacecolor=SURFACE,
-      label="withstood every magnitude tested",
-    )
-  )
   fig.legend(
     handles=handles,
     loc="upper center",
     bbox_to_anchor=(0.5, 0.955),
-    ncol=min(len(handles), 4),
-    columnspacing=2.0,
+    ncol=min(len(handles), 3),
+    columnspacing=3.0,
+    fontsize=11
   )
   fig.suptitle(
-    "Push envelope: the shove each direction takes before half the trials fall",
-    x=0.008,
+    "Push Survival Envelope",
+    x=0.5,
     y=0.995,
-    ha="left",
-    fontsize=12,
+    ha="center",
+    fontsize=15,
     fontweight="bold",
     color=INK,
   )
@@ -1278,8 +1259,7 @@ def figure_push_envelope(
     battery_caption(
       batteries,
       ("left", "right"),
-      "Radius is the push magnitude at 50% survival, in m/s of free-body "
-      "velocity change; the robot faces up the page.",
+      "",
     ),
     fontsize=7.5,
     color=MUTED,
@@ -1548,13 +1528,8 @@ def main() -> None:
     sweeps,
     out / "fig3_tracking_plane",
     field="tracking_error",
-    title="Tracking error over the command plane",
-    subtitle=(
-      "Planar velocity error, |achieved − commanded|. Grey cells fell before "
-      "the measurement window opened; the outline encloses the commands the "
-      "controller held for the whole run, so only inside it is the error a "
-      "measurement of walking."
-    ),
+    title="",
+    subtitle=(""),
   )
   figure_command_plane(
     controllers,
