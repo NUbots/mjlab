@@ -243,6 +243,14 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     r".*Elbow.*": 0.35,
   }
 
+  # At init_std 1.0 the raw-action smoothness penalties cost ~-30/step, so
+  # early on the policy learns that falling ends them: episodes shrink to ~8
+  # steps until the action std decays and the penalties with it. The NUgus
+  # never gets there because its 0.05 action scale cannot throw it over; the
+  # K1's ~0.5 rad scale can. An upright bonus (as on k1_competence, whose K1
+  # runs showed the same dip and recovered by iteration ~300) gives staying
+  # alive a dense positive value and shortens that transient.
+  cfg.rewards["upright"].weight = 1.0
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("Trunk",)
   cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("Trunk",)
 
