@@ -8,6 +8,14 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added the Booster K1 humanoid and the ``Mjlab-Velocity-Flat-Booster-K1`` /
+  ``Mjlab-Velocity-Rough-Booster-K1`` tasks. They follow the NUbots Nugus
+  velocity recipe with the 25-step observation-history actor, but without
+  competence tracking or a gait clock. The head is left to the vision system,
+  so the policy commands and observes only the 20 leg and arm joints. A
+  time-staged command curriculum widens the envelope from a 0.5 m/s walk to
+  ``lin_vel_x`` (-0.6, 1.2), ``lin_vel_y`` +/-0.4 and ``ang_vel_z`` +/-1.0 by
+  iteration 8000.
 - Added ``mjlab.rl.obs_history``: an actor observation-history encoder. The
   environment publishes a ``"history"`` observation group holding a T-step
   window of the actor observation stream (shape ``[num_envs, T, obs_dim]``),
