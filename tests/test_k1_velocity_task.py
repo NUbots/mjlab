@@ -76,6 +76,13 @@ def test_actor_terms_and_order() -> None:
   ]
 
 
+def test_attainment_terms_and_running_threshold() -> None:
+  cfg = booster_k1_flat_env_cfg()
+  assert cfg.rewards["track_linear_velocity_attainment"].weight > 0
+  assert cfg.rewards["track_angular_velocity_attainment"].weight > 0
+  assert cfg.rewards["pose"].params["running_threshold"] == 0.8
+
+
 def test_no_competence_machinery() -> None:
   cfg = booster_k1_flat_env_cfg()
   assert "competence_tracker" not in cfg.events

@@ -273,6 +273,29 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     r".*Shoulder_Roll.*": 0.2,
     r".*Elbow.*": 0.35,
   }
+  # The running stds apply above |v_xy| + |w_z| = running_threshold. At the
+  # base 1.5, a pure-forward command at 1.5 m/s was still scored against the
+  # walking stds, so a fast gait paid ~0.4/step more pose cost than marching
+  # on the spot.
+  cfg.rewards["pose"].params["running_threshold"] = 0.8
+
+  # Reach, not just precision. The exponential tracking kernels are flat
+  # beyond ~2 std of error, so a command past the robot's capability pays
+  # the same nothing whether it tries or not, while trying costs pose,
+  # smoothness and foot terms. On the wide envelope that made the policy
+  # march on the spot above ~1 m/s: at a pinned 1.5 m/s, marching scored
+  # +6.87/step and running at 1.36 m/s only +6.39. These pay linearly in
+  # the fraction of the command actually delivered, restoring the gradient.
+  cfg.rewards["track_linear_velocity_attainment"] = RewardTermCfg(
+    func=mdp.track_linear_velocity_attainment,
+    weight=2.0,
+    params={"command_name": "twist"},
+  )
+  cfg.rewards["track_angular_velocity_attainment"] = RewardTermCfg(
+    func=mdp.track_angular_velocity_attainment,
+    weight=2.0,
+    params={"command_name": "twist"},
+  )
 
   # At init_std 1.0 the raw-action smoothness penalties cost ~-30/step, so
   # early on the policy learns that falling ends them: episodes shrink to ~8

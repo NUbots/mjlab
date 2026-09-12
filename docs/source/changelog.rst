@@ -18,6 +18,13 @@ Added
   time-staged command curriculum widens the envelope from a 0.5 m/s walk to
   ``lin_vel_x`` (-1.0, 2.0), ``lin_vel_y`` +/-0.8 and ``ang_vel_z`` +/-2.0 by
   iteration 8000.
+- Added ``track_linear_velocity_attainment`` and
+  ``track_angular_velocity_attainment`` rewards, which pay linearly in the
+  fraction of the commanded velocity actually delivered. They restore a
+  gradient toward trying harder on commands past the robot's capability,
+  where the exponential tracking kernels are flat. Enabled for the Booster
+  K1, whose wide-envelope policy otherwise learned to march on the spot
+  above ~1 m/s.
 - Added the ``drop_command_to_zero`` velocity event: at random intervals it
   cuts a moving command to zero in a single step and holds it there for a
   sampled time, so the policy learns to stop abruptly without falling. It is

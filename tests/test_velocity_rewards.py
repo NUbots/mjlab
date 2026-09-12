@@ -16,6 +16,8 @@ from mjlab.tasks.velocity.mdp.rewards import (
   _swing_height_profile,
   feet_swing_height_clock,
   gait_clock_contact_mismatch_cost,
+  track_angular_velocity_attainment,
+  track_linear_velocity_attainment,
   upright,
 )
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
@@ -330,3 +332,33 @@ def test_gait_clock_ungated_without_command_name():
   clock = gait_clock(_make_clock_obs_env(2, still), period=0.8)
   assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
   assert math.isclose(clock[0, 1].item(), 0.0, abs_tol=1e-6)
+
+
+def _attain_env(command: list[float], lin_vel: list[float], ang_vel_z: float):
+  asset = MagicMock()
+  asset.data.root_link_lin_vel_b = torch.tensor([lin_vel])
+  asset.data.root_link_ang_vel_b = torch.tensor([[0.0, 0.0, ang_vel_z]])
+  env = MagicMock()
+  env.scene.__getitem__ = MagicMock(return_value=asset)
+  env.command_manager.get_command = MagicMock(return_value=torch.tensor([command]))
+  return env
+
+
+def test_linear_attainment_pays_fraction_delivered():
+  def attain(command, lin_vel):
+    env = _attain_env(command, lin_vel, 0.0)
+    return track_linear_velocity_attainment(env, command_name="twist").item()
+
+  # Linear in the delivered fraction, so an unreachable command still has a
+  # gradient where the exponential kernel is flat.
+  assert math.isclose(attain([2.0, 0.0, 0.0], [1.5, 0.0, 0.0]), 0.75, rel_tol=1e-6)
+  assert attain([2.0, 0.0, 0.0], [0.0, 0.0, 0.0]) == 0.0
+  assert attain([1.0, 0.0, 0.0], [1.4, 0.0, 0.0]) == 1.0  # overshoot capped
+  assert attain([1.0, 0.0, 0.0], [-3.0, 0.0, 0.0]) == -0.5  # floored
+  assert attain([0.1, 0.0, 0.0], [0.1, 0.0, 0.0]) == 0.0  # below threshold
+
+
+def test_angular_attainment_pays_fraction_delivered():
+  env = _attain_env([0.0, 0.0, 2.0], [0.0, 0.0, 0.0], 1.0)
+  value = track_angular_velocity_attainment(env, command_name="twist")
+  assert math.isclose(value.item(), 0.5, rel_tol=1e-6)
