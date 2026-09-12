@@ -188,6 +188,10 @@ STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
     ".*_Hip_Pitch": -0.2,
     ".*_Knee_Pitch": 0.4,
     ".*_Ankle_Pitch": -0.2,
+    # Elbow yaw's hard stop is at 0, which lies outside the 0.9 soft joint
+    # limit, so the arms-down pose would pay dof_pos_limits every step.
+    "Left_Elbow_Yaw": -0.15,
+    "Right_Elbow_Yaw": 0.15,
   },
   joint_vel={".*": 0.0},
 )
