@@ -80,6 +80,8 @@ def test_attainment_terms_and_running_threshold() -> None:
   cfg = booster_k1_flat_env_cfg()
   assert cfg.rewards["track_linear_velocity_attainment"].weight > 0
   assert cfg.rewards["track_angular_velocity_attainment"].weight > 0
+  for name in ("track_linear_velocity_attainment", "track_angular_velocity_attainment"):
+    assert cfg.rewards[name].params["penalize_overshoot"] is True
   assert cfg.rewards["pose"].params["running_threshold"] == 0.8
 
 

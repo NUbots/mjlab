@@ -358,6 +358,20 @@ def test_linear_attainment_pays_fraction_delivered():
   assert attain([0.1, 0.0, 0.0], [0.1, 0.0, 0.0]) == 0.0  # below threshold
 
 
+def test_attainment_tent_penalizes_overshoot():
+  env = _attain_env([1.0, 0.0, 0.0], [1.4, 0.0, 0.0], 0.0)
+  lin = track_linear_velocity_attainment(
+    env, command_name="twist", penalize_overshoot=True
+  )
+  # 40% over pays what 40% under pays.
+  assert math.isclose(lin.item(), 0.6, rel_tol=1e-6)
+  env = _attain_env([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 1.6)
+  ang = track_angular_velocity_attainment(
+    env, command_name="twist", penalize_overshoot=True
+  )
+  assert math.isclose(ang.item(), 0.4, rel_tol=1e-6)
+
+
 def test_angular_attainment_pays_fraction_delivered():
   env = _attain_env([0.0, 0.0, 2.0], [0.0, 0.0, 0.0], 1.0)
   value = track_angular_velocity_attainment(env, command_name="twist")

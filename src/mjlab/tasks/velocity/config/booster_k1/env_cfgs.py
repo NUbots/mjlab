@@ -286,15 +286,18 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # march on the spot above ~1 m/s: at a pinned 1.5 m/s, marching scored
   # +6.87/step and running at 1.36 m/s only +6.39. These pay linearly in
   # the fraction of the command actually delivered, restoring the gradient.
+  # Overshoot is penalized symmetrically: with the plain cap at 1.0 the
+  # policy overshot yaw by ~60% and strafe by ~40%, because both oscillate
+  # within a stride and aiming high kept every step's credit near 1.
   cfg.rewards["track_linear_velocity_attainment"] = RewardTermCfg(
     func=mdp.track_linear_velocity_attainment,
     weight=2.0,
-    params={"command_name": "twist"},
+    params={"command_name": "twist", "penalize_overshoot": True},
   )
   cfg.rewards["track_angular_velocity_attainment"] = RewardTermCfg(
     func=mdp.track_angular_velocity_attainment,
     weight=2.0,
-    params={"command_name": "twist"},
+    params={"command_name": "twist", "penalize_overshoot": True},
   )
 
   # At init_std 1.0 the raw-action smoothness penalties cost ~-30/step, so

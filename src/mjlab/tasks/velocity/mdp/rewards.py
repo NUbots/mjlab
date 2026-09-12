@@ -66,12 +66,23 @@ def track_angular_velocity(
   return torch.exp(-ang_vel_error / std**2)
 
 
+def _attainment_credit(
+  ratio: torch.Tensor, min_credit: float, penalize_overshoot: bool
+) -> torch.Tensor:
+  """Map delivered/commanded ``ratio`` to attainment credit in [min_credit, 1]."""
+  if penalize_overshoot:
+    # Tent: overshoot costs credit at the same rate undershoot does.
+    ratio = 1.0 - torch.abs(ratio - 1.0)
+  return ratio.clamp(min=min_credit, max=1.0)
+
+
 def track_linear_velocity_attainment(
   env: ManagerBasedRlEnv,
   command_name: str,
   channel_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
   command_threshold: float = 0.15,
   min_credit: float = -0.5,
+  penalize_overshoot: bool = False,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """Reward the fraction of the commanded linear velocity actually delivered.
@@ -105,6 +116,13 @@ def track_linear_velocity_attainment(
   backwards lunge under a small command cannot dominate the return.
   Commands shorter than ``command_threshold`` score zero, where the
   normalization blows up and the kernel is the right instrument anyway.
+
+  The cap makes the credit asymmetric: shortfall costs, overshoot does not.
+  Where the delivered velocity oscillates within a stride (strafe, and yaw
+  in the angular term), aiming above the command keeps every step's credit
+  near 1, so the policy learns to overshoot unless the kernel is tight
+  enough to push back. ``penalize_overshoot=True`` uses the tent
+  ``1 - |ratio - 1|`` instead, which peaks exactly at the command.
   """
   asset: Entity = env.scene[asset_cfg.name]
   command = env.command_manager.get_command(command_name)
@@ -120,7 +138,9 @@ def track_linear_velocity_attainment(
   )
   numerator = w_x * actual[:, 0] * cmd_x + w_strafe * actual[:, 1] * cmd_y
   denominator = w_x * torch.square(cmd_x) + w_strafe * torch.square(cmd_y)
-  attain = (numerator / denominator.clamp(min=1e-6)).clamp(min=min_credit, max=1.0)
+  attain = _attainment_credit(
+    numerator / denominator.clamp(min=1e-6), min_credit, penalize_overshoot
+  )
 
   cmd_sq = torch.sum(torch.square(command[:, :2]), dim=1)
   return torch.where(cmd_sq >= command_threshold**2, attain, torch.zeros_like(attain))
@@ -131,6 +151,7 @@ def track_angular_velocity_attainment(
   command_name: str,
   command_threshold: float = 0.15,
   min_credit: float = -0.5,
+  penalize_overshoot: bool = False,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """Yaw-rate counterpart of :func:`track_linear_velocity_attainment`.
@@ -147,8 +168,8 @@ def track_angular_velocity_attainment(
   # Projection form rather than a plain ratio, so a zero command produces a
   # clamped denominator instead of an inf that the mask would have to hide.
   numerator = asset.data.root_link_ang_vel_b[:, 2] * cmd_yaw
-  attain = (numerator / torch.square(cmd_yaw).clamp(min=1e-6)).clamp(
-    min=min_credit, max=1.0
+  attain = _attainment_credit(
+    numerator / torch.square(cmd_yaw).clamp(min=1e-6), min_credit, penalize_overshoot
   )
   return torch.where(
     cmd_yaw.abs() >= command_threshold, attain, torch.zeros_like(attain)
