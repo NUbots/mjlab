@@ -75,22 +75,35 @@ VELOCITY_STAGES: list[VelocityStage] = [
     "ang_vel_z": (-0.8, 0.8),
   },
   {
-    "step": 4_000 * _STEPS_PER_ITER,
+    "step": 3_000 * _STEPS_PER_ITER,
     "lin_vel_x": (-0.6, 1.0),
     "lin_vel_y": (-0.4, 0.4),
     "ang_vel_z": (-1.0, 1.0),
   },
-  # Extend only the forward ceiling; the rest of training refines this
-  # final envelope.
+  {
+    "step": 4_500 * _STEPS_PER_ITER,
+    "lin_vel_x": (-0.8, 1.4),
+    "lin_vel_y": (-0.6, 0.6),
+    "ang_vel_z": (-1.5, 1.5),
+  },
+  {
+    "step": 6_000 * _STEPS_PER_ITER,
+    "lin_vel_x": (-1.0, 1.7),
+    "lin_vel_y": (-0.7, 0.7),
+    "ang_vel_z": (-1.8, 1.8),
+  },
+  # The final envelope sits at the edge of what the K1 reaches: the policy
+  # trained to +/-1.2 m/s extrapolated to 1.56 m/s at a 2.0 m/s command and
+  # 1.81 rad/s at 2.0 rad/s without falling. The rest of training refines it.
   {
     "step": 8_000 * _STEPS_PER_ITER,
-    "lin_vel_x": (-0.6, 1.2),
-    "lin_vel_y": (-0.4, 0.4),
-    "ang_vel_z": (-1.0, 1.0),
+    "lin_vel_x": (-1.0, 2.0),
+    "lin_vel_y": (-0.8, 0.8),
+    "ang_vel_z": (-2.0, 2.0),
   },
 ]
 """Time-staged command envelope, widened in steps from a gentle walk to the
-final range the K1 is expected to track."""
+limits of what the K1 can track."""
 
 
 def _policy_cfg() -> SceneEntityCfg:
@@ -215,6 +228,17 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
   cfg.events["base_com"].params["asset_cfg"].body_names = ("Trunk",)
+
+  # Instant stops: now and then a moving command is cut straight to zero, with
+  # no ramp, and held long enough to be rewarded, so the policy learns to stop
+  # quickly without falling. Roughly a fifth of training time is spent in
+  # these forced stops.
+  cfg.events["command_drop"] = EventTermCfg(
+    func=mdp.drop_command_to_zero,
+    mode="interval",
+    interval_range_s=(5.0, 12.0),
+    params={"command_name": "twist", "hold_range_s": (1.5, 3.0)},
+  )
 
   # Rationale for std values:
   # - Knees/hip_pitch get the loosest std to allow natural leg bending.
@@ -375,6 +399,7 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.observations["actor"].enable_corruption = False
     cfg.observations["history"].enable_corruption = False
     cfg.events.pop("push_robot", None)
+    cfg.events.pop("command_drop", None)
     # The command curriculum runs on every reset and would overwrite the
     # play command ranges.
     cfg.curriculum.pop("command_vel", None)

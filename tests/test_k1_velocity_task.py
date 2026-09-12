@@ -15,7 +15,11 @@ from mjlab.tasks.velocity.config.booster_k1.env_cfgs import (
   booster_k1_flat_env_cfg,
 )
 from mjlab.tasks.velocity.config.booster_k1.rl_cfg import booster_k1_ppo_runner_cfg
-from mjlab.tasks.velocity.mdp import VelocityStage
+from mjlab.tasks.velocity.mdp import (
+  UniformVelocityCommand,
+  VelocityStage,
+  drop_command_to_zero,
+)
 
 # Policy joints in MuJoCo body-tree order (arms before legs, head excluded).
 # joint_pos / joint_vel / actions follow this order; deployment depends on it.
@@ -108,6 +112,7 @@ def test_play_disables_corruption_and_command_curriculum() -> None:
   assert cfg.observations["history"].enable_corruption is False
   assert "command_vel" not in cfg.curriculum
   assert "push_robot" not in cfg.events
+  assert "command_drop" not in cfg.events
 
 
 def _envelope(stage: VelocityStage) -> list[tuple[float, float]]:
@@ -174,3 +179,31 @@ def test_env_steps(k1_env: ManagerBasedRlEnv) -> None:
     actor_obs = obs["actor"]
     assert isinstance(actor_obs, torch.Tensor)
     assert torch.isfinite(actor_obs).all()
+
+
+def test_command_drop_zeroes_moving_envs_and_holds(k1_env: ManagerBasedRlEnv) -> None:
+  term = k1_env.command_manager.get_term("twist")
+  assert isinstance(term, UniformVelocityCommand)
+  env_ids = torch.arange(4, device=k1_env.device)
+  term.is_standing_env[:] = False
+  term.is_world_env[:] = False
+  # Envs 0-2 move (env 1 under heading control, which would otherwise keep
+  # re-deriving a yaw command); env 3 is already standing and is left alone.
+  term.is_heading_env[:] = torch.tensor([False, True, False, False])
+  term.heading_target[1] = term.robot.data.heading_w[1] + 1.0
+  term.vel_command_b[:] = torch.tensor(
+    [[1.5, 0.0, 0.0], [0.0, 0.5, 0.3], [0.0, 0.0, -1.0], [0.0, 0.0, 0.0]],
+    device=k1_env.device,
+  )
+  term.is_standing_env[3] = True
+  term.time_left[3] = 0.5
+
+  drop_command_to_zero(k1_env, env_ids, command_name="twist", hold_range_s=(1.5, 3.0))
+
+  assert term.is_standing_env.all()
+  assert torch.all(term.vel_command_b == 0.0)
+  assert torch.all((term.time_left[:3] >= 1.5) & (term.time_left[:3] <= 3.0))
+  assert term.time_left[3].item() == 0.5
+  # The zero survives the command term's own per-step update.
+  k1_env.command_manager.compute(dt=k1_env.step_dt)
+  assert torch.all(term.vel_command_b[:3] == 0.0)

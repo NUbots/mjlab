@@ -16,8 +16,12 @@ Added
   without which the K1 learned to stand still. The head is left to the vision
   system, so the policy commands and observes only the 20 leg and arm joints. A
   time-staged command curriculum widens the envelope from a 0.5 m/s walk to
-  ``lin_vel_x`` (-0.6, 1.2), ``lin_vel_y`` +/-0.4 and ``ang_vel_z`` +/-1.0 by
+  ``lin_vel_x`` (-1.0, 2.0), ``lin_vel_y`` +/-0.8 and ``ang_vel_z`` +/-2.0 by
   iteration 8000.
+- Added the ``drop_command_to_zero`` velocity event: at random intervals it
+  cuts a moving command to zero in a single step and holds it there for a
+  sampled time, so the policy learns to stop abruptly without falling. It is
+  enabled for the Booster K1.
 - Added ``mjlab.rl.obs_history``: an actor observation-history encoder. The
   environment publishes a ``"history"`` observation group holding a T-step
   window of the actor observation stream (shape ``[num_envs, T, obs_dim]``),
