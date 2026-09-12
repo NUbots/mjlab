@@ -15,6 +15,7 @@ from mjlab.tasks.velocity.mdp.observations import gait_clock
 from mjlab.tasks.velocity.mdp.rewards import (
   _swing_height_profile,
   feet_swing_height_clock,
+  gait_clock_contact_mismatch_cost,
   upright,
 )
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
@@ -252,6 +253,37 @@ def test_clock_reward_gated_off_when_not_commanded():
   still = torch.tensor([[0.0, 0.0, 0.0]])
   r = _clock_reward(_make_clock_env(torch.tensor([[0.1, 0.0]]), 2, still))
   assert r.item() == 0.0
+
+
+def _contact_mismatch(found: torch.Tensor, command: torch.Tensor) -> float:
+  # Same clock as _clock_reward: at episode_step=2 foot 0 is in its swing window
+  # and foot 1 in its stance window.
+  sensor = MagicMock()
+  sensor.data.found = found
+  env = _make_clock_env(torch.zeros(1, 2), 2, command)
+  env.scene.__getitem__ = MagicMock(return_value=sensor)
+  cost = gait_clock_contact_mismatch_cost(
+    env,
+    sensor_name="feet_ground_contact",
+    period=0.8,
+    swing_ratio=0.5,
+    command_name="twist",
+    command_threshold=0.05,
+  )
+  return cost.item()
+
+
+def test_contact_mismatch_charges_planted_swing_foot():
+  moving = torch.tensor([[0.5, 0.0, 0.0]])
+  # Swing foot airborne, stance foot planted: matches the clock.
+  assert _contact_mismatch(torch.tensor([[0, 1]]), moving) == 0.0
+  # Standing still: the swing-window foot is planted -> one mismatch.
+  assert _contact_mismatch(torch.tensor([[1, 1]]), moving) == 1.0
+  # Exactly out of phase: both feet contradict their windows.
+  assert _contact_mismatch(torch.tensor([[1, 0]]), moving) == 2.0
+  # Gated off at zero command.
+  still = torch.tensor([[0.0, 0.0, 0.0]])
+  assert _contact_mismatch(torch.tensor([[1, 1]]), still) == 0.0
 
 
 def _make_clock_obs_env(episode_step: int, command: torch.Tensor):

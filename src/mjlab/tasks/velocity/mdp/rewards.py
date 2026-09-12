@@ -448,6 +448,60 @@ def feet_swing_height_clock(
   return reward
 
 
+def gait_clock_contact_mismatch_cost(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  period: float,
+  swing_ratio: float,
+  foot_offsets: tuple[float, ...] = (0.0, 0.5),
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Penalize foot contact states that contradict the gait clock's windows.
+
+  Grounds the clock of :func:`feet_swing_height_clock` in the physical gait:
+  each foot must be airborne during its swing window (``foot_phase <
+  swing_ratio``, same phase convention and ``foot_offsets``) and in contact
+  during its stance window. The cost is the number of feet whose contact
+  state contradicts their window.
+
+  The height-tracking term alone cannot force stepping: a planted foot still
+  collects its full reward through the stance window and a large share of it
+  through a low swing arc, so a policy can stand still and keep most of it.
+  This term charges a planted foot for every swing-window step instead.
+  """
+  contact_sensor: ContactSensor = env.scene[sensor_name]
+  assert contact_sensor.data.found is not None
+  in_contact = contact_sensor.data.found > 0  # [B, F]
+  num_feet = in_contact.shape[1]
+  assert len(foot_offsets) == num_feet, (
+    f"foot_offsets has {len(foot_offsets)} entries but sensor reports {num_feet} feet."
+  )
+
+  t = env.episode_length_buf.float() * env.step_dt  # [B]
+  base_phase = torch.remainder(t / period, 1.0)  # [B]
+  offsets = torch.tensor(foot_offsets, device=env.device, dtype=torch.float32)
+  foot_phase = torch.remainder(base_phase[:, None] + offsets[None, :], 1.0)  # [B, F]
+  in_swing = foot_phase < swing_ratio  # [B, F]
+
+  mismatch = (in_swing == in_contact).float()  # [B, F]
+  cost = torch.sum(mismatch, dim=1)  # [B]
+
+  active = torch.ones_like(cost, dtype=torch.bool)
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      active = (linear_norm + angular_norm) > command_threshold
+      cost = cost * active.float()
+  if active.any():
+    env.extras["log"]["Metrics/gait_clock_contact_match_mean"] = (
+      1.0 - mismatch[active].mean()
+    )
+  return cost
+
+
 def feet_slip(
   env: ManagerBasedRlEnv,
   sensor_name: str,
@@ -645,10 +699,10 @@ def feet_lateral_distance_cost(
   isolating lateral spread from fore-aft offset during a stride.
 
 
-  The penalty shape is ``exp(sharpness * shortfall) - 1`` where 
-  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``. 
-  When nominal_distance == lateral_distance the cost is zero. For 
-  anything else, the cost grows exponentially with the difference. 
+  The penalty shape is ``exp(sharpness * shortfall) - 1`` where
+  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``.
+  When nominal_distance == lateral_distance the cost is zero. For
+  anything else, the cost grows exponentially with the difference.
   """
   asset: Entity = env.scene[asset_cfg.name]
   foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]

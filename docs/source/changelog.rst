@@ -10,9 +10,11 @@ Added
 
 - Added the Booster K1 humanoid and the ``Mjlab-Velocity-Flat-Booster-K1`` /
   ``Mjlab-Velocity-Rough-Booster-K1`` tasks. They follow the NUbots Nugus
-  velocity recipe with the 25-step observation-history actor, but without
-  competence tracking or a gait clock. The head is left to the vision system,
-  so the policy commands and observes only the 20 leg and arm joints. A
+  velocity recipe (25-step observation-history actor, time-indexed gait
+  clock) without competence tracking, and add
+  ``gait_clock_contact_mismatch_cost`` to tie the clock to foot contacts,
+  without which the K1 learned to stand still. The head is left to the vision
+  system, so the policy commands and observes only the 20 leg and arm joints. A
   time-staged command curriculum widens the envelope from a 0.5 m/s walk to
   ``lin_vel_x`` (-0.6, 1.2), ``lin_vel_y`` +/-0.4 and ``ang_vel_z`` +/-1.0 by
   iteration 8000.

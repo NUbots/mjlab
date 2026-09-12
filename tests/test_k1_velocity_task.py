@@ -9,6 +9,7 @@ from mjlab.envs.mdp.actions import JointPositionAction
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.rl.obs_history import HistoryActor, HistoryModelCfg, OnnxHistoryPolicy
 from mjlab.tasks.velocity.config.booster_k1.env_cfgs import (
+  GAIT_PERIOD,
   HISTORY_WINDOW,
   VELOCITY_STAGES,
   booster_k1_flat_env_cfg,
@@ -42,6 +43,11 @@ EXPECTED_POLICY_JOINTS = (
 )
 
 
+# ang vel (3) + gravity (3) + joint pos/vel/actions (3 x 20) + command (3)
+# + gait clock (2).
+ACTOR_DIM = 71
+
+
 @pytest.fixture(scope="module")
 def k1_env():
   cfg = booster_k1_flat_env_cfg()
@@ -62,14 +68,30 @@ def test_actor_terms_and_order() -> None:
     "joint_vel",
     "actions",
     "command",
+    "gait_clock",
   ]
 
 
-def test_no_competence_or_gait_clock() -> None:
+def test_no_competence_machinery() -> None:
   cfg = booster_k1_flat_env_cfg()
   assert "competence_tracker" not in cfg.events
   assert "competence_diagnostics" not in cfg.curriculum
-  assert "gait_clock" not in cfg.observations["critic"].terms
+
+
+def test_gait_clock_shares_one_period() -> None:
+  """The observed clock and both clock rewards must tick together."""
+  cfg = booster_k1_flat_env_cfg()
+  periods = {
+    cfg.observations["actor"].terms["gait_clock"].params["period"],
+    cfg.observations["critic"].terms["gait_clock"].params["period"],
+    cfg.rewards["foot_swing_height"].params["period"],
+    cfg.rewards["gait_clock_contact"].params["period"],
+  }
+  assert periods == {GAIT_PERIOD}
+  assert (
+    cfg.rewards["foot_swing_height"].params["swing_ratio"]
+    == cfg.rewards["gait_clock_contact"].params["swing_ratio"]
+  )
 
 
 def test_history_group_clones_actor_terms() -> None:
@@ -119,8 +141,8 @@ def test_policy_excludes_head(k1_env: ManagerBasedRlEnv) -> None:
 def test_history_actor_builds_from_live_env(k1_env: ManagerBasedRlEnv) -> None:
   """Real env shapes -> history actor -> deployable ONNX graph."""
   obs = RslRlVecEnvWrapper(k1_env).get_observations()
-  assert obs["actor"].shape == (4, 69)
-  assert obs["history"].shape == (4, HISTORY_WINDOW, 69)
+  assert obs["actor"].shape == (4, ACTOR_DIM)
+  assert obs["history"].shape == (4, HISTORY_WINDOW, ACTOR_DIM)
 
   rl_cfg = booster_k1_ppo_runner_cfg()
   actor_cfg = rl_cfg.actor
@@ -141,7 +163,7 @@ def test_history_actor_builds_from_live_env(k1_env: ManagerBasedRlEnv) -> None:
   assert actor(obs).shape == (4, num_actions)
   onnx_policy = actor.as_onnx(verbose=False)
   assert isinstance(onnx_policy, OnnxHistoryPolicy)
-  assert onnx_policy.input_size == HISTORY_WINDOW * 69
+  assert onnx_policy.input_size == HISTORY_WINDOW * ACTOR_DIM
 
 
 def test_env_steps(k1_env: ManagerBasedRlEnv) -> None:
