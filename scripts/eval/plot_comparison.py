@@ -754,7 +754,7 @@ def _edges(values: np.ndarray) -> np.ndarray:
 PLANE_LABEL = {
   "tracking_error": "Planar Velocity Error (m/s)",
   "abs_error_wz": "Yaw Rate Error (rad/s)",
-  "normalised_error": "Command Error (fraction of commanded range)",
+  "normalised_error": "Normalised Error",
   "time_upright": "Time Upright (s)",
 }
 
