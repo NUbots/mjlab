@@ -13,6 +13,7 @@ v0 blocks with the body and the feet only: see ``goalkeeper_env_cfg.py``.
 import copy
 
 from mjlab.asset_zoo.robots import K1_ACTION_SCALE, get_k1_robot_cfg
+from mjlab.asset_zoo.robots.booster_k1.k1_constants import FULL_COLLISION_GND_ONLY
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
@@ -79,7 +80,14 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Create the Booster K1 goalkeeper (block policy) configuration."""
   cfg = make_goalkeeper_env_cfg()
 
-  cfg.scene.entities = {"robot": get_k1_robot_cfg(), **(cfg.scene.entities or {})}
+  robot = get_k1_robot_cfg()
+  # The K1 ships with only its feet collidable, which is fine for walking and wrong
+  # for goalkeeping: the ball passes straight through the shins, knees and body, so
+  # the only thing that can ever touch it is a foot. That alone would cap what any
+  # reward can teach. Every collision geom is enabled here, against the ground and the
+  # ball but not against itself, which keeps the contact count down.
+  robot.collisions = (FULL_COLLISION_GND_ONLY,)
+  cfg.scene.entities = {"robot": robot, **(cfg.scene.entities or {})}
 
   # Sensor noise and delays, shared with the velocity task so the two policies see the
   # same robot.
@@ -143,9 +151,10 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["dof_pos_limits"].params = {"asset_cfg": _policy_cfg()}
   cfg.viewer.body_name = "Trunk"
 
+  # A whole collidable robot makes far more contacts than a pair of feet.
   cfg.sim.mujoco.ccd_iterations = 50
-  cfg.sim.contact_sensor_maxmatch = 64
-  cfg.sim.njmax = 300
+  cfg.sim.contact_sensor_maxmatch = 128
+  cfg.sim.njmax = 600
 
   # Shot envelope. The reach numbers in PLAN.md say a K1 that may not leave its feet
   # covers roughly +-0.5 m, so v0 trains shots that a step or two can reach, plus some

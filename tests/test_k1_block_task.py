@@ -1,5 +1,6 @@
 """Tests for the Booster K1 goalkeeper (block policy) task configuration."""
 
+import mujoco
 import pytest
 import torch
 from conftest import get_test_device
@@ -249,3 +250,20 @@ def test_play_faces_the_full_envelope() -> None:
   assert shot.start_level == len(SHOT_LEVELS) - 1
   assert shot.mix_fraction == 0.0
   assert "shot_levels" not in cfg.curriculum
+
+
+def test_the_ball_can_hit_more_than_the_feet(block_env: ManagerBasedRlEnv) -> None:
+  """A keeper whose shins are not collidable cannot block with them.
+
+  The stock K1 enables only *foot_collision, so a ball passes through the legs and
+  body. Goalkeeping needs the rest of the robot to be solid.
+  """
+  model = block_env.sim.mj_model
+  enabled = {
+    mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, i)
+    for i in range(model.ngeom)
+    if model.geom_contype[i] or model.geom_conaffinity[i]
+  }
+  for part in ("left_shin_collision", "right_shin_collision", "left_knee_collision"):
+    assert f"robot/{part}" in enabled, f"{part} cannot be hit by the ball"
+  assert "robot/left_foot_collision" in enabled
