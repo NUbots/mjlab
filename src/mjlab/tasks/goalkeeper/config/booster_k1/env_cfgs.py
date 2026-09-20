@@ -21,7 +21,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.goalkeeper import mdp
 from mjlab.tasks.goalkeeper.goalkeeper_env_cfg import make_goalkeeper_env_cfg
-from mjlab.tasks.goalkeeper.mdp import ShotCommandCfg, ShotStage
+from mjlab.tasks.goalkeeper.mdp import ShotCommandCfg, ShotLevel
 from mjlab.tasks.velocity.config.booster_k1.env_cfgs import (
   HISTORY_WINDOW,
   K1_POLICY_JOINT_REGEX,
@@ -34,23 +34,41 @@ K1_ARM_JOINT_REGEX = r"^A?(Left|Right)_(Shoulder_(Pitch|Roll)|Elbow_(Pitch|Yaw))
 """Arms only. v0 holds these in the ready stance rather than blocking with them."""
 
 
-_STEPS_PER_ITER = 24
-"""Env steps per PPO iteration; must match num_steps_per_env in rl_cfg."""
-
-SHOT_STAGES: list[ShotStage] = [
-  # Shots the goalie can block by leaning, so there is something to earn from the
-  # first iteration while it is still learning to stand.
-  {"step": 0, "crossing": (-0.25, 0.25), "speed": (1.5, 3.0)},
-  # Then shots that need a step.
-  {"step": 600 * _STEPS_PER_ITER, "crossing": (-0.45, 0.45), "speed": (1.5, 3.5)},
-  {"step": 1_200 * _STEPS_PER_ITER, "crossing": (-0.65, 0.65), "speed": (1.5, 4.0)},
-  # And finally the full envelope, including shots it cannot reach on its feet and
-  # should not fall over chasing. Keyed early enough that a 2500-iteration run trains
-  # against it for a while, rather than meeting it on the last iteration.
-  {"step": 1_800 * _STEPS_PER_ITER, "crossing": (-0.8, 0.8), "speed": (1.5, 4.0)},
-]
-"""Shot envelope, widened in stages. Starting at the full width trains against a
-reward the policy cannot earn: it stands still and takes whatever hits it."""
+SHOT_LEVELS: tuple[ShotLevel, ...] = (
+  # Straight at the keeper, slow: the drill is stopping the ball, not moving to it.
+  # Run 6 leaves this as the weak spot — 55% of its misses had a foot within 20 cm of
+  # the ball and it went in anyway — so this is where the curriculum starts.
+  {
+    "name": "stop it",
+    "crossing": (-0.05, 0.05),
+    "speed": (1.5, 2.5),
+    "distance": (2.0, 3.0),
+  },
+  # Then the ball starts arriving to one side, still slowly.
+  {
+    "name": "one step",
+    "crossing": (-0.3, 0.3),
+    "speed": (1.5, 3.0),
+    "distance": (2.0, 3.5),
+  },
+  # Then faster and wider.
+  {
+    "name": "wider",
+    "crossing": (-0.55, 0.55),
+    "speed": (1.5, 3.5),
+    "distance": (2.0, 4.0),
+  },
+  # And finally everything, including shots it cannot reach on its feet and should not
+  # fall over chasing.
+  {
+    "name": "full",
+    "crossing": (-0.8, 0.8),
+    "speed": (1.5, 4.0),
+    "distance": (2.0, 4.5),
+  },
+)
+"""The drills, easiest first. A level is left behind on save rate, not on a step
+count, and later levels keep serving a quarter of their shots from earlier ones."""
 
 
 def _policy_cfg() -> SceneEntityCfg:
@@ -134,13 +152,11 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # it cannot, which it should at least not fall over chasing.
   shot = cfg.commands["shot"]
   assert isinstance(shot, ShotCommandCfg)
-  shot.crossing = SHOT_STAGES[0]["crossing"]
-  shot.speed = SHOT_STAGES[0]["speed"]
-  shot.distance = (2.0, 4.5)
+  shot.levels = SHOT_LEVELS
 
-  cfg.curriculum["shot_envelope"] = CurriculumTermCfg(
-    func=mdp.shot_envelope,
-    params={"command_name": "shot", "shot_stages": SHOT_STAGES},
+  cfg.curriculum["shot_levels"] = CurriculumTermCfg(
+    func=mdp.shot_levels,
+    params={"command_name": "shot", "advance_at": 0.6, "min_shots": 400},
   )
 
   # Actor observation history, as in the velocity task: a 25-step window of the exact
@@ -160,10 +176,11 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   if play:
     cfg.episode_length_s = int(1e9)
-    # Play and envelope measurement face the full envelope, not the first stage.
-    cfg.curriculum.pop("shot_envelope", None)
-    shot.crossing = SHOT_STAGES[-1]["crossing"]
-    shot.speed = SHOT_STAGES[-1]["speed"]
+    # Play and envelope measurement face the full envelope, not the drill the keeper
+    # happens to be on, and without earlier levels mixed in.
+    cfg.curriculum.pop("shot_levels", None)
+    shot.start_level = len(SHOT_LEVELS) - 1
+    shot.mix_fraction = 0.0
     cfg.observations["actor"].enable_corruption = False
     cfg.observations["history"].enable_corruption = False
     cfg.events.pop("push_robot", None)

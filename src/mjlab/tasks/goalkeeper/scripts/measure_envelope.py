@@ -160,7 +160,6 @@ def main(
   # An envelope describes one policy. Recording what it was measured from lets
   # planning::PlanSave refuse a mismatched pair rather than plan against numbers
   # belonging to a policy the robot is not running.
-  shot_cfg = shot.cfg
   sidecar = {
     "task": TASK_ID,
     "checkpoint": str(checkpoint),
@@ -174,11 +173,7 @@ def main(
       sum(r["touched"] for r in rows) / max(1, len([r for r in rows if r["on_target"]]))
     ),
     "fell": sum(r["fell"] for r in rows),
-    "shot_ranges": {
-      "crossing": list(shot_cfg.crossing),
-      "speed": list(shot_cfg.speed),
-      "distance": list(shot_cfg.distance),
-    },
+    "shot_level": shot.levels[shot.level],
     "dy_edges": list(DY_EDGES),
     "time_edges": list(TIME_EDGES),
   }

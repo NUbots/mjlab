@@ -17,7 +17,7 @@ for actually blocking it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 import torch
 
@@ -28,6 +28,22 @@ from mjlab.sensor import ContactSensor
 if TYPE_CHECKING:
   from mjlab.envs.manager_based_rl_env import ManagerBasedRlEnv
   from mjlab.viewer.debug_visualizer import DebugVisualizer
+
+
+class ShotLevel(TypedDict, total=False):
+  """One drill in the curriculum: the shots a level serves up.
+
+  Levels work the way soccer training does. The keeper starts on a ball rolled
+  straight at it and has to stop it, then the ball starts arriving to one side, then
+  faster and wider. A level is only left behind once the keeper is actually saving
+  them, and later levels keep serving a share of earlier ones so it does not forget
+  how to deal with the simple ones.
+  """
+
+  name: str
+  crossing: tuple[float, float]
+  speed: tuple[float, float]
+  distance: tuple[float, float]
 
 
 class ShotCommand(CommandTerm):
@@ -112,6 +128,31 @@ class ShotCommand(CommandTerm):
     self.metrics["shots_on_target"] = zeros(self.num_envs)
     self.metrics["command_dy_error"] = zeros(self.num_envs)
 
+    # Curriculum: which drill the keeper is on, and how it is doing on it. The save
+    # rate is a running average over resolved shots rather than a per-episode figure,
+    # so the curriculum can advance on evidence instead of on a step count.
+    levels = cfg.levels or (
+      {
+        "name": "full",
+        "crossing": (-0.8, 0.8),
+        "speed": (1.5, 4.0),
+        "distance": (2.0, 4.5),
+      },
+    )
+    self.levels: tuple[ShotLevel, ...] = tuple(levels)
+    self.level = int(min(cfg.start_level, len(self.levels) - 1))
+    self.recent_save_rate = torch.zeros((), device=self.device)
+    self.shots_since_level = 0
+
+    def to_range(key: str) -> torch.Tensor:
+      return torch.tensor(
+        [list(level[key]) for level in self.levels], device=self.device
+      )
+
+    self._level_crossing = to_range("crossing")
+    self._level_speed = to_range("speed")
+    self._level_distance = to_range("distance")
+
     self._pending_forward = False
 
   @property
@@ -180,10 +221,22 @@ class ShotCommand(CommandTerm):
     n = len(env_ids)
     r = torch.empty(n, device=self.device)
 
-    distance = r.uniform_(*self.cfg.distance).clone()
+    # Most shots come from the current drill; the rest are drawn from the ones already
+    # passed, so a keeper working on wide shots keeps being served the simple ones.
+    level_ids = torch.full((n,), self.level, device=self.device, dtype=torch.long)
+    if self.level > 0 and self.cfg.mix_fraction > 0.0:
+      revisit = torch.rand(n, device=self.device) < self.cfg.mix_fraction
+      earlier = torch.randint(0, self.level, (n,), device=self.device)
+      level_ids = torch.where(revisit, earlier, level_ids)
+
+    def sample(ranges: torch.Tensor) -> torch.Tensor:
+      low, high = ranges[level_ids, 0], ranges[level_ids, 1]
+      return low + (high - low) * torch.rand(n, device=self.device)
+
+    distance = sample(self._level_distance)
+    crossing = sample(self._level_crossing)
+    speed = sample(self._level_speed)
     lateral = r.uniform_(*self.cfg.lateral).clone()
-    crossing = r.uniform_(*self.cfg.crossing).clone()
-    speed = r.uniform_(*self.cfg.speed).clone()
     self.kick_delay[env_ids] = r.uniform_(*self.cfg.kick_delay).clone()
 
     origins = self._env.scene.env_origins[env_ids]
@@ -411,6 +464,16 @@ class ShotCommand(CommandTerm):
     self.saved_now = over & self.on_target_shot & ~in_the_goal
     self.finished |= over
 
+    resolved_on_target = over & self.on_target_shot
+    decided = int(resolved_on_target.sum())
+    if decided > 0:
+      saved_fraction = (self.saved_now & resolved_on_target).float().sum() / decided
+      # One step can resolve many shots at once, so the average is moved as if it had
+      # seen them one at a time.
+      weight = 1.0 - (1.0 - self.cfg.save_rate_smoothing) ** decided
+      self.recent_save_rate += weight * (saved_fraction - self.recent_save_rate)
+      self.shots_since_level += decided
+
     self.shots_finished += over.float()
     self.shots_on_target += (over & self.on_target_shot).float()
     self.shots_saved += self.saved_now.float()
@@ -469,10 +532,14 @@ class ShotCommandCfg(CommandTermCfg):
   """FIFA size 3, the ball the Middle division plays with."""
 
   # Shot geometry, in the goalie's start frame: +x points at the shooter.
-  distance: tuple[float, float] = (2.0, 5.0)
+  levels: tuple[ShotLevel, ...] = ()
+  """The drills, easiest first. Empty means one level covering the full envelope."""
+  start_level: int = 0
+  mix_fraction: float = 0.25
+  """Share of shots drawn from levels already passed, so they are not forgotten."""
+  save_rate_smoothing: float = 0.01
+  """Weight of one resolved shot in the running save rate the curriculum advances on."""
   lateral: tuple[float, float] = (-1.5, 1.5)
-  crossing: tuple[float, float] = (-1.2, 1.2)
-  speed: tuple[float, float] = (1.5, 4.5)
   kick_delay: tuple[float, float] = (0.5, 1.5)
 
   rolling_deceleration: float = 0.5

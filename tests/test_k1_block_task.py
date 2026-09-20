@@ -7,8 +7,9 @@ from conftest import get_test_device
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.envs.mdp.actions import JointPositionAction
 from mjlab.rl.obs_history import HistoryActor, HistoryModelCfg, OnnxHistoryPolicy
+from mjlab.tasks.goalkeeper import mdp
 from mjlab.tasks.goalkeeper.config.booster_k1.env_cfgs import (
-  SHOT_STAGES,
+  SHOT_LEVELS,
   booster_k1_block_env_cfg,
 )
 from mjlab.tasks.goalkeeper.config.booster_k1.rl_cfg import (
@@ -198,25 +199,53 @@ def test_exports_the_shape_the_robot_loads(block_env: ManagerBasedRlEnv) -> None
   assert num_actions == 20
 
 
-def test_shot_curriculum_only_widens() -> None:
-  """Stages must widen, and training must start inside the first one."""
-  steps = [stage["step"] for stage in SHOT_STAGES]
-  assert steps == sorted(steps) and steps[0] == 0
-  for previous, current in zip(SHOT_STAGES, SHOT_STAGES[1:], strict=False):
+def test_shot_levels_only_get_harder() -> None:
+  """Each drill must be at least as hard as the one before, and training start on L1."""
+  for previous, current in zip(SHOT_LEVELS, SHOT_LEVELS[1:], strict=False):
     assert current["crossing"][1] >= previous["crossing"][1]
     assert current["speed"][1] >= previous["speed"][1]
 
   cfg = booster_k1_block_env_cfg()
   shot = cfg.commands["shot"]
   assert isinstance(shot, ShotCommandCfg)
-  assert shot.crossing == SHOT_STAGES[0]["crossing"]
-  assert "shot_envelope" in cfg.curriculum
+  assert shot.levels == SHOT_LEVELS
+  assert shot.start_level == 0
+  assert 0.0 < shot.mix_fraction < 1.0, "earlier drills must keep being served"
+  assert "shot_levels" in cfg.curriculum
+
+
+def test_level_advances_on_save_rate_not_on_steps(block_env: ManagerBasedRlEnv) -> None:
+  """A level is left behind on evidence: enough shots, saved often enough."""
+  shot = block_env.command_manager.get_term("shot")
+  assert isinstance(shot, ShotCommand)
+  start = shot.level
+
+  # Saving well, but too few shots to say so.
+  shot.recent_save_rate.fill_(0.9)
+  shot.shots_since_level = 10
+  mdp.shot_levels(block_env, torch.arange(1), "shot", advance_at=0.6, min_shots=400)
+  assert shot.level == start
+
+  # Plenty of shots, but not saving them.
+  shot.recent_save_rate.fill_(0.2)
+  shot.shots_since_level = 1000
+  mdp.shot_levels(block_env, torch.arange(1), "shot", advance_at=0.6, min_shots=400)
+  assert shot.level == start
+
+  # Both, so it moves up, and the evidence resets for the new level.
+  shot.recent_save_rate.fill_(0.9)
+  shot.shots_since_level = 1000
+  mdp.shot_levels(block_env, torch.arange(1), "shot", advance_at=0.6, min_shots=400)
+  assert shot.level == start + 1
+  assert shot.shots_since_level == 0
+  assert float(shot.recent_save_rate) == 0.0
 
 
 def test_play_faces_the_full_envelope() -> None:
-  """Measuring an envelope against the first curriculum stage would flatter it."""
+  """Measuring an envelope against the drill it is on would flatter it."""
   cfg = booster_k1_block_env_cfg(play=True)
   shot = cfg.commands["shot"]
   assert isinstance(shot, ShotCommandCfg)
-  assert shot.crossing == SHOT_STAGES[-1]["crossing"]
-  assert "shot_envelope" not in cfg.curriculum
+  assert shot.start_level == len(SHOT_LEVELS) - 1
+  assert shot.mix_fraction == 0.0
+  assert "shot_levels" not in cfg.curriculum

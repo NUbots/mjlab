@@ -2,51 +2,47 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 
-from mjlab.tasks.goalkeeper.mdp.shot_command import ShotCommandCfg
+from mjlab.tasks.goalkeeper.mdp.shot_command import ShotCommand
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 
-class ShotStage(TypedDict, total=False):
-  """One stage of the shot envelope, applied once ``step`` env steps have passed."""
-
-  step: int
-  crossing: tuple[float, float]
-  speed: tuple[float, float]
-  distance: tuple[float, float]
-
-
-def shot_envelope(
+def shot_levels(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
   command_name: str,
-  shot_stages: list[ShotStage],
+  advance_at: float = 0.6,
+  min_shots: int = 400,
 ) -> dict[str, torch.Tensor]:
-  """Widen the shots the goalie faces as it learns.
+  """Move the keeper up a drill once it is actually saving the one it is on.
 
-  A shot crossing a metre away cannot be reached from a standing start in the time
-  available, so early on it is a reward the policy cannot earn no matter what it does,
-  and the gradient it contributes is noise. Starting with shots that come close to the
-  goalie and widening from there gives it something to chase from the first iteration.
+  Advancing on a step count, as the first version did, moves the keeper on whether or
+  not it has learned anything; advancing on the save rate means a level that is not
+  working holds it until it does. The running save rate is reset on promotion so the
+  next level has to earn its own evidence, which also stops several levels being
+  cleared at once on the strength of one easy drill.
   """
-  del env_ids  # Applied to the whole batch.
+  del env_ids  # Applies to the whole batch.
   command_term = env.command_manager.get_term(command_name)
-  assert command_term is not None
-  cfg = cast(ShotCommandCfg, command_term.cfg)
-  for stage in shot_stages:
-    if env.common_step_counter >= stage["step"]:
-      if stage.get("crossing") is not None:
-        cfg.crossing = stage["crossing"]
-      if stage.get("speed") is not None:
-        cfg.speed = stage["speed"]
-      if stage.get("distance") is not None:
-        cfg.distance = stage["distance"]
+  shot = cast(ShotCommand, command_term)
+
+  ready = (
+    float(shot.recent_save_rate) > advance_at
+    and shot.shots_since_level >= min_shots
+    and shot.level < len(shot.levels) - 1
+  )
+  if ready:
+    shot.level += 1
+    shot.shots_since_level = 0
+    shot.recent_save_rate.zero_()
+
   return {
-    "crossing_max": torch.tensor(cfg.crossing[1]),
-    "speed_max": torch.tensor(cfg.speed[1]),
+    "level": torch.tensor(float(shot.level)),
+    "recent_save_rate": shot.recent_save_rate.detach().clone().cpu(),
+    "crossing_max": torch.tensor(float(shot.levels[shot.level]["crossing"][1])),
   }
