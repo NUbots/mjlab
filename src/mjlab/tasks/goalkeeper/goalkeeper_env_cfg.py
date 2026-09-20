@@ -266,17 +266,20 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
     # The task.
     "line_up": RewardTermCfg(
       func=mdp.urgency_weighted_line_up,
-      weight=3.0,
+      # The only term that pays for moving sideways, so it has to outweigh the comfort
+      # of standing still. At weight 3 against the stance rewards the first policy
+      # simply stood there and blocked whatever arrived at its body.
+      weight=8.0,
       params={"command_name": "shot", "std": 0.25, "horizon": 1.0},
     ),
     "blocked": RewardTermCfg(
       func=mdp.blocked,
-      weight=30.0,
+      weight=100.0,
       params={"command_name": "shot"},
     ),
     "conceded": RewardTermCfg(
       func=mdp.conceded,
-      weight=-30.0,
+      weight=-100.0,
       params={"command_name": "shot"},
     ),
     # Stay on the line, facing the field. Both are bounded rewards rather than
@@ -294,7 +297,9 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
     # Ready stance, and stillness when there is nothing to do.
     "posture": RewardTermCfg(
       func=mdp.posture,
-      weight=1.0,
+      # Held low on purpose: a goalie that is paid well for standing in its default
+      # pose will do exactly that. It only has to be enough to keep the stance tidy.
+      weight=0.5,
       params={
         "std": 0.35,
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),  # Per-robot.
@@ -305,7 +310,7 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
       # keeps the policy from discovering an arm block it is not yet trained or
       # measured for.
       func=mdp.posture,
-      weight=1.0,
+      weight=0.5,
       params={
         "std": 0.2,
         "asset_cfg": SceneEntityCfg("robot", joint_names=()),  # Set per-robot.
@@ -313,7 +318,7 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "ready_when_idle": RewardTermCfg(
       func=mdp.ready_when_idle,
-      weight=0.5,
+      weight=0.25,
       params={"command_name": "shot", "std": 0.3},
     ),
     # Keep it on its feet and the motion clean.
