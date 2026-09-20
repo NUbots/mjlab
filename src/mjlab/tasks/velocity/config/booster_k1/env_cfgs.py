@@ -1,14 +1,15 @@
 """Booster K1 velocity environment configurations.
 
 A port of the NUgus velocity recipe (same base reward set and weights, same
-sensor noise/delay model, same 25-step observation-history actor and the same
-time-indexed gait clock) to the K1, without competence tracking.
+sensor noise/delay model and the same 25-step observation-history actor) to
+the K1, without competence tracking. Unlike the NUgus, the K1 has a usable
+base linear velocity estimate on hardware, so the policy observes it.
 
 The head (AAHead_yaw, Head_pitch) is not policy-controlled; on hardware it
 belongs to the vision system. Its actuators hold the default pose and the
 policy neither observes nor commands it, so the actor observation is
-3 (ang vel) + 3 (gravity) + 20 (joint pos) + 20 (joint vel) + 20 (actions)
-+ 3 (command) + 2 (gait clock) = 71 dims.
+3 (lin vel) + 3 (ang vel) + 3 (gravity) + 20 (joint pos) + 20 (joint vel)
++ 20 (actions) + 3 (command) = 72 dims.
 """
 
 import copy
@@ -18,7 +19,7 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.event_manager import EventTermCfg
-from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
+from mjlab.managers.observation_manager import ObservationGroupCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import (
@@ -48,12 +49,6 @@ pitch joints carry an "A" ordering prefix (ALeft_Shoulder_Pitch), hence the
 optional ``A?``."""
 
 _HEAD_ACTION_SCALE_KEYS = ("AAHead_yaw", "Head_pitch")
-
-GAIT_PERIOD = 0.6
-"""Full gait-cycle duration in seconds, shared by the clock observation and
-both clock rewards. Booster's own K1 configs command 1.5-2.4 Hz gaits."""
-_SWING_RATIO = 0.45
-_SWING_TARGET_HEIGHT = 0.08
 
 _STEPS_PER_ITER = 24
 """Env steps per PPO iteration; must match ``num_steps_per_env`` in rl_cfg.
@@ -114,13 +109,19 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Create Booster K1 rough terrain velocity configuration."""
   cfg = make_velocity_env_cfg()
 
-  # The deployed policy has no odometry, so it must not observe base linear
-  # velocity. Terrain height is privileged: critic-only.
-  cfg.observations["actor"].terms.pop("base_lin_vel", None)
+  # Terrain height is privileged: critic-only. Base linear velocity stays in
+  # the actor observation -- unlike the NUgus, the K1 ships a usable base
+  # velocity estimate, so the deployed policy can be fed one.
   cfg.observations["actor"].terms.pop("height_scan", None)
 
   # Sensor noise, as used for the NUgus (IMU measured, encoders from the
   # position/velocity resolution, both with a safety factor).
+  # Base linear velocity comes from the K1's on-board estimator (leg
+  # kinematics fused with the IMU), not a direct measurement: noisier and
+  # laggier than the gyro, so it gets a wider std and the encoder-grade delay.
+  cfg.observations["actor"].terms["base_lin_vel"].noise = Gnoise(
+    mean=0.0, std=(0.05, 0.05, 0.08)
+  )
   cfg.observations["actor"].terms["base_ang_vel"].noise = Gnoise(
     mean=0.0, std=(0.02, 0.03, 0.03)
   )
@@ -131,6 +132,8 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["actor"].terms["joint_vel"].noise = Gnoise(mean=0.0, std=0.05)
 
   # Sensor delays.
+  cfg.observations["actor"].terms["base_lin_vel"].delay_min_lag = 0
+  cfg.observations["actor"].terms["base_lin_vel"].delay_max_lag = 3  # 0-60ms
   cfg.observations["actor"].terms["base_ang_vel"].delay_min_lag = 0
   cfg.observations["actor"].terms["base_ang_vel"].delay_max_lag = 2  # 0-40ms
   cfg.observations["actor"].terms["projected_gravity"].delay_min_lag = 0
@@ -322,53 +325,6 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["foot_clearance"].params["power"] = 2
   cfg.rewards["foot_clearance"].params["only_below"] = True
   cfg.rewards["foot_clearance"].weight = -15.0
-
-  # Time-indexed gait clock. A fixed-frequency clock the policy does not
-  # control drives a desired per-foot swing arc, and the same clock is fed to
-  # the policy (zeroed at standstill) so it can step periodically. Without it
-  # the K1 converged to a statue: standing still under every command earned
-  # ~+6/step from pose, upright and the small commands it already matched,
-  # and nothing paid specifically for lifting a foot.
-  clock_obs = ObservationTermCfg(
-    func=mdp.gait_clock,
-    params={
-      "period": GAIT_PERIOD,
-      "command_name": "twist",
-      "command_threshold": 0.05,
-    },
-  )
-  cfg.observations["actor"].terms["gait_clock"] = clock_obs
-  cfg.observations["critic"].terms["gait_clock"] = clock_obs
-  swing_height = cfg.rewards["foot_swing_height"]
-  swing_height.func = mdp.feet_swing_height_clock
-  swing_height.weight = 0.75
-  swing_height.params = {
-    "height_sensor_name": "foot_height_scan",
-    "target_height": _SWING_TARGET_HEIGHT,
-    "period": GAIT_PERIOD,
-    "swing_ratio": _SWING_RATIO,
-    "std": 0.05,
-    "profile": "sin",
-    "command_name": "twist",
-    "command_threshold": 0.05,
-  }
-  # Ground the clock in the feet. The height-tracking term alone still pays a
-  # planted foot most of its value, and on k1_competence the K1 stood still
-  # under it too; charging each foot whose contact contradicts its clock
-  # window is what made that K1 step (Booster's booster_gym uses the same
-  # contact-windowed swing signal). Must share swing_ratio with the height
-  # term, or the two would demand contradictory contact states.
-  cfg.rewards["gait_clock_contact"] = RewardTermCfg(
-    func=mdp.gait_clock_contact_mismatch_cost,
-    weight=-1.0,
-    params={
-      "sensor_name": "feet_ground_contact",
-      "period": GAIT_PERIOD,
-      "swing_ratio": _SWING_RATIO,
-      "command_name": "twist",
-      "command_threshold": 0.05,
-    },
-  )
 
   # Flat-foot shaping: the K1 sole is the bottom face of the foot box, so the
   # sole normal is the foot body's local Z axis.

@@ -9,7 +9,6 @@ from mjlab.envs.mdp.actions import JointPositionAction
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.rl.obs_history import HistoryActor, HistoryModelCfg, OnnxHistoryPolicy
 from mjlab.tasks.velocity.config.booster_k1.env_cfgs import (
-  GAIT_PERIOD,
   HISTORY_WINDOW,
   VELOCITY_STAGES,
   booster_k1_flat_env_cfg,
@@ -47,9 +46,9 @@ EXPECTED_POLICY_JOINTS = (
 )
 
 
-# ang vel (3) + gravity (3) + joint pos/vel/actions (3 x 20) + command (3)
-# + gait clock (2).
-ACTOR_DIM = 71
+# lin vel (3) + ang vel (3) + gravity (3) + joint pos/vel/actions (3 x 20)
+# + command (3).
+ACTOR_DIM = 72
 
 
 @pytest.fixture(scope="module")
@@ -66,13 +65,13 @@ def k1_env():
 def test_actor_terms_and_order() -> None:
   cfg = booster_k1_flat_env_cfg()
   assert list(cfg.observations["actor"].terms) == [
+    "base_lin_vel",
     "base_ang_vel",
     "projected_gravity",
     "joint_pos",
     "joint_vel",
     "actions",
     "command",
-    "gait_clock",
   ]
 
 
@@ -91,20 +90,20 @@ def test_no_competence_machinery() -> None:
   assert "competence_diagnostics" not in cfg.curriculum
 
 
-def test_gait_clock_shares_one_period() -> None:
-  """The observed clock and both clock rewards must tick together."""
+def test_base_lin_vel_has_odometry_noise_and_delay() -> None:
+  """The K1 observes base linear velocity, corrupted like a real estimate."""
   cfg = booster_k1_flat_env_cfg()
-  periods = {
-    cfg.observations["actor"].terms["gait_clock"].params["period"],
-    cfg.observations["critic"].terms["gait_clock"].params["period"],
-    cfg.rewards["foot_swing_height"].params["period"],
-    cfg.rewards["gait_clock_contact"].params["period"],
-  }
-  assert periods == {GAIT_PERIOD}
-  assert (
-    cfg.rewards["foot_swing_height"].params["swing_ratio"]
-    == cfg.rewards["gait_clock_contact"].params["swing_ratio"]
-  )
+  term = cfg.observations["actor"].terms["base_lin_vel"]
+  assert term.noise is not None
+  assert term.delay_max_lag > 0
+
+
+def test_no_gait_clock() -> None:
+  cfg = booster_k1_flat_env_cfg()
+  for group in ("actor", "critic"):
+    assert "gait_clock" not in cfg.observations[group].terms
+  assert "gait_clock_contact" not in cfg.rewards
+  assert "period" not in cfg.rewards["foot_swing_height"].params
 
 
 def test_history_group_clones_actor_terms() -> None:
