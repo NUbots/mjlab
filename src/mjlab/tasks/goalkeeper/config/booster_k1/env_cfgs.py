@@ -168,6 +168,18 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     params={"command_name": "shot", "advance_at": 0.6, "min_shots": 400},
   )
 
+  # The upright bonus is scaffolding for the early training collapse, not part of the
+  # job. It is eased off as the keeper clears drills, so a keeper that can stand is
+  # free to lean, dip and reach rather than being held rigidly vertical.
+  cfg.curriculum["upright_relaxation"] = CurriculumTermCfg(
+    func=mdp.relax_upright,
+    params={
+      "command_name": "shot",
+      "reward_name": "upright",
+      "weights": (2.0, 1.0, 0.5, 0.25),
+    },
+  )
+
   # Actor observation history, as in the velocity task: a 25-step window of the exact
   # actor observation vector, encoded by a TCN inside the model. This block must stay
   # after every actor-term change above, because the window clones the final layout;
@@ -188,6 +200,7 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     # Play and envelope measurement face the full envelope, not the drill the keeper
     # happens to be on, and without earlier levels mixed in.
     cfg.curriculum.pop("shot_levels", None)
+    cfg.curriculum.pop("upright_relaxation", None)
     shot.start_level = len(SHOT_LEVELS) - 1
     shot.mix_fraction = 0.0
     cfg.observations["actor"].enable_corruption = False

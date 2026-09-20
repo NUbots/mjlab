@@ -267,3 +267,13 @@ def test_the_ball_can_hit_more_than_the_feet(block_env: ManagerBasedRlEnv) -> No
   for part in ("left_shin_collision", "right_shin_collision", "left_knee_collision"):
     assert f"robot/{part}" in enabled, f"{part} cannot be hit by the ball"
   assert "robot/left_foot_collision" in enabled
+
+
+def test_upright_bonus_eases_off_as_drills_are_cleared() -> None:
+  """It is scaffolding for the early collapse, not a requirement of the job."""
+  cfg = booster_k1_block_env_cfg()
+  weights = cfg.curriculum["upright_relaxation"].params["weights"]
+  assert weights[0] == cfg.rewards["upright"].weight, "level 1 keeps the full bonus"
+  assert list(weights) == sorted(weights, reverse=True), "it must only loosen"
+  assert weights[-1] > 0.0, "a keeper still should not dive onto its face"
+  assert len(weights) == len(SHOT_LEVELS)

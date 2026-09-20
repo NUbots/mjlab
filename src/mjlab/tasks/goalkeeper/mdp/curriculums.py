@@ -46,3 +46,29 @@ def shot_levels(
     "recent_save_rate": shot.recent_save_rate.detach().clone().cpu(),
     "crossing_max": torch.tensor(float(shot.levels[shot.level]["crossing"][1])),
   }
+
+
+def relax_upright(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  command_name: str,
+  reward_name: str = "upright",
+  weights: tuple[float, ...] = (2.0, 1.0, 0.5, 0.25),
+) -> dict[str, torch.Tensor]:
+  """Loosen the upright bonus as the keeper moves up the drills.
+
+  The upright term is scaffolding. It was added because at the start of training the
+  action-smoothness penalties made falling over the quickest way to stop paying them,
+  and episodes collapsed to about 7 steps. Once the keeper can stand, holding it
+  rigidly upright only rules out the motions a keeper needs: leaning out over a foot,
+  dropping the hips, reaching across. So it is strong while the keeper is learning to
+  stand on drill 1 and is eased off level by level after that.
+
+  Tied to the drill rather than to a step count for the same reason the drills are:
+  the keeper should only be given the freedom once it has shown it can stand.
+  """
+  del env_ids  # Applies to the whole batch.
+  shot = cast(ShotCommand, env.command_manager.get_term(command_name))
+  term_cfg = env.reward_manager.get_term_cfg(reward_name)
+  term_cfg.weight = float(weights[min(shot.level, len(weights) - 1)])
+  return {"upright_weight": torch.tensor(term_cfg.weight)}
