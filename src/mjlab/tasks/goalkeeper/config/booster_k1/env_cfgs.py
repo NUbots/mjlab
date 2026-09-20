@@ -42,11 +42,12 @@ SHOT_STAGES: list[ShotStage] = [
   # first iteration while it is still learning to stand.
   {"step": 0, "crossing": (-0.25, 0.25), "speed": (1.5, 3.0)},
   # Then shots that need a step.
-  {"step": 800 * _STEPS_PER_ITER, "crossing": (-0.45, 0.45), "speed": (1.5, 3.5)},
-  {"step": 1_500 * _STEPS_PER_ITER, "crossing": (-0.65, 0.65), "speed": (1.5, 4.0)},
+  {"step": 600 * _STEPS_PER_ITER, "crossing": (-0.45, 0.45), "speed": (1.5, 3.5)},
+  {"step": 1_200 * _STEPS_PER_ITER, "crossing": (-0.65, 0.65), "speed": (1.5, 4.0)},
   # And finally the full envelope, including shots it cannot reach on its feet and
-  # should not fall over chasing.
-  {"step": 2_500 * _STEPS_PER_ITER, "crossing": (-0.8, 0.8), "speed": (1.5, 4.0)},
+  # should not fall over chasing. Keyed early enough that a 2500-iteration run trains
+  # against it for a while, rather than meeting it on the last iteration.
+  {"step": 1_800 * _STEPS_PER_ITER, "crossing": (-0.8, 0.8), "speed": (1.5, 4.0)},
 ]
 """Shot envelope, widened in stages. Starting at the full width trains against a
 reward the policy cannot earn: it stands still and takes whatever hits it."""
