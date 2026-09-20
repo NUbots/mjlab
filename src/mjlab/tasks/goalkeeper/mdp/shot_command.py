@@ -59,6 +59,12 @@ class ShotCommand(CommandTerm):
     self.shot_speed = zeros(self.num_envs)
     self.shot_direction = zeros(self.num_envs, 2)
 
+    # How much of the danger has been taken out of the ball: 0 while it is still
+    # heading inside the posts, 1 once it can no longer reach them at all, graded in
+    # between by how far outside it is now projected to pass. Rewards read this to pay
+    # for the outcome of a touch rather than the touch itself.
+    self.defused = zeros(self.num_envs)
+
     # True crossing of the goalie's lateral line, in the goalie's frame, and whether
     # the ball is on its way there. Rewards read these.
     self.true_crossing = zeros(self.num_envs)
@@ -352,12 +358,20 @@ class ShotCommand(CommandTerm):
     ball_speed = torch.linalg.norm(ball_vel_r, dim=-1)
     moving_now = self.kicked & (ball_speed > self.cfg.min_shot_speed)
 
+    # The goal does not move with the goalie. Outcomes are judged against a goal fixed
+    # at the environment origin, where the goalie starts: a goalie that steps aside
+    # must not be able to carry its goal out of the ball's way.
+    ball_pos_o = (
+      self.ball.data.root_link_pos_w[:, :2] - self._env.scene.env_origins[:, :2]
+    )
+    ball_vel_o = self.ball.data.root_link_lin_vel_w[:, :2]
+
     # As the ball starts rolling, work out whether it was ever going in. A shot that
     # would have missed anyway is not a save, however it ends.
     starting = moving_now & ~self.was_moving
     if bool(starting.any()):
       goal_dy, _, reaches_goal = self._predict_crossing(
-        ball_pos_r, ball_vel_r, plane_x=-self.cfg.goal_line_depth
+        ball_pos_o, ball_vel_o, plane_x=-self.cfg.goal_line_depth
       )
       would_score = reaches_goal & (goal_dy.abs() < self.cfg.goal_half_width)
       self.on_target_shot = torch.where(starting, would_score, self.on_target_shot)
@@ -366,16 +380,29 @@ class ShotCommand(CommandTerm):
     # A shot is over when the ball reaches the goal line, stops, or is on its way back
     # out. Stopping 0.1 m behind the goalie is not the end of it: a ball the goalie
     # got a toe to can still roll in, and that is a goal, not a save.
-    at_goal_line = ball_pos_r[:, 0] < -self.cfg.goal_line_depth
+    at_goal_line = ball_pos_o[:, 0] < -self.cfg.goal_line_depth
     stopped = self.was_moving & (ball_speed < self.cfg.min_shot_speed)
     going_away = (
       self.was_moving
-      & (ball_vel_r[:, 0] > self.cfg.min_shot_speed)
-      & (ball_pos_r[:, 0] > 0.0)
+      & (ball_vel_o[:, 0] > self.cfg.min_shot_speed)
+      & (ball_pos_o[:, 0] > 0.0)
     )
     over = self.kicked & ~self.finished & (at_goal_line | stopped | going_away)
 
-    in_the_goal = at_goal_line & (ball_pos_r[:, 1].abs() < self.cfg.goal_half_width)
+    # Where the ball is headed now, which is what a touch has to change. A ball that
+    # can no longer reach the goal is fully defused, whether it was stopped dead or
+    # sent wide; one still bound for the posts is not defused at all.
+    projected_dy, _, still_reaches = self._predict_crossing(
+      ball_pos_o, ball_vel_o, plane_x=-self.cfg.goal_line_depth
+    )
+    outside_post = (projected_dy.abs() - self.cfg.goal_half_width).clamp(min=0.0)
+    self.defused = torch.where(
+      still_reaches,
+      (outside_post / self.cfg.defuse_margin).clamp(0.0, 1.0),
+      torch.ones_like(outside_post),
+    )
+
+    in_the_goal = at_goal_line & (ball_pos_o[:, 1].abs() < self.cfg.goal_half_width)
     self.scored_now = over & in_the_goal
     self.saved_now = over & self.on_target_shot & ~in_the_goal
     self.finished |= over
@@ -449,9 +476,13 @@ class ShotCommandCfg(CommandTermCfg):
   goal_half_width: float = 1.25
   """Half the goal mouth (m). HSL Middle goals are 2.4-2.6 m wide."""
   goal_line_depth: float = 0.2
-  """How far behind the goalie the goal line is (m). PLAN.md has the goalie standing
-  0.2 m off its line, so a ball is only in once it has passed that."""
+  """How far behind the *environment origin* the goal line is (m), where the goalie
+  starts. PLAN.md has the goalie standing 0.2 m off its line. The goal is fixed there,
+  not carried around with the robot."""
   min_shot_speed: float = 0.3
+  defuse_margin: float = 0.5
+  """How far outside the post a deflected ball has to be headed (m) to count as fully
+  out of danger."""
 
   # Simulated ball estimate, from the NUSim validation of the real chain.
   estimate_rate_hz: float = 30.0

@@ -193,3 +193,20 @@ def close_on_crossing(
   return (
     (closing / reference_speed).clamp(-1.0, 1.0) * worth_moving * shot.on_target.float()
   )
+
+
+def defused(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+) -> torch.Tensor:
+  """Reward, after a touch, for where the ball is now headed.
+
+  The goalie touches far more shots than it saves: it gets in the way of a fast ball
+  and the ball comes off it into the goal. Waiting for the shot to resolve says so
+  only once, and late. This pays every step after the first touch for the danger
+  actually taken out of the ball, which is 1 once it can no longer reach the goal
+  (stopped dead or sent wide) and 0 while it is still bound for the posts.
+  """
+  shot = _shot(env, command_name)
+  live = shot.was_moving & shot.touched & ~shot.finished & shot.on_target_shot
+  return shot.defused * live.float()

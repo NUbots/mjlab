@@ -287,6 +287,13 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=20.0,
       params={"command_name": "shot"},
     ),
+    "defused": RewardTermCfg(
+      # Pays for the outcome of a touch, from the moment of contact, rather than
+      # leaving the policy to infer it from the sparse save at the end.
+      func=mdp.defused,
+      weight=3.0,
+      params={"command_name": "shot"},
+    ),
     "saved": RewardTermCfg(
       # The job: a shot that was going in, kept out.
       func=mdp.saved,
