@@ -6,8 +6,12 @@ from conftest import get_test_device
 
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.envs.mdp.actions import JointPositionAction
+from mjlab.rl.obs_history import HistoryActor, HistoryModelCfg, OnnxHistoryPolicy
 from mjlab.tasks.goalkeeper.config.booster_k1.env_cfgs import (
   booster_k1_block_env_cfg,
+)
+from mjlab.tasks.goalkeeper.config.booster_k1.rl_cfg import (
+  booster_k1_block_ppo_runner_cfg,
 )
 from mjlab.tasks.goalkeeper.goalkeeper_env_cfg import (
   BALL_RADIUS,
@@ -166,3 +170,28 @@ def test_play_disables_corruption_and_pushes() -> None:
   assert cfg.observations["actor"].enable_corruption is False
   assert cfg.observations["history"].enable_corruption is False
   assert "push_robot" not in cfg.events
+
+
+def test_exports_the_shape_the_robot_loads(block_env: ManagerBasedRlEnv) -> None:
+  """skill::K1BlockPolicy loads obs [1, 25 x 70] in and actions [1, 20] out."""
+  rl_cfg = booster_k1_block_ppo_runner_cfg()
+  actor_cfg = rl_cfg.actor
+  assert isinstance(actor_cfg, HistoryModelCfg)
+  obs = block_env.observation_manager.compute()
+  num_actions = block_env.action_manager.total_action_dim
+  actor = HistoryActor(
+    obs,
+    {k: list(v) for k, v in rl_cfg.obs_groups.items()},
+    "actor",
+    num_actions,
+    history_cfg=dict(actor_cfg.history_cfg),
+    hidden_dims=actor_cfg.hidden_dims,
+    activation=actor_cfg.activation,
+    obs_normalization=actor_cfg.obs_normalization,
+    distribution_cfg=dict(actor_cfg.distribution_cfg or {}),
+  ).to(block_env.device)
+  assert actor(obs).shape == (block_env.num_envs, num_actions)
+  onnx_policy = actor.as_onnx(verbose=False)
+  assert isinstance(onnx_policy, OnnxHistoryPolicy)
+  assert onnx_policy.input_size == HISTORY_WINDOW * ACTOR_DIM
+  assert num_actions == 20
