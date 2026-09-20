@@ -76,14 +76,18 @@ def hold_line(
   std: float,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Penalize drifting off the goal line, towards the shooter or back into the goal.
+  """Reward staying on the goal line, rather than drifting up the pitch or into goal.
 
   The goalie's depth is the positioning layer's decision, not the policy's; the policy
   holds the line it was placed on and moves sideways along it.
+
+  Bounded on purpose. As an unbounded ``(offset / std)^2`` penalty this grew without
+  limit while the robot toppled, so ending the episode paid better than standing up:
+  episode length collapsed to about 7 steps and stayed there.
   """
   asset: Entity = env.scene[asset_cfg.name]
   offset = asset.data.root_link_pos_w[:, 0] - env.scene.env_origins[:, 0]
-  return torch.square(offset / std)
+  return torch.exp(-torch.square(offset / std))
 
 
 def face_shooter(
@@ -91,14 +95,14 @@ def face_shooter(
   std: float,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Penalize turning away from the field.
+  """Reward facing the field.
 
   The command is expressed in the goalie's frame, so a policy that turns can shrink
   ``dy`` without moving. Holding the heading keeps the command honest and keeps the
-  camera pointed at the ball.
+  camera pointed at the ball. Bounded, for the reason given in ``hold_line``.
   """
   asset: Entity = env.scene[asset_cfg.name]
-  return torch.square(asset.data.heading_w / std)
+  return torch.exp(-torch.square(asset.data.heading_w / std))
 
 
 def posture(

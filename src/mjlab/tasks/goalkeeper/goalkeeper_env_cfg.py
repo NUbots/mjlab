@@ -279,15 +279,16 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=-30.0,
       params={"command_name": "shot"},
     ),
-    # Stay on the line, facing the field.
+    # Stay on the line, facing the field. Both are bounded rewards rather than
+    # penalties: unbounded ones grow as the robot topples, which pays it to fall.
     "hold_line": RewardTermCfg(
       func=mdp.hold_line,
-      weight=-1.0,
+      weight=1.0,
       params={"std": 0.3},
     ),
     "face_shooter": RewardTermCfg(
       func=mdp.face_shooter,
-      weight=-1.0,
+      weight=1.0,
       params={"std": 0.4},
     ),
     # Ready stance, and stillness when there is nothing to do.
@@ -318,7 +319,9 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
     # Keep it on its feet and the motion clean.
     "upright": RewardTermCfg(
       func=mdp.upright,
-      weight=1.0,
+      # Staying on its feet has to be worth more than the smoothness penalties cost,
+      # or the quickest way to stop paying them is to fall over.
+      weight=2.0,
       params={
         "std": math.sqrt(0.2),
         "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
