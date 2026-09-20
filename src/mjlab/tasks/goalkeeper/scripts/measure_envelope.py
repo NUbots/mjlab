@@ -17,6 +17,8 @@ the same numbers it was measured with.
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 from dataclasses import asdict
 from pathlib import Path
 
@@ -36,6 +38,14 @@ DY_EDGES = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.9, 1.2)
 """Bins of |dy|: how far sideways the ball crosses, in the goalie's frame."""
 TIME_EDGES = (0.0, 0.5, 0.8, 1.2, 2.0, 99.0)
 """Bins of time-to-arrival at the moment of the kick: how much warning there was."""
+
+
+def _sha256(path: Path) -> str:
+  digest = hashlib.sha256()
+  with path.open("rb") as f:
+    for chunk in iter(lambda: f.read(1 << 20), b""):
+      digest.update(chunk)
+  return digest.hexdigest()
 
 
 def _bin(value: float, edges: tuple[float, ...]) -> int:
@@ -125,6 +135,31 @@ def main(
     writer = csv.DictWriter(f, fieldnames=list(rows[0]))
     writer.writeheader()
     writer.writerows(rows)
+
+  # An envelope describes one policy. Recording what it was measured from lets
+  # planning::PlanSave refuse a mismatched pair rather than plan against numbers
+  # belonging to a policy the robot is not running.
+  shot_cfg = shot.cfg
+  sidecar = {
+    "task": TASK_ID,
+    "checkpoint": str(checkpoint),
+    "checkpoint_sha256": _sha256(checkpoint),
+    "shots": len(rows),
+    "blocked_overall": sum(r["blocked"] for r in rows) / len(rows),
+    "fell": sum(r["fell"] for r in rows),
+    "shot_ranges": {
+      "crossing": list(shot_cfg.crossing),
+      "speed": list(shot_cfg.speed),
+      "distance": list(shot_cfg.distance),
+    },
+    "dy_edges": list(DY_EDGES),
+    "time_edges": list(TIME_EDGES),
+  }
+  onnx_path = next(checkpoint.parent.glob("*.onnx"), None)
+  if onnx_path is not None:
+    sidecar["onnx"] = str(onnx_path)
+    sidecar["onnx_sha256"] = _sha256(onnx_path)
+  (destination.with_suffix(".json")).write_text(json.dumps(sidecar, indent=2) + "\n")
 
   print(f"{len(rows)} shots -> {destination}\n")
   overall = sum(r["blocked"] for r in rows) / len(rows)
