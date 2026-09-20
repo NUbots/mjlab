@@ -149,3 +149,34 @@ def foot_slip(
   in_contact = (sensor.data.found > 0).float()  # [B, N]
   foot_vel_xy = asset.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]  # [B, N, 2]
   return torch.sum(torch.square(torch.norm(foot_vel_xy, dim=-1)) * in_contact, dim=1)
+
+
+def close_on_crossing(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  reference_speed: float = 1.0,
+  deadband: float = 0.05,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward moving sideways towards where the ball will cross.
+
+  ``line_up`` pays for *being* on the ball's line, and as a Gaussian it is already
+  flat by 0.6 m: a goalie a metre off gets the same (zero) reward whether it steps
+  towards the ball or stands still, so nothing tells it to move. This pays for closing
+  the gap at any distance, which is the gradient that was missing. It is bounded, and
+  it stops at the deadband so a goalie already on the line is not paid to jitter.
+  """
+  shot = _shot(env, command_name)
+  asset: Entity = env.scene[asset_cfg.name]
+
+  heading = asset.data.heading_w
+  velocity_w = asset.data.root_link_lin_vel_w[:, :2]
+  lateral = (
+    -torch.sin(heading) * velocity_w[:, 0] + torch.cos(heading) * velocity_w[:, 1]
+  )
+
+  closing = lateral * torch.sign(shot.true_crossing)
+  worth_moving = (shot.true_crossing.abs() > deadband).float()
+  return (
+    (closing / reference_speed).clamp(-1.0, 1.0) * worth_moving * shot.on_target.float()
+  )

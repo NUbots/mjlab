@@ -272,6 +272,14 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=8.0,
       params={"command_name": "shot", "std": 0.25, "horizon": 1.0},
     ),
+    "close_on_crossing": RewardTermCfg(
+      # The gradient that gets it moving at all. line_up is flat past about 0.6 m, so
+      # without this a goalie a metre off the ball's line is paid the same for
+      # stepping towards it as for standing still.
+      func=mdp.close_on_crossing,
+      weight=2.0,
+      params={"command_name": "shot", "reference_speed": 1.0, "deadband": 0.05},
+    ),
     "blocked": RewardTermCfg(
       func=mdp.blocked,
       weight=100.0,
