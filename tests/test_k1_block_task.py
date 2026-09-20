@@ -8,6 +8,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.envs.mdp.actions import JointPositionAction
 from mjlab.rl.obs_history import HistoryActor, HistoryModelCfg, OnnxHistoryPolicy
 from mjlab.tasks.goalkeeper.config.booster_k1.env_cfgs import (
+  SHOT_STAGES,
   booster_k1_block_env_cfg,
 )
 from mjlab.tasks.goalkeeper.config.booster_k1.rl_cfg import (
@@ -195,3 +196,27 @@ def test_exports_the_shape_the_robot_loads(block_env: ManagerBasedRlEnv) -> None
   assert isinstance(onnx_policy, OnnxHistoryPolicy)
   assert onnx_policy.input_size == HISTORY_WINDOW * ACTOR_DIM
   assert num_actions == 20
+
+
+def test_shot_curriculum_only_widens() -> None:
+  """Stages must widen, and training must start inside the first one."""
+  steps = [stage["step"] for stage in SHOT_STAGES]
+  assert steps == sorted(steps) and steps[0] == 0
+  for previous, current in zip(SHOT_STAGES, SHOT_STAGES[1:], strict=False):
+    assert current["crossing"][1] >= previous["crossing"][1]
+    assert current["speed"][1] >= previous["speed"][1]
+
+  cfg = booster_k1_block_env_cfg()
+  shot = cfg.commands["shot"]
+  assert isinstance(shot, ShotCommandCfg)
+  assert shot.crossing == SHOT_STAGES[0]["crossing"]
+  assert "shot_envelope" in cfg.curriculum
+
+
+def test_play_faces_the_full_envelope() -> None:
+  """Measuring an envelope against the first curriculum stage would flatter it."""
+  cfg = booster_k1_block_env_cfg(play=True)
+  shot = cfg.commands["shot"]
+  assert isinstance(shot, ShotCommandCfg)
+  assert shot.crossing == SHOT_STAGES[-1]["crossing"]
+  assert "shot_envelope" not in cfg.curriculum

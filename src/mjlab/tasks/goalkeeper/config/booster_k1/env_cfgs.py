@@ -15,11 +15,13 @@ import copy
 from mjlab.asset_zoo.robots import K1_ACTION_SCALE, get_k1_robot_cfg
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.tasks.goalkeeper import mdp
 from mjlab.tasks.goalkeeper.goalkeeper_env_cfg import make_goalkeeper_env_cfg
-from mjlab.tasks.goalkeeper.mdp import ShotCommandCfg
+from mjlab.tasks.goalkeeper.mdp import ShotCommandCfg, ShotStage
 from mjlab.tasks.velocity.config.booster_k1.env_cfgs import (
   HISTORY_WINDOW,
   K1_POLICY_JOINT_REGEX,
@@ -30,6 +32,24 @@ _HEAD_ACTION_SCALE_KEYS = ("AAHead_yaw", "Head_pitch")
 
 K1_ARM_JOINT_REGEX = r"^A?(Left|Right)_(Shoulder_(Pitch|Roll)|Elbow_(Pitch|Yaw))$"
 """Arms only. v0 holds these in the ready stance rather than blocking with them."""
+
+
+_STEPS_PER_ITER = 24
+"""Env steps per PPO iteration; must match num_steps_per_env in rl_cfg."""
+
+SHOT_STAGES: list[ShotStage] = [
+  # Shots the goalie can block by leaning, so there is something to earn from the
+  # first iteration while it is still learning to stand.
+  {"step": 0, "crossing": (-0.25, 0.25), "speed": (1.5, 3.0)},
+  # Then shots that need a step.
+  {"step": 800 * _STEPS_PER_ITER, "crossing": (-0.45, 0.45), "speed": (1.5, 3.5)},
+  {"step": 1_500 * _STEPS_PER_ITER, "crossing": (-0.65, 0.65), "speed": (1.5, 4.0)},
+  # And finally the full envelope, including shots it cannot reach on its feet and
+  # should not fall over chasing.
+  {"step": 2_500 * _STEPS_PER_ITER, "crossing": (-0.8, 0.8), "speed": (1.5, 4.0)},
+]
+"""Shot envelope, widened in stages. Starting at the full width trains against a
+reward the policy cannot earn: it stands still and takes whatever hits it."""
 
 
 def _policy_cfg() -> SceneEntityCfg:
@@ -113,9 +133,14 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # it cannot, which it should at least not fall over chasing.
   shot = cfg.commands["shot"]
   assert isinstance(shot, ShotCommandCfg)
-  shot.crossing = (-0.8, 0.8)
-  shot.speed = (1.5, 4.0)
+  shot.crossing = SHOT_STAGES[0]["crossing"]
+  shot.speed = SHOT_STAGES[0]["speed"]
   shot.distance = (2.0, 4.5)
+
+  cfg.curriculum["shot_envelope"] = CurriculumTermCfg(
+    func=mdp.shot_envelope,
+    params={"command_name": "shot", "shot_stages": SHOT_STAGES},
+  )
 
   # Actor observation history, as in the velocity task: a 25-step window of the exact
   # actor observation vector, encoded by a TCN inside the model. This block must stay
@@ -134,6 +159,10 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   if play:
     cfg.episode_length_s = int(1e9)
+    # Play and envelope measurement face the full envelope, not the first stage.
+    cfg.curriculum.pop("shot_envelope", None)
+    shot.crossing = SHOT_STAGES[-1]["crossing"]
+    shot.speed = SHOT_STAGES[-1]["speed"]
     cfg.observations["actor"].enable_corruption = False
     cfg.observations["history"].enable_corruption = False
     cfg.events.pop("push_robot", None)
