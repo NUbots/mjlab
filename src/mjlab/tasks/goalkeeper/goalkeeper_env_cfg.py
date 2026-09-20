@@ -265,12 +265,18 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
   rewards = {
     # The task.
     "line_up": RewardTermCfg(
-      func=mdp.urgency_weighted_line_up,
+      func=mdp.approach_crossing,
       # The only term that pays for moving sideways, so it has to outweigh the comfort
       # of standing still. At weight 3 against the stance rewards the first policy
       # simply stood there and blocked whatever arrived at its body.
       weight=8.0,
-      params={"command_name": "shot", "std": 0.25, "horizon": 1.0},
+      params={
+        "command_name": "shot",
+        "reach": 0.25,
+        "sharpness": 3.0,
+        "horizon": 1.0,
+        "switch_time": 0.35,
+      },
     ),
     "close_on_crossing": RewardTermCfg(
       # The gradient that gets it moving at all. line_up is flat past about 0.6 m, so

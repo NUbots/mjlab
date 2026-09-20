@@ -69,6 +69,7 @@ class ShotCommand(CommandTerm):
     # the ball is on its way there. Rewards read these.
     self.true_crossing = zeros(self.num_envs)
     self.true_time_to_cross = zeros(self.num_envs)
+    self.ball_offset = zeros(self.num_envs)
     self.on_target = torch.zeros_like(self.kicked)
 
     # Whether the shot, left alone, would have gone in. Only those shots are a
@@ -345,6 +346,9 @@ class ShotCommand(CommandTerm):
     )
     true_dy, true_time, true_reaches = self._predict_crossing(ball_pos_r, ball_vel_r)
     self.true_crossing = torch.where(true_reaches, true_dy, self.true_crossing)
+    # Where the ball actually is, sideways, in the goalie's frame. Once it is nearly
+    # here, that is what the goalie has to be in front of, not a prediction.
+    self.ball_offset = ball_pos_r[:, 1]
     self.true_time_to_cross = torch.where(
       true_reaches, true_time, torch.full_like(true_time, self.cfg.max_time)
     )

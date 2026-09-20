@@ -29,34 +29,30 @@ def _shot(env: ManagerBasedRlEnv, command_name: str) -> ShotCommand:
   return term
 
 
-def line_up(
+def approach_crossing(
   env: ManagerBasedRlEnv,
   command_name: str,
-  std: float,
-) -> torch.Tensor:
-  """Reward standing where the ball will cross, while a shot is on its way.
-
-  This is the dense signal that teaches side-stepping: the crossing point is expressed
-  in the goalie's own frame, so driving it to zero means putting the body in the way.
-  """
-  shot = _shot(env, command_name)
-  aligned = torch.exp(-shot.true_crossing.square() / std**2)
-  return aligned * shot.on_target.float()
-
-
-def urgency_weighted_line_up(
-  env: ManagerBasedRlEnv,
-  command_name: str,
-  std: float,
+  reach: float = 0.25,
+  sharpness: float = 3.0,
   horizon: float = 1.0,
+  switch_time: float = 0.35,
 ) -> torch.Tensor:
-  """``line_up``, worth more the closer the ball is to arriving.
+  """Reward being where the ball will cross, worth more the closer it is to arriving.
 
-  Being in place early is worth little if the goalie drifts off the line again, so the
-  reward is concentrated in the last ``horizon`` seconds before the ball arrives.
+  Shaped as a soft step rather than a Gaussian: full value inside ``reach``, falling
+  off over a width of about ``1 / sharpness``, and still meaningfully sloped a metre
+  out. The Gaussian this replaces was flat past 0.6 m, so two thirds of the misses
+  (the ones that never got a foot within 20 cm of the ball) sat in a part of the
+  reward that could not tell moving towards the ball from standing still.
+
+  The target switches late: until ``switch_time`` before arrival it is the predicted
+  crossing point, and after that the ball's own position, because by then a prediction
+  is worth less than what is actually in front of the goalie.
   """
   shot = _shot(env, command_name)
-  aligned = torch.exp(-shot.true_crossing.square() / std**2)
+  late = shot.true_time_to_cross < switch_time
+  target = torch.where(late, shot.ball_offset, shot.true_crossing)
+  aligned = 1.0 - torch.sigmoid((target.abs() - reach) * sharpness)
   urgency = (1.0 - shot.true_time_to_cross / horizon).clamp(0.0, 1.0)
   return aligned * urgency * shot.on_target.float()
 
