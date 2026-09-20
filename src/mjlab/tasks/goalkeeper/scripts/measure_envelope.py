@@ -64,8 +64,8 @@ def main(
 ) -> None:
   env_cfg = load_env_cfg(TASK_ID, play=True)
   env_cfg.scene.num_envs = num_envs
-  # Episodes have to end, or a goalie that falls never gets reset and stops taking
-  # shots, which would quietly bias the envelope towards the shots it survived.
+  # Episodes have to end so a fallen goalie is reset and keeps taking shots. Shots cut
+  # short by that reset are counted as failures below, not dropped.
   env_cfg.episode_length_s = 30.0
   agent_cfg = load_rl_cfg(TASK_ID)
 
@@ -95,7 +95,7 @@ def main(
   for _ in range(steps):
     with torch.inference_mode():
       actions = policy(obs)
-    obs, _, _, _ = wrapped.step(actions)
+    obs, _, dones, _ = wrapped.step(actions)
 
     # A shot's axes are read once, just after the kick, before any contact bends it.
     just_kicked = shot.was_moving & ~was_moving
@@ -107,6 +107,23 @@ def main(
       ].norm(dim=-1)
       live[just_kicked] = True
     was_moving = shot.was_moving.clone()
+
+    # A shot cut short because the goalie fell is a shot it did not block. Dropping
+    # those would quietly score the envelope only over the shots it survived.
+    interrupted = (dones > 0) & live & ~shot.finished
+    if bool(interrupted.any()):
+      for i in interrupted.nonzero(as_tuple=False).flatten().tolist():
+        rows.append(
+          {
+            "dy": float(pending_dy[i]),
+            "time_to_arrival": float(pending_time[i]),
+            "speed": float(pending_speed[i]),
+            "blocked": 0.0,
+            "conceded": 0.0,
+            "fell": 1.0,
+          }
+        )
+      live[interrupted] = False
 
     resolved = shot.finished & ~was_finished & live
     if bool(resolved.any()):
