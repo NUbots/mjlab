@@ -118,7 +118,9 @@ def main(
             "dy": float(pending_dy[i]),
             "time_to_arrival": float(pending_time[i]),
             "speed": float(pending_speed[i]),
-            "blocked": 0.0,
+            "on_target": float(bool(shot.on_target_shot[i])),
+            "saved": 0.0,
+            "touched": float(bool(shot.touched[i])),
             "conceded": 0.0,
             "fell": 1.0,
           }
@@ -134,8 +136,10 @@ def main(
             "dy": float(pending_dy[i]),
             "time_to_arrival": float(pending_time[i]),
             "speed": float(pending_speed[i]),
-            "blocked": float(bool(shot.touched[i])),
-            "conceded": float(bool(shot.shots_conceded[i] > 0)),
+            "on_target": float(bool(shot.on_target_shot[i])),
+            "saved": float(bool(shot.saved_now[i])),
+            "touched": float(bool(shot.touched[i])),
+            "conceded": float(bool(shot.scored_now[i])),
             "fell": float(bool(fell[i])),
           }
         )
@@ -162,7 +166,13 @@ def main(
     "checkpoint": str(checkpoint),
     "checkpoint_sha256": _sha256(checkpoint),
     "shots": len(rows),
-    "blocked_overall": sum(r["blocked"] for r in rows) / len(rows),
+    "shots_on_target": len([r for r in rows if r["on_target"]]),
+    "save_rate": (
+      sum(r["saved"] for r in rows) / max(1, len([r for r in rows if r["on_target"]]))
+    ),
+    "touch_rate": (
+      sum(r["touched"] for r in rows) / max(1, len([r for r in rows if r["on_target"]]))
+    ),
     "fell": sum(r["fell"] for r in rows),
     "shot_ranges": {
       "crossing": list(shot_cfg.crossing),
@@ -178,11 +188,15 @@ def main(
     sidecar["onnx_sha256"] = _sha256(onnx_path)
   (destination.with_suffix(".json")).write_text(json.dumps(sidecar, indent=2) + "\n")
 
-  print(f"{len(rows)} shots -> {destination}\n")
-  overall = sum(r["blocked"] for r in rows) / len(rows)
-  print(f"Blocked overall: {overall:.0%}\n")
+  on_target = [r for r in rows if r["on_target"]]
+  print(f"{len(rows)} shots ({len(on_target)} of them on target) -> {destination}\n")
+  if on_target:
+    saved = sum(r["saved"] for r in on_target) / len(on_target)
+    touched = sum(r["touched"] for r in on_target) / len(on_target)
+    print(f"Saved: {saved:.0%} of the shots that were going in")
+    print(f"Touched: {touched:.0%} (a touch that goes in is still a goal)\n")
 
-  print("Block rate by |dy| (m) and time to arrival at the kick (s):")
+  print("Save rate on shots that were going in, by |dy| (m) and warning (s):")
   header = "  |dy|      " + "".join(
     f"{TIME_EDGES[j]:>5.1f}-{TIME_EDGES[j + 1]:<5.1f}"
     if TIME_EDGES[j + 1] < 90
@@ -195,14 +209,14 @@ def main(
     for j in range(len(TIME_EDGES) - 1):
       subset = [
         r
-        for r in rows
+        for r in on_target
         if _bin(abs(r["dy"]), DY_EDGES) == i
         and _bin(r["time_to_arrival"], TIME_EDGES) == j
       ]
       if len(subset) < 5:
         cells.append(f"{'-':>10}")
       else:
-        rate = sum(r["blocked"] for r in subset) / len(subset)
+        rate = sum(r["saved"] for r in subset) / len(subset)
         cells.append(f"{rate:>6.0%}({len(subset):3d})")
     print(f"  {DY_EDGES[i]:.1f}-{DY_EDGES[i + 1]:.1f}   " + "".join(cells))
 

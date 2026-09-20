@@ -53,6 +53,7 @@ def booster_k1_block_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     ),
     obs_groups={"actor": ("actor", "history"), "critic": ("critic",)},
     experiment_name="k1_block",
+    wandb_project="goalie",
     save_interval=500,
     num_steps_per_env=24,
     max_iterations=30_000,

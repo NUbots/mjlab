@@ -280,8 +280,16 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=2.0,
       params={"command_name": "shot", "reference_speed": 1.0, "deadband": 0.05},
     ),
-    "blocked": RewardTermCfg(
-      func=mdp.blocked,
+    "touched": RewardTermCfg(
+      # Getting a touch is progress and keeps the gradient that taught it to step,
+      # but it is not the job.
+      func=mdp.touched,
+      weight=20.0,
+      params={"command_name": "shot"},
+    ),
+    "saved": RewardTermCfg(
+      # The job: a shot that was going in, kept out.
+      func=mdp.saved,
       weight=100.0,
       params={"command_name": "shot"},
     ),

@@ -65,9 +65,14 @@ class ShotCommand(CommandTerm):
     self.true_time_to_cross = zeros(self.num_envs)
     self.on_target = torch.zeros_like(self.kicked)
 
+    # Whether the shot, left alone, would have gone in. Only those shots are a
+    # goalkeeping test, so they are the ones the save rate is measured over.
+    self.on_target_shot = torch.zeros_like(self.kicked)
+
     # Events for the sparse rewards, true for the single step they happen on.
-    self.blocked_now = torch.zeros_like(self.kicked)
-    self.conceded_now = torch.zeros_like(self.kicked)
+    self.touched_now = torch.zeros_like(self.kicked)
+    self.saved_now = torch.zeros_like(self.kicked)
+    self.scored_now = torch.zeros_like(self.kicked)
 
     # Simulated estimate state.
     self.est_pos = zeros(self.num_envs, 2)
@@ -89,12 +94,15 @@ class ShotCommand(CommandTerm):
     # Counted over the episode, so the metrics below are per-shot rates. "Did this
     # episode ever block" cannot tell one shot in four from four.
     self.shots_finished = zeros(self.num_envs)
-    self.shots_blocked = zeros(self.num_envs)
+    self.shots_on_target = zeros(self.num_envs)
+    self.shots_saved = zeros(self.num_envs)
+    self.shots_touched = zeros(self.num_envs)
     self.shots_conceded = zeros(self.num_envs)
 
-    self.metrics["block_rate"] = zeros(self.num_envs)
+    self.metrics["save_rate"] = zeros(self.num_envs)
     self.metrics["concede_rate"] = zeros(self.num_envs)
-    self.metrics["shots"] = zeros(self.num_envs)
+    self.metrics["touch_rate"] = zeros(self.num_envs)
+    self.metrics["shots_on_target"] = zeros(self.num_envs)
     self.metrics["command_dy_error"] = zeros(self.num_envs)
 
     self._pending_forward = False
@@ -129,11 +137,14 @@ class ShotCommand(CommandTerm):
     )
     return pos_r, vec_r
 
-  def _predict_crossing(self, pos_r: torch.Tensor, vel_r: torch.Tensor):
-    """Where and when the ball crosses the goalie's lateral line (x = 0 in {r}).
+  def _predict_crossing(
+    self, pos_r: torch.Tensor, vel_r: torch.Tensor, plane_x: float = 0.0
+  ):
+    """Where and when the ball crosses a plane ahead of the goalie (x = plane_x).
 
-    Returns ``(dy, time, reaches)``. The ball rolls straight and slows at a constant
-    rate, so the crossing point needs no deceleration term, but the time does.
+    ``plane_x`` is 0 for the goalie's own line and negative for the goal line behind
+    it. Returns ``(dy, time, reaches)``. The ball rolls straight and slows at a
+    constant rate, so the crossing point needs no deceleration term, but the time does.
     """
     speed = torch.linalg.norm(vel_r, dim=-1)
     safe_speed = speed.clamp(min=1e-6)
@@ -142,8 +153,8 @@ class ShotCommand(CommandTerm):
     # Distance along the ball's path to the goalie's line. Positive only when the ball
     # is in front and closing.
     closing = -direction[:, 0]
-    distance = pos_r[:, 0] / closing.clamp(min=1e-6)
-    approaching = (closing > 1e-3) & (pos_r[:, 0] > 0.0)
+    distance = (pos_r[:, 0] - plane_x) / closing.clamp(min=1e-6)
+    approaching = (closing > 1e-3) & (pos_r[:, 0] > plane_x)
 
     dy = pos_r[:, 1] + direction[:, 1] * distance
 
@@ -202,8 +213,10 @@ class ShotCommand(CommandTerm):
     self.was_moving[env_ids] = False
     self.touched[env_ids] = False
     self.finished[env_ids] = False
-    self.blocked_now[env_ids] = False
-    self.conceded_now[env_ids] = False
+    self.on_target_shot[env_ids] = False
+    self.touched_now[env_ids] = False
+    self.saved_now[env_ids] = False
+    self.scored_now[env_ids] = False
 
     # The estimate starts from the resting ball, which is what the real filter would
     # have converged on while it sat there.
@@ -218,7 +231,9 @@ class ShotCommand(CommandTerm):
     extras = super().reset(env_ids)
     if isinstance(env_ids, torch.Tensor):
       self.shots_finished[env_ids] = 0.0
-      self.shots_blocked[env_ids] = 0.0
+      self.shots_on_target[env_ids] = 0.0
+      self.shots_saved[env_ids] = 0.0
+      self.shots_touched[env_ids] = 0.0
       self.shots_conceded[env_ids] = 0.0
     self._pending_forward = False
     return extras
@@ -330,24 +345,46 @@ class ShotCommand(CommandTerm):
     self.on_target = self.kicked & ~self.finished & true_reaches
 
     contact = self._contact_with_robot()
-    newly_touched = contact & self.kicked & ~self.touched
-    self.blocked_now = newly_touched
+    newly_touched = contact & self.kicked & ~self.finished & ~self.touched
+    self.touched_now = newly_touched
     self.touched |= newly_touched
 
-    # The shot is over once the ball is behind the goalie's line or has stopped.
     ball_speed = torch.linalg.norm(ball_vel_r, dim=-1)
-    self.was_moving |= self.kicked & (ball_speed > self.cfg.min_shot_speed)
-    past = ball_pos_r[:, 0] < -self.cfg.past_line_margin
+    moving_now = self.kicked & (ball_speed > self.cfg.min_shot_speed)
+
+    # As the ball starts rolling, work out whether it was ever going in. A shot that
+    # would have missed anyway is not a save, however it ends.
+    starting = moving_now & ~self.was_moving
+    if bool(starting.any()):
+      goal_dy, _, reaches_goal = self._predict_crossing(
+        ball_pos_r, ball_vel_r, plane_x=-self.cfg.goal_line_depth
+      )
+      would_score = reaches_goal & (goal_dy.abs() < self.cfg.goal_half_width)
+      self.on_target_shot = torch.where(starting, would_score, self.on_target_shot)
+    self.was_moving |= moving_now
+
+    # A shot is over when the ball reaches the goal line, stops, or is on its way back
+    # out. Stopping 0.1 m behind the goalie is not the end of it: a ball the goalie
+    # got a toe to can still roll in, and that is a goal, not a save.
+    at_goal_line = ball_pos_r[:, 0] < -self.cfg.goal_line_depth
     stopped = self.was_moving & (ball_speed < self.cfg.min_shot_speed)
-    over = self.kicked & ~self.finished & (past | stopped)
-    self.conceded_now = (
-      over & past & ~self.touched & (ball_pos_r[:, 1].abs() < self.cfg.goal_half_width)
+    going_away = (
+      self.was_moving
+      & (ball_vel_r[:, 0] > self.cfg.min_shot_speed)
+      & (ball_pos_r[:, 0] > 0.0)
     )
+    over = self.kicked & ~self.finished & (at_goal_line | stopped | going_away)
+
+    in_the_goal = at_goal_line & (ball_pos_r[:, 1].abs() < self.cfg.goal_half_width)
+    self.scored_now = over & in_the_goal
+    self.saved_now = over & self.on_target_shot & ~in_the_goal
     self.finished |= over
 
     self.shots_finished += over.float()
-    self.shots_blocked += (over & self.touched).float()
-    self.shots_conceded += self.conceded_now.float()
+    self.shots_on_target += (over & self.on_target_shot).float()
+    self.shots_saved += self.saved_now.float()
+    self.shots_touched += (over & self.touched).float()
+    self.shots_conceded += self.scored_now.float()
 
   def _contact_with_robot(self) -> torch.Tensor:
     sensor: ContactSensor = self._env.scene[self.cfg.contact_sensor_name]
@@ -355,11 +392,14 @@ class ShotCommand(CommandTerm):
     return (sensor.data.found > 0).reshape(self.num_envs, -1).any(dim=-1)
 
   def _update_metrics(self) -> None:
-    self.metrics["block_rate"] = self.shots_blocked / self.shots_finished.clamp(min=1.0)
-    self.metrics["concede_rate"] = self.shots_conceded / self.shots_finished.clamp(
-      min=1.0
-    )
-    self.metrics["shots"] = self.shots_finished
+    # Rates are over shots that were going in: those are the ones a goalie is judged
+    # on. touch_rate is a diagnostic, not a score, because a touch that deflects the
+    # ball into the goal is still a goal.
+    on_target = self.shots_on_target.clamp(min=1.0)
+    self.metrics["save_rate"] = self.shots_saved / on_target
+    self.metrics["concede_rate"] = self.shots_conceded / on_target
+    self.metrics["touch_rate"] = self.shots_touched / self.shots_finished.clamp(min=1.0)
+    self.metrics["shots_on_target"] = self.shots_on_target
     active = self.command_buf[:, 0] > 0.5
     self.metrics["command_dy_error"] = torch.where(
       active,
@@ -406,8 +446,11 @@ class ShotCommandCfg(CommandTermCfg):
 
   rolling_deceleration: float = 0.5
   """Rolling resistance (m/s^2), used to predict the crossing time."""
-  goal_half_width: float = 1.3
-  past_line_margin: float = 0.1
+  goal_half_width: float = 1.25
+  """Half the goal mouth (m). HSL Middle goals are 2.4-2.6 m wide."""
+  goal_line_depth: float = 0.2
+  """How far behind the goalie the goal line is (m). PLAN.md has the goalie standing
+  0.2 m off its line, so a ball is only in once it has passed that."""
   min_shot_speed: float = 0.3
 
   # Simulated ball estimate, from the NUSim validation of the real chain.

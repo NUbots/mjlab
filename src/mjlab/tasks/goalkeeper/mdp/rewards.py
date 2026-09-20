@@ -61,14 +61,27 @@ def urgency_weighted_line_up(
   return aligned * urgency * shot.on_target.float()
 
 
-def blocked(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-  """One-off reward the step the ball first touches the robot."""
-  return _shot(env, command_name).blocked_now.float()
+def touched(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+  """One-off reward the step the ball first touches the robot.
+
+  Getting in the way is progress, but it is not the job: a touch that deflects the
+  ball into the goal is still a goal, so this is worth much less than a save.
+  """
+  return _shot(env, command_name).touched_now.float()
+
+
+def saved(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+  """One-off reward for keeping out a shot that was going in.
+
+  Paid when a shot that would have crossed the goal line inside the posts ends up not
+  doing so: stopped, deflected wide, or sent back out.
+  """
+  return _shot(env, command_name).saved_now.float()
 
 
 def conceded(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-  """One-off penalty the step a shot passes the goalie's line untouched."""
-  return _shot(env, command_name).conceded_now.float()
+  """One-off penalty the step a shot crosses the goal line inside the posts."""
+  return _shot(env, command_name).scored_now.float()
 
 
 def hold_line(
