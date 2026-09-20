@@ -86,8 +86,15 @@ class ShotCommand(CommandTerm):
     self.history_vel = zeros(self.num_envs, depth, 2)
     self.history_index = 0
 
-    self.metrics["blocked"] = zeros(self.num_envs)
-    self.metrics["conceded"] = zeros(self.num_envs)
+    # Counted over the episode, so the metrics below are per-shot rates. "Did this
+    # episode ever block" cannot tell one shot in four from four.
+    self.shots_finished = zeros(self.num_envs)
+    self.shots_blocked = zeros(self.num_envs)
+    self.shots_conceded = zeros(self.num_envs)
+
+    self.metrics["block_rate"] = zeros(self.num_envs)
+    self.metrics["concede_rate"] = zeros(self.num_envs)
+    self.metrics["shots"] = zeros(self.num_envs)
     self.metrics["command_dy_error"] = zeros(self.num_envs)
 
     self._pending_forward = False
@@ -206,7 +213,13 @@ class ShotCommand(CommandTerm):
     self.history_vel[env_ids] = 0.0
 
   def reset(self, env_ids: torch.Tensor | slice | None) -> dict[str, float]:
+    # super().reset() logs the metrics and zeroes them, so the counters they are built
+    # from have to be cleared here too, after it has read them.
     extras = super().reset(env_ids)
+    if isinstance(env_ids, torch.Tensor):
+      self.shots_finished[env_ids] = 0.0
+      self.shots_blocked[env_ids] = 0.0
+      self.shots_conceded[env_ids] = 0.0
     self._pending_forward = False
     return extras
 
@@ -332,22 +345,21 @@ class ShotCommand(CommandTerm):
     )
     self.finished |= over
 
+    self.shots_finished += over.float()
+    self.shots_blocked += (over & self.touched).float()
+    self.shots_conceded += self.conceded_now.float()
+
   def _contact_with_robot(self) -> torch.Tensor:
     sensor: ContactSensor = self._env.scene[self.cfg.contact_sensor_name]
     assert sensor.data.found is not None
     return (sensor.data.found > 0).reshape(self.num_envs, -1).any(dim=-1)
 
   def _update_metrics(self) -> None:
-    self.metrics["blocked"] = torch.where(
-      self.blocked_now,
-      torch.ones_like(self.metrics["blocked"]),
-      self.metrics["blocked"],
+    self.metrics["block_rate"] = self.shots_blocked / self.shots_finished.clamp(min=1.0)
+    self.metrics["concede_rate"] = self.shots_conceded / self.shots_finished.clamp(
+      min=1.0
     )
-    self.metrics["conceded"] = torch.where(
-      self.conceded_now,
-      torch.ones_like(self.metrics["conceded"]),
-      self.metrics["conceded"],
-    )
+    self.metrics["shots"] = self.shots_finished
     active = self.command_buf[:, 0] > 0.5
     self.metrics["command_dy_error"] = torch.where(
       active,
