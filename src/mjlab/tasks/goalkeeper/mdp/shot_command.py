@@ -16,9 +16,11 @@ for actually blocking it.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict
 
+import numpy as np
 import torch
 
 from mjlab.entity import Entity
@@ -533,11 +535,14 @@ class ShotCommand(CommandTerm):
       heading = float(self.robot.data.heading_w[batch])
       root = self.robot.data.root_link_pos_w[batch].cpu().numpy()
       dy = float(self.command_buf[batch, 1])
-      # The commanded crossing point, on the goalie's lateral line.
-      point = (
-        root[0] - dy * float(torch.sin(torch.tensor(heading))),
-        root[1] + dy * float(torch.cos(torch.tensor(heading))),
-        self.cfg.ball_radius,
+      # The commanded crossing point, on the goalie's lateral line. A numpy array, not
+      # a tuple: the viewer copies whatever it is handed.
+      point = np.array(
+        [
+          root[0] - dy * math.sin(heading),
+          root[1] + dy * math.cos(heading),
+          self.cfg.ball_radius,
+        ]
       )
       visualizer.add_sphere(
         center=point,
