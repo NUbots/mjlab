@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import torch
 
 from mjlab.entity import Entity
+from mjlab.envs.mdp.rewards import action_acc_l2, action_rate_l2
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
 from mjlab.tasks.goalkeeper.mdp.shot_command import ShotCommand
@@ -119,6 +120,47 @@ def meet_the_ball(
   forward = torch.cos(heading) * foot_vel[:, 0] + torch.sin(heading) * foot_vel[:, 1]
   arriving = shot.on_target & (shot.true_time_to_cross < window)
   return (forward / reference_speed).clamp(0.0, 1.0) * arriving.float()
+
+
+def striking(shot: ShotCommand, window: float) -> torch.Tensor:
+  """Whether the goalie is in the middle of a strike at the ball.
+
+  From ``window`` seconds before an on-target ball arrives, and through the
+  follow-through after a save.
+  """
+  arriving = shot.on_target & (shot.true_time_to_cross < window)
+  return arriving | (shot.since_save < shot.cfg.clear_window)
+
+
+def action_rate_l2_outside_strike(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  window: float = 0.3,
+  strike_scale: float = 0.1,
+) -> torch.Tensor:
+  """``action_rate_l2``, mostly waived while the goalie strikes at the ball.
+
+  A clearance needs a fast leg swing, and the smoothness penalties charge for exactly
+  that: in run 14 they were the largest cost the keeper paid, about sixty times what
+  its clearances earned. They still hold everywhere else, so the keeper is smooth
+  when it stands, shuffles and recovers, and only the strike itself is let off.
+  """
+  scale = torch.where(striking(_shot(env, command_name), window), strike_scale, 1.0)
+  return action_rate_l2(env) * scale
+
+
+def action_acc_l2_outside_strike(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  window: float = 0.3,
+  strike_scale: float = 0.1,
+) -> torch.Tensor:
+  """``action_acc_l2``, mostly waived while the goalie strikes at the ball.
+
+  See ``action_rate_l2_outside_strike``.
+  """
+  scale = torch.where(striking(_shot(env, command_name), window), strike_scale, 1.0)
+  return action_acc_l2(env) * scale
 
 
 def conceded(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:

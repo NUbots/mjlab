@@ -384,8 +384,17 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-30.0),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
-    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.2),
-    "action_acc_l2": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.2),
+    # Smooth everywhere but the strike, which has to be quick to clear the ball.
+    "action_rate_l2": RewardTermCfg(
+      func=mdp.action_rate_l2_outside_strike,
+      weight=-0.2,
+      params={"command_name": "shot", "window": 0.3, "strike_scale": 0.1},
+    ),
+    "action_acc_l2": RewardTermCfg(
+      func=mdp.action_acc_l2_outside_strike,
+      weight=-0.2,
+      params={"command_name": "shot", "window": 0.3, "strike_scale": 0.1},
+    ),
     "foot_slip": RewardTermCfg(
       func=mdp.foot_slip,
       weight=-1.0,
