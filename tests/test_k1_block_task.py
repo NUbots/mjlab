@@ -305,3 +305,24 @@ def test_clearance_is_only_paid_on_a_save(block_env: ManagerBasedRlEnv) -> None:
   reward = mdp.cleared(block_env, "shot", reference=3.0)
   assert torch.all(reward[~shot.saved_now] == 0.0)
   assert torch.all(reward >= 0.0) and torch.all(reward <= 1.0)
+
+
+def test_clearing_is_paid_only_inside_the_window(block_env: ManagerBasedRlEnv) -> None:
+  """The dense clearance reward is open only just after a save."""
+  shot = block_env.command_manager.get_term("shot")
+  assert isinstance(shot, ShotCommand)
+  shot.clearing_time_left.zero_()
+  assert torch.all(mdp.clearing(block_env, "shot", reference=3.0) == 0.0)
+
+  shot.clearing_time_left.fill_(0.5)
+  shot.projected_clearance.fill_(6.0)
+  assert torch.all(mdp.clearing(block_env, "shot", reference=3.0) == 1.0)
+
+
+def test_dense_clearing_cannot_outweigh_a_save() -> None:
+  """Across its whole window it must still be worth less than keeping the ball out."""
+  cfg = booster_k1_block_env_cfg()
+  shot = cfg.commands["shot"]
+  assert isinstance(shot, ShotCommandCfg)
+  window_steps = shot.clearance_window / (cfg.sim.mujoco.timestep * cfg.decimation)
+  assert cfg.rewards["clearing"].weight * window_steps < cfg.rewards["saved"].weight

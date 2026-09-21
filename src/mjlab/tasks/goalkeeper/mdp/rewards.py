@@ -256,3 +256,23 @@ def cleared(
   """
   shot = _shot(env, command_name)
   return (shot.clearance / reference).clamp(0.0, 1.0) * shot.saved_now.float()
+
+
+def clearing(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  reference: float = 3.0,
+) -> torch.Tensor:
+  """Reward, over the moments after a save, for where the ball is rolling.
+
+  The sparse version of this paid once, at the instant of the save, and was worth
+  about 1% of an episode's return: the keeper never noticed it and cleared no better
+  than one trained without it. This pays across the window after the save instead, the
+  same densifying that made the post-contact ``defused`` term work.
+
+  It cannot change what the keeper already did to the ball, and that is fine: the
+  point is to make the consequence of the contact visible enough to learn from.
+  """
+  shot = _shot(env, command_name)
+  live = shot.clearing_time_left > 0.0
+  return (shot.projected_clearance / reference).clamp(0.0, 1.0) * live.float()

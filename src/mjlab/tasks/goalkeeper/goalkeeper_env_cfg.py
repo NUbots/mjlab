@@ -306,6 +306,13 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=100.0,
       params={"command_name": "shot"},
     ),
+    "clearing": RewardTermCfg(
+      # Paid over the window after a save, so the keeper can actually see it. Sized
+      # like the other dense outcome term (defused) rather than like a bonus.
+      func=mdp.clearing,
+      weight=3.0,
+      params={"command_name": "shot", "reference": 3.0},
+    ),
     "cleared": RewardTermCfg(
       # A bonus on a save, never a reason to risk one: an order below the save itself.
       func=mdp.cleared,

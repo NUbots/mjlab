@@ -98,6 +98,12 @@ class ShotCommand(CommandTerm):
     # Stopping a shot dead at your own feet is a save and a corner waiting to happen;
     # this is what pays for getting rid of it.
     self.clearance = zeros(self.num_envs)
+    # Where the ball is rolling to, updated every step rather than only when a shot
+    # resolves, and how long the clearance reward stays open after a save. The shot
+    # itself is over the moment the ball heads away, which is far too short a window
+    # to pay a dense reward over.
+    self.projected_clearance = zeros(self.num_envs)
+    self.clearing_time_left = zeros(self.num_envs)
 
     # Events for the sparse rewards, true for the single step they happen on.
     self.touched_now = torch.zeros_like(self.kicked)
@@ -282,6 +288,7 @@ class ShotCommand(CommandTerm):
     self.touched[env_ids] = False
     self.finished[env_ids] = False
     self.on_target_shot[env_ids] = False
+    self.clearing_time_left[env_ids] = 0.0
     self.touched_now[env_ids] = False
     self.saved_now[env_ids] = False
     self.scored_now[env_ids] = False
@@ -481,10 +488,17 @@ class ShotCommand(CommandTerm):
     goal_centre = torch.tensor(
       [-self.cfg.goal_line_depth, 0.0], device=self.device
     ).expand_as(resting)
+    self.projected_clearance = torch.linalg.norm(resting - goal_centre, dim=-1)
     self.clearance = torch.where(
+      self.saved_now, self.projected_clearance, torch.zeros_like(self.clearance)
+    )
+
+    # A save opens the clearance window, during which the ball is still rolling and
+    # its resting place is still being paid for.
+    self.clearing_time_left = torch.where(
       self.saved_now,
-      torch.linalg.norm(resting - goal_centre, dim=-1),
-      torch.zeros_like(self.clearance),
+      torch.full_like(self.clearing_time_left, self.cfg.clearance_window),
+      (self.clearing_time_left - dt).clamp(min=0.0),
     )
     self.finished |= over
 
@@ -581,6 +595,9 @@ class ShotCommandCfg(CommandTermCfg):
   starts. PLAN.md has the goalie standing 0.2 m off its line. The goal is fixed there,
   not carried around with the robot."""
   min_shot_speed: float = 0.3
+  clearance_window: float = 0.6
+  """Seconds a save keeps earning for where the ball is rolling. The shot is over the
+  instant the ball heads away, which is one step: too short to learn from."""
   defuse_margin: float = 0.5
   """How far outside the post a deflected ball has to be headed (m) to count as fully
   out of danger."""
