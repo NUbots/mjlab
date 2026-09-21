@@ -92,6 +92,11 @@ class ShotCommand(CommandTerm):
     # goalkeeping test, so they are the ones the save rate is measured over.
     self.on_target_shot = torch.zeros_like(self.kicked)
 
+    # How far from goal the ball will come to rest, measured the step a shot is saved.
+    # Stopping a shot dead at your own feet is a save and a corner waiting to happen;
+    # this is what pays for getting rid of it.
+    self.clearance = zeros(self.num_envs)
+
     # Events for the sparse rewards, true for the single step they happen on.
     self.touched_now = torch.zeros_like(self.kicked)
     self.saved_now = torch.zeros_like(self.kicked)
@@ -126,6 +131,7 @@ class ShotCommand(CommandTerm):
     self.metrics["concede_rate"] = zeros(self.num_envs)
     self.metrics["touch_rate"] = zeros(self.num_envs)
     self.metrics["shots_on_target"] = zeros(self.num_envs)
+    self.metrics["clearance"] = zeros(self.num_envs)
     self.metrics["command_dy_error"] = zeros(self.num_envs)
 
     # Curriculum: which drill the keeper is on, and how it is doing on it. The save
@@ -462,6 +468,22 @@ class ShotCommand(CommandTerm):
     in_the_goal = at_goal_line & (ball_pos_o[:, 1].abs() < self.cfg.goal_half_width)
     self.scored_now = over & in_the_goal
     self.saved_now = over & self.on_target_shot & ~in_the_goal
+
+    # Where the ball will end up, rolling on from wherever the save left it. Taking
+    # the resting point rather than the speed means a ball hit hard at the goalpost
+    # earns nothing, while one sent into space earns the lot.
+    speed_o = torch.linalg.norm(ball_vel_o, dim=-1)
+    roll_on = speed_o.square() / (2.0 * max(self.cfg.rolling_deceleration, 1e-6))
+    direction = ball_vel_o / speed_o.clamp(min=1e-6).unsqueeze(-1)
+    resting = ball_pos_o + direction * roll_on.unsqueeze(-1)
+    goal_centre = torch.tensor(
+      [-self.cfg.goal_line_depth, 0.0], device=self.device
+    ).expand_as(resting)
+    self.clearance = torch.where(
+      self.saved_now,
+      torch.linalg.norm(resting - goal_centre, dim=-1),
+      torch.zeros_like(self.clearance),
+    )
     self.finished |= over
 
     resolved_on_target = over & self.on_target_shot
@@ -494,6 +516,9 @@ class ShotCommand(CommandTerm):
     self.metrics["concede_rate"] = self.shots_conceded / on_target
     self.metrics["touch_rate"] = self.shots_touched / self.shots_finished.clamp(min=1.0)
     self.metrics["shots_on_target"] = self.shots_on_target
+    self.metrics["clearance"] = torch.where(
+      self.saved_now, self.clearance, self.metrics["clearance"]
+    )
     active = self.command_buf[:, 0] > 0.5
     self.metrics["command_dy_error"] = torch.where(
       active,

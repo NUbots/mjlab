@@ -122,6 +122,7 @@ def main(
             "saved": 0.0,
             "touched": float(bool(shot.touched[i])),
             "conceded": 0.0,
+            "clearance": 0.0,
             "fell": 1.0,
           }
         )
@@ -140,6 +141,7 @@ def main(
             "saved": float(bool(shot.saved_now[i])),
             "touched": float(bool(shot.touched[i])),
             "conceded": float(bool(shot.scored_now[i])),
+            "clearance": float(shot.clearance[i]),
             "fell": float(bool(fell[i])),
           }
         )
@@ -189,7 +191,15 @@ def main(
     saved = sum(r["saved"] for r in on_target) / len(on_target)
     touched = sum(r["touched"] for r in on_target) / len(on_target)
     print(f"Saved: {saved:.0%} of the shots that were going in")
-    print(f"Touched: {touched:.0%} (a touch that goes in is still a goal)\n")
+    print(f"Touched: {touched:.0%} (a touch that goes in is still a goal)")
+    saves = [r for r in on_target if r["saved"]]
+    if saves:
+      distances = sorted(r["clearance"] for r in saves)
+      close = sum(1 for d in distances if d < 1.0) / len(distances)
+      print(
+        f"Clearance: median {distances[len(distances) // 2]:.2f} m from goal, "
+        f"{close:.0%} of saves left within 1 m of it\n"
+      )
 
   print("Save rate on shots that were going in, by |dy| (m) and warning (s):")
   header = "  |dy|      " + "".join(
