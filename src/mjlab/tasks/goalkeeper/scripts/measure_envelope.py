@@ -94,11 +94,15 @@ def main(
   save_row = torch.full((num_envs,), -1, dtype=torch.long)
 
   rows: list[dict[str, float]] = []
+  # Every fall, not only those that cut a shot short: a keeper that clears the ball
+  # and lands on the floor after it has resolved its shot before it falls.
+  total_falls = 0
   obs = wrapped.get_observations()
   for _ in range(steps):
     with torch.inference_mode():
       actions = policy(obs)
     obs, _, dones, _ = wrapped.step(actions)
+    total_falls += int(env.termination_manager.terminated.sum())
 
     # A shot's axes are read once, just after the kick, before any contact bends it.
     just_kicked = shot.was_moving & ~was_moving
@@ -160,6 +164,7 @@ def main(
         rows[int(save_row[i])]["rest_x"] = float(shot.best_rest[i])
         save_row[i] = -1
 
+  play_minutes = num_envs * steps * env.step_dt / 60.0
   env.close()
 
   if not rows:
@@ -187,6 +192,7 @@ def main(
       sum(r["touched"] for r in rows) / max(1, len([r for r in rows if r["on_target"]]))
     ),
     "fell": sum(r["fell"] for r in rows),
+    "falls_per_minute": total_falls / play_minutes,
     "shot_level": shot.levels[shot.level],
     "dy_edges": list(DY_EDGES),
     "time_edges": list(TIME_EDGES),
@@ -242,6 +248,9 @@ def main(
 
   falls = sum(r["fell"] for r in rows)
   print(f"\nShots during which the goalie fell: {falls:.0f} of {len(rows)}")
+  print(
+    f"Falls per minute of play, after the shot too: {sidecar['falls_per_minute']:.2f}"
+  )
 
 
 if __name__ == "__main__":
