@@ -290,3 +290,18 @@ def test_leaning_is_free_but_toppling_is_not() -> None:
     "a keeper paid full value right up to the angle it is terminated at has no "
     "gradient left to catch itself"
   )
+
+
+def test_clearing_never_outranks_saving() -> None:
+  """Getting rid of the ball is a bonus on a save, not a reason to gamble on one."""
+  cfg = booster_k1_block_env_cfg()
+  assert cfg.rewards["cleared"].weight < cfg.rewards["saved"].weight / 4.0
+  assert cfg.rewards["cleared"].weight < abs(cfg.rewards["conceded"].weight) / 4.0
+
+
+def test_clearance_is_only_paid_on_a_save(block_env: ManagerBasedRlEnv) -> None:
+  shot = block_env.command_manager.get_term("shot")
+  assert isinstance(shot, ShotCommand)
+  reward = mdp.cleared(block_env, "shot", reference=3.0)
+  assert torch.all(reward[~shot.saved_now] == 0.0)
+  assert torch.all(reward >= 0.0) and torch.all(reward <= 1.0)

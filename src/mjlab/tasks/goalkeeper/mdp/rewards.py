@@ -237,3 +237,22 @@ def upright_with_dead_zone(
   tilt = torch.linalg.norm(projected_gravity[:, :2], dim=-1)
   excess = (tilt - math.sin(math.radians(dead_zone_deg))).clamp(min=0.0)
   return torch.exp(-excess.square() / std**2)
+
+
+def cleared(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  reference: float = 3.0,
+) -> torch.Tensor:
+  """Reward, on a save, for how far from goal the ball will finish.
+
+  Smothering a shot leaves the ball at the keeper's feet, which is a save and then an
+  immediate second shot. Getting rid of it is the rest of the job. Paid on the resting
+  place the ball is rolling towards rather than on how hard it was struck, so hammering
+  it into a post earns nothing and putting it into space earns the lot.
+
+  Deliberately worth far less than the save itself: clearing is a bonus on top of
+  keeping the ball out, never a reason to gamble on keeping it out.
+  """
+  shot = _shot(env, command_name)
+  return (shot.clearance / reference).clamp(0.0, 1.0) * shot.saved_now.float()
