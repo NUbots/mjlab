@@ -123,6 +123,7 @@ def main(
             "touched": float(bool(shot.touched[i])),
             "conceded": 0.0,
             "fell": 1.0,
+            "rest_x": 0.0,
           }
         )
       live[interrupted] = False
@@ -141,6 +142,9 @@ def main(
             "touched": float(bool(shot.touched[i])),
             "conceded": float(bool(shot.scored_now[i])),
             "fell": float(bool(fell[i])),
+            # Where the ball will stop, in metres up the field from the goalie's
+            # start: how far a save cleared it.
+            "rest_x": float(shot.rest_x[i]),
           }
         )
       live[resolved] = False
@@ -189,7 +193,18 @@ def main(
     saved = sum(r["saved"] for r in on_target) / len(on_target)
     touched = sum(r["touched"] for r in on_target) / len(on_target)
     print(f"Saved: {saved:.0%} of the shots that were going in")
-    print(f"Touched: {touched:.0%} (a touch that goes in is still a goal)\n")
+    print(f"Touched: {touched:.0%} (a touch that goes in is still a goal)")
+    saves = [r for r in on_target if r["saved"]]
+    cleared = sum(r["rest_x"] > 1.0 for r in saves) / len(on_target)
+    print(f"Cleared: {cleared:.0%} saved and sent more than 1 m up the field")
+    if saves:
+      rests = sorted(r["rest_x"] for r in saves)
+      mean_rest = sum(rests) / len(rests)
+      median_rest = rests[len(rests) // 2]
+      print(
+        f"Saved balls come to rest {mean_rest:.2f} m up the field on average "
+        f"(median {median_rest:.2f} m)\n"
+      )
 
   print("Save rate on shots that were going in, by |dy| (m) and warning (s):")
   header = "  |dy|      " + "".join(
