@@ -85,7 +85,17 @@ class ShotCommand(CommandTerm):
     # goalie's start (the goal is behind, at negative x). A save only keeps the ball
     # out for now; clearing it upfield is what stops it coming straight back.
     self.rest_x = zeros(self.num_envs)
+    # A clearance is judged over a short follow-through after the save rather than on
+    # the step it is decided: that step is the first on which the ball is rolling back
+    # out, usually still on the foot that is striking it. best_rest is the furthest
+    # rest point reached since the save, and cleared_now the part of it gained this
+    # step, so the reward summed over the follow-through is the best clearance.
+    self.since_save = torch.full((self.num_envs,), float("inf"), device=self.device)
+    self.best_rest = zeros(self.num_envs)
     self.cleared_now = zeros(self.num_envs)
+    self.clear_judged_now = torch.zeros(
+      self.num_envs, dtype=torch.bool, device=self.device
+    )
 
     # True crossing of the goalie's lateral line, in the goalie's frame, and whether
     # the ball is on its way there. Rewards read these.
@@ -128,6 +138,7 @@ class ShotCommand(CommandTerm):
     self.shots_touched = zeros(self.num_envs)
     self.shots_conceded = zeros(self.num_envs)
     self.shots_cleared = zeros(self.num_envs)
+    self.shots_judged = zeros(self.num_envs)
     self.clearance_total = zeros(self.num_envs)
 
     self.metrics["save_rate"] = zeros(self.num_envs)
@@ -287,7 +298,10 @@ class ShotCommand(CommandTerm):
     self.touched_now[env_ids] = False
     self.saved_now[env_ids] = False
     self.scored_now[env_ids] = False
+    self.since_save[env_ids] = float("inf")
+    self.best_rest[env_ids] = 0.0
     self.cleared_now[env_ids] = 0.0
+    self.clear_judged_now[env_ids] = False
 
     # The estimate starts from the resting ball, which is what the real filter would
     # have converged on while it sat there.
@@ -307,6 +321,7 @@ class ShotCommand(CommandTerm):
       self.shots_touched[env_ids] = 0.0
       self.shots_conceded[env_ids] = 0.0
       self.shots_cleared[env_ids] = 0.0
+      self.shots_judged[env_ids] = 0.0
       self.clearance_total[env_ids] = 0.0
     self._pending_forward = False
     return extras
@@ -484,13 +499,25 @@ class ShotCommand(CommandTerm):
     self.saved_now = over & self.on_target_shot & ~in_the_goal
     self.finished |= over
 
-    # How much of a clearance the save was, judged the moment it is decided: a ball
-    # stopped dead at the goalie's feet is worth nothing here, one sent
-    # clear_distance up the field is worth the full amount.
-    self.cleared_now = torch.where(
-      self.saved_now,
-      (self.rest_x / self.cfg.clear_distance).clamp(0.0, 1.0),
-      torch.zeros_like(self.rest_x),
+    # How much of a clearance the save was: a ball stopped dead at the goalie's feet
+    # is worth nothing, one sent clear_distance up the field the full amount, judged
+    # on the best rest point over the follow-through.
+    self.since_save = torch.where(
+      self.saved_now, torch.zeros_like(self.since_save), self.since_save + dt
+    )
+    following = self.since_save < self.cfg.clear_window
+    best_before = torch.where(
+      self.saved_now, torch.zeros_like(self.best_rest), self.best_rest
+    )
+    rest = self.rest_x.clamp(min=0.0)
+    limit = self.cfg.clear_distance
+    gain = (rest.clamp(max=limit) - best_before.clamp(max=limit)).clamp(min=0.0)
+    self.cleared_now = gain / limit * following.float()
+    self.best_rest = torch.where(
+      following, torch.maximum(best_before, rest), self.best_rest
+    )
+    self.clear_judged_now = following & (
+      self.since_save + dt >= self.cfg.clear_window - 1e-6
     )
 
     resolved_on_target = over & self.on_target_shot
@@ -508,9 +535,11 @@ class ShotCommand(CommandTerm):
     self.shots_saved += self.saved_now.float()
     self.shots_touched += (over & self.touched).float()
     self.shots_conceded += self.scored_now.float()
-    self.shots_cleared += (self.saved_now & (self.rest_x > self.cfg.cleared_at)).float()
+    judged = self.clear_judged_now
+    self.shots_judged += judged.float()
+    self.shots_cleared += (judged & (self.best_rest > self.cfg.cleared_at)).float()
     self.clearance_total += torch.where(
-      self.saved_now, self.rest_x.clamp(min=0.0), torch.zeros_like(self.rest_x)
+      judged, self.best_rest, torch.zeros_like(self.best_rest)
     )
 
   def _contact_with_robot(self) -> torch.Tensor:
@@ -530,7 +559,7 @@ class ShotCommand(CommandTerm):
     # clear_rate is over shots that were going in, like save_rate, so it can never
     # exceed it; clearance is the mean distance a saved ball ends up up the field.
     self.metrics["clear_rate"] = self.shots_cleared / on_target
-    self.metrics["clearance"] = self.clearance_total / self.shots_saved.clamp(min=1.0)
+    self.metrics["clearance"] = self.clearance_total / self.shots_judged.clamp(min=1.0)
     active = self.command_buf[:, 0] > 0.5
     self.metrics["command_dy_error"] = torch.where(
       active,
@@ -594,6 +623,8 @@ class ShotCommandCfg(CommandTermCfg):
   clear_distance: float = 3.0
   """How far up the field from the goalie's start (m) a saved ball has to come to rest
   for the save to count as a full clearance."""
+  clear_window: float = 0.5
+  """Follow-through after a save (s) over which its clearance is judged."""
   cleared_at: float = 1.0
   """Rest distance (m) past which a save is counted in the clear_rate metric."""
 

@@ -89,6 +89,9 @@ def main(
   live = torch.zeros(num_envs, dtype=torch.bool, device=device)
   was_moving = torch.zeros(num_envs, dtype=torch.bool, device=device)
   was_finished = torch.zeros(num_envs, dtype=torch.bool, device=device)
+  # Row of each env's last save, so its clearance can be filled in once the
+  # follow-through has been judged.
+  save_row = torch.full((num_envs,), -1, dtype=torch.long)
 
   rows: list[dict[str, float]] = []
   obs = wrapped.get_observations()
@@ -143,12 +146,19 @@ def main(
             "conceded": float(bool(shot.scored_now[i])),
             "fell": float(bool(fell[i])),
             # Where the ball will stop, in metres up the field from the goalie's
-            # start: how far a save cleared it.
+            # start, updated below with the best over the save's follow-through.
             "rest_x": float(shot.rest_x[i]),
           }
         )
+        if shot.saved_now[i]:
+          save_row[i] = len(rows) - 1
       live[resolved] = False
     was_finished = shot.finished.clone()
+
+    for i in shot.clear_judged_now.nonzero(as_tuple=False).flatten().tolist():
+      if save_row[i] >= 0:
+        rows[int(save_row[i])]["rest_x"] = float(shot.best_rest[i])
+        save_row[i] = -1
 
   env.close()
 

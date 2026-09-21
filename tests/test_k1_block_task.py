@@ -329,3 +329,58 @@ def test_rest_point_is_where_a_cleared_ball_stops(
     block_env.step(action)
     assert torch.allclose(shot.rest_x, torch.full_like(shot.rest_x, expected), atol=0.3)
   assert float(shot.ball.data.root_link_lin_vel_w[:, 0].max()) < 0.8 * speed
+
+
+def test_clearance_counts_the_follow_through(block_env: ManagerBasedRlEnv) -> None:
+  """A strike still speeding the ball up after the save is decided is paid for."""
+  shot = block_env.command_manager.get_term("shot")
+  assert isinstance(shot, ShotCommand)
+  block_env.reset(seed=11)
+  action = torch.zeros(
+    block_env.num_envs,
+    block_env.action_manager.total_action_dim,
+    device=block_env.device,
+  )
+  n = block_env.num_envs
+  ids = torch.arange(n)
+  origins = block_env.scene.env_origins
+
+  def roll(speed: float) -> None:
+    pose = torch.zeros(n, 7, device=block_env.device)
+    pose[:, :2] = shot.ball.data.root_link_pos_w[:, :2]
+    pose[:, 2] = BALL_RADIUS
+    pose[:, 3] = 1.0
+    velocity = torch.zeros(n, 6, device=block_env.device)
+    velocity[:, 0] = speed
+    velocity[:, 4] = speed / BALL_RADIUS
+    shot.ball.write_root_link_pose_to_sim(pose, env_ids=ids)
+    shot.ball.write_root_link_velocity_to_sim(velocity, env_ids=ids)
+
+  # A shot that was going in, now rolling back out slowly: a save that barely clears.
+  shot.time_left[:] = 100.0
+  shot.kicked[:] = True
+  shot.was_moving[:] = True
+  shot.on_target_shot[:] = True
+  pose = torch.zeros(n, 7, device=block_env.device)
+  pose[:, 0] = origins[:, 0] + 0.3
+  pose[:, 1] = origins[:, 1] + 2.0
+  pose[:, 2] = BALL_RADIUS
+  pose[:, 3] = 1.0
+  shot.ball.write_root_link_pose_to_sim(pose, env_ids=ids)
+  roll(0.8)
+
+  paid = torch.zeros(n, device=block_env.device)
+  steps = int(round(shot.cfg.clear_window / block_env.step_dt)) + 5
+  for step in range(steps):
+    block_env.step(action)
+    if step == 0:
+      assert bool(shot.saved_now.all())
+    if step == 5:
+      roll(2.0)  # The follow-through of the strike.
+    paid += shot.cleared_now
+
+  # Paid for the boosted ball, not the one first seen leaving, and paid once.
+  assert bool((shot.best_rest > 0.3 + 1.5**2 / (2.0 * ROLLING_DECELERATION)).all())
+  expected = shot.best_rest.clamp(max=shot.cfg.clear_distance) / shot.cfg.clear_distance
+  assert torch.allclose(paid, expected, atol=1e-4)
+  assert float(shot.since_save.min()) > shot.cfg.clear_window

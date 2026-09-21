@@ -78,12 +78,16 @@ def saved(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
 
 
 def cleared(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
-  """One-off reward on a save for how far up the field the ball will come to rest.
+  """Reward on a save for how far up the field the ball will come to rest.
 
   A ball stopped at the goalie's feet or knocked just wide is still there for the
   shooter to have another go at. This pays, on top of the save, for sending it away
   from the goal and towards the other end: nothing for a ball left at the goalie's
   feet, full value for one that will roll ``clear_distance`` or more up the field.
+
+  It is paid in increments over the follow-through after the save, each step paying
+  for any gain on the best rest point so far, so a strike that keeps accelerating the
+  ball after the save is decided is paid for all of it and not only its first step.
   """
   return _shot(env, command_name).cleared_now
 
