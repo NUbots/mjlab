@@ -382,7 +382,13 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
         "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
       },
     ),
-    "termination_penalty": RewardTermCfg(func=envs_mdp.is_terminated, weight=-30.0),
+    "termination_penalty": RewardTermCfg(
+      # More than a save and a full clearance are worth together, which are paid
+      # before the keeper lands: at -30, kicking through the ball and falling over
+      # after it was the best way to clear one.
+      func=envs_mdp.is_terminated,
+      weight=-200.0,
+    ),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     # Smooth everywhere but the strike, which has to be quick to clear the ball.
     "action_rate_l2": RewardTermCfg(

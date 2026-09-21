@@ -384,3 +384,14 @@ def test_clearance_counts_the_follow_through(block_env: ManagerBasedRlEnv) -> No
   expected = shot.best_rest.clamp(max=shot.cfg.clear_distance) / shot.cfg.clear_distance
   assert torch.allclose(paid, expected, atol=1e-4)
   assert float(shot.since_save.min()) > shot.cfg.clear_window
+
+
+def test_falling_costs_more_than_a_clearance_earns() -> None:
+  """Save and clearance are paid before the keeper lands, so a fall must outweigh both.
+
+  Otherwise kicking through the ball and falling over is the best way to clear it.
+  """
+  cfg = booster_k1_block_env_cfg()
+  rewards = cfg.rewards
+  best_outcome = rewards["saved"].weight + rewards["cleared"].weight
+  assert -rewards["termination_penalty"].weight > best_outcome
