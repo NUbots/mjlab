@@ -8,6 +8,7 @@ act well despite it is the point.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import torch
@@ -16,6 +17,7 @@ from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
 from mjlab.tasks.goalkeeper.mdp.shot_command import ShotCommand
+from mjlab.utils.lab_api.math import quat_apply_inverse
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -206,3 +208,32 @@ def defused(
   shot = _shot(env, command_name)
   live = shot.was_moving & shot.touched & ~shot.finished & shot.on_target_shot
   return shot.defused * live.float()
+
+
+def upright_with_dead_zone(
+  env: ManagerBasedRlEnv,
+  std: float,
+  dead_zone_deg: float = 25.0,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward staying off the floor, without insisting on standing straight.
+
+  The velocity task's upright term charges for every degree of tilt, which is right
+  for walking and wrong here: a keeper reaching a wide ball has to lean out over a
+  foot, and that lean was being paid for out of the same term that stops it toppling.
+  Leaning up to ``dead_zone_deg`` is free, and past that the cost rises as before, so
+  the term still does the job it was added for while leaving the motion alone.
+
+  The dead zone has to stay well inside the angle that ends the episode, or the keeper
+  would be paid full value for a tilt it is about to be terminated for.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  if asset_cfg.body_ids:
+    quat = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :].squeeze(1)
+  else:
+    quat = asset.data.root_link_quat_w
+  projected_gravity = quat_apply_inverse(quat, asset.data.gravity_vec_w)
+  # Magnitude of the horizontal part of gravity in the body frame: sin of the tilt.
+  tilt = torch.linalg.norm(projected_gravity[:, :2], dim=-1)
+  excess = (tilt - math.sin(math.radians(dead_zone_deg))).clamp(min=0.0)
+  return torch.exp(-excess.square() / std**2)

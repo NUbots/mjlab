@@ -352,12 +352,15 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     # Keep it on its feet and the motion clean.
     "upright": RewardTermCfg(
-      func=mdp.upright,
+      func=mdp.upright_with_dead_zone,
       # Staying on its feet has to be worth more than the smoothness penalties cost,
-      # or the quickest way to stop paying them is to fall over.
+      # or the quickest way to stop paying them is to fall over. Leaning is free up to
+      # the dead zone, which is where a keeper reaching a wide ball lives; the cost
+      # only starts beyond that, well before the angle that ends the episode.
       weight=2.0,
       params={
         "std": math.sqrt(0.2),
+        "dead_zone_deg": 25.0,
         "asset_cfg": SceneEntityCfg("robot", body_names=()),  # Set per-robot.
       },
     ),

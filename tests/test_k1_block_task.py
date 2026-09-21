@@ -1,5 +1,7 @@
 """Tests for the Booster K1 goalkeeper (block policy) task configuration."""
 
+import math
+
 import mujoco
 import pytest
 import torch
@@ -277,3 +279,14 @@ def test_upright_bonus_eases_off_as_drills_are_cleared() -> None:
   assert list(weights) == sorted(weights, reverse=True), "it must only loosen"
   assert weights[-1] > 0.0, "a keeper still should not dive onto its face"
   assert len(weights) == len(SHOT_LEVELS)
+
+
+def test_leaning_is_free_but_toppling_is_not() -> None:
+  """The dead zone must leave room to lean, and stay inside the fall termination."""
+  cfg = booster_k1_block_env_cfg()
+  dead_zone = cfg.rewards["upright"].params["dead_zone_deg"]
+  fall_angle = math.degrees(cfg.terminations["fell_over"].params["limit_angle"])
+  assert 10.0 < dead_zone < fall_angle - 10.0, (
+    "a keeper paid full value right up to the angle it is terminated at has no "
+    "gradient left to catch itself"
+  )
