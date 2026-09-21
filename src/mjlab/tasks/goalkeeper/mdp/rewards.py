@@ -88,6 +88,35 @@ def cleared(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
   return _shot(env, command_name).cleared_now
 
 
+def meet_the_ball(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  window: float = 0.3,
+  reference_speed: float = 1.0,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward driving the nearest foot up the field as the ball arrives.
+
+  A ball that meets a keeper standing still loses most of its speed and stops at its
+  feet: a 3 m/s shot comes back at under 1 m/s and anything slower dies outright. So
+  a clearance has to come from meeting the ball going forward, and ``cleared`` alone
+  only says so once the policy has stumbled on it. This pays for the forward speed of
+  whichever foot is closest to the ball, only in the last ``window`` seconds before it
+  arrives, so it shapes the strike without paying for walking out of goal.
+  """
+  shot = _shot(env, command_name)
+  asset: Entity = env.scene[asset_cfg.name]
+  feet_pos = asset.data.site_pos_w[:, asset_cfg.site_ids, :2]  # [B, N, 2]
+  feet_vel = asset.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]  # [B, N, 2]
+  ball_pos = shot.ball.data.root_link_pos_w[:, :2].unsqueeze(1)
+  nearest = torch.linalg.norm(feet_pos - ball_pos, dim=-1).argmin(dim=-1)
+  foot_vel = feet_vel[torch.arange(env.num_envs, device=env.device), nearest]
+  heading = asset.data.heading_w
+  forward = torch.cos(heading) * foot_vel[:, 0] + torch.sin(heading) * foot_vel[:, 1]
+  arriving = shot.on_target & (shot.true_time_to_cross < window)
+  return (forward / reference_speed).clamp(0.0, 1.0) * arriving.float()
+
+
 def conceded(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
   """One-off penalty the step a shot crosses the goal line inside the posts."""
   return _shot(env, command_name).scored_now.float()

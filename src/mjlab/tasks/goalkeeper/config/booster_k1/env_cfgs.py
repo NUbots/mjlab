@@ -146,6 +146,7 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.events["base_com"].params["asset_cfg"].body_names = ("Trunk",)
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("Trunk",)
   cfg.rewards["foot_slip"].params["asset_cfg"].site_names = site_names
+  cfg.rewards["meet_the_ball"].params["asset_cfg"].site_names = site_names
   cfg.rewards["posture"].params["asset_cfg"].joint_names = (K1_POLICY_JOINT_REGEX,)
   cfg.rewards["arm_posture"].params["asset_cfg"].joint_names = (K1_ARM_JOINT_REGEX,)
   cfg.rewards["dof_pos_limits"].params = {"asset_cfg": _policy_cfg()}

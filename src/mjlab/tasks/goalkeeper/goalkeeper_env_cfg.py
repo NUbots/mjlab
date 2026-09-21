@@ -313,6 +313,17 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=60.0,
       params={"command_name": "shot"},
     ),
+    "meet_the_ball": RewardTermCfg(
+      # Shaping for the clearance: a ball met by a still keeper dies at its feet.
+      func=mdp.meet_the_ball,
+      weight=1.5,
+      params={
+        "command_name": "shot",
+        "window": 0.3,
+        "reference_speed": 1.0,
+        "asset_cfg": SceneEntityCfg("robot", site_names=()),  # Set per-robot.
+      },
+    ),
     "conceded": RewardTermCfg(
       func=mdp.conceded,
       weight=-100.0,
