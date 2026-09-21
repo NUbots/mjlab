@@ -81,6 +81,12 @@ class ShotCommand(CommandTerm):
     # for the outcome of a touch rather than the touch itself.
     self.defused = zeros(self.num_envs)
 
+    # Where the ball will come to rest if left alone, as metres up the field from the
+    # goalie's start (the goal is behind, at negative x). A save only keeps the ball
+    # out for now; clearing it upfield is what stops it coming straight back.
+    self.rest_x = zeros(self.num_envs)
+    self.cleared_now = zeros(self.num_envs)
+
     # True crossing of the goalie's lateral line, in the goalie's frame, and whether
     # the ball is on its way there. Rewards read these.
     self.true_crossing = zeros(self.num_envs)
@@ -121,12 +127,16 @@ class ShotCommand(CommandTerm):
     self.shots_saved = zeros(self.num_envs)
     self.shots_touched = zeros(self.num_envs)
     self.shots_conceded = zeros(self.num_envs)
+    self.shots_cleared = zeros(self.num_envs)
+    self.clearance_total = zeros(self.num_envs)
 
     self.metrics["save_rate"] = zeros(self.num_envs)
     self.metrics["concede_rate"] = zeros(self.num_envs)
     self.metrics["touch_rate"] = zeros(self.num_envs)
     self.metrics["shots_on_target"] = zeros(self.num_envs)
     self.metrics["command_dy_error"] = zeros(self.num_envs)
+    self.metrics["clear_rate"] = zeros(self.num_envs)
+    self.metrics["clearance"] = zeros(self.num_envs)
 
     # Curriculum: which drill the keeper is on, and how it is doing on it. The save
     # rate is a running average over resolved shots rather than a per-episode figure,
@@ -277,6 +287,7 @@ class ShotCommand(CommandTerm):
     self.touched_now[env_ids] = False
     self.saved_now[env_ids] = False
     self.scored_now[env_ids] = False
+    self.cleared_now[env_ids] = 0.0
 
     # The estimate starts from the resting ball, which is what the real filter would
     # have converged on while it sat there.
@@ -295,6 +306,8 @@ class ShotCommand(CommandTerm):
       self.shots_saved[env_ids] = 0.0
       self.shots_touched[env_ids] = 0.0
       self.shots_conceded[env_ids] = 0.0
+      self.shots_cleared[env_ids] = 0.0
+      self.clearance_total[env_ids] = 0.0
     self._pending_forward = False
     return extras
 
@@ -459,10 +472,26 @@ class ShotCommand(CommandTerm):
       torch.ones_like(outside_post),
     )
 
+    # The ball rolls straight and slows at a constant rate, so it comes to rest
+    # speed^2 / 2a further along its path.
+    ball_speed_o = torch.linalg.norm(ball_vel_o, dim=-1)
+    self.rest_x = ball_pos_o[:, 0] + ball_vel_o[:, 0] * ball_speed_o / (
+      2.0 * max(self.cfg.rolling_deceleration, 1e-6)
+    )
+
     in_the_goal = at_goal_line & (ball_pos_o[:, 1].abs() < self.cfg.goal_half_width)
     self.scored_now = over & in_the_goal
     self.saved_now = over & self.on_target_shot & ~in_the_goal
     self.finished |= over
+
+    # How much of a clearance the save was, judged the moment it is decided: a ball
+    # stopped dead at the goalie's feet is worth nothing here, one sent
+    # clear_distance up the field is worth the full amount.
+    self.cleared_now = torch.where(
+      self.saved_now,
+      (self.rest_x / self.cfg.clear_distance).clamp(0.0, 1.0),
+      torch.zeros_like(self.rest_x),
+    )
 
     resolved_on_target = over & self.on_target_shot
     decided = int(resolved_on_target.sum())
@@ -479,6 +508,10 @@ class ShotCommand(CommandTerm):
     self.shots_saved += self.saved_now.float()
     self.shots_touched += (over & self.touched).float()
     self.shots_conceded += self.scored_now.float()
+    self.shots_cleared += (self.saved_now & (self.rest_x > self.cfg.cleared_at)).float()
+    self.clearance_total += torch.where(
+      self.saved_now, self.rest_x.clamp(min=0.0), torch.zeros_like(self.rest_x)
+    )
 
   def _contact_with_robot(self) -> torch.Tensor:
     sensor: ContactSensor = self._env.scene[self.cfg.contact_sensor_name]
@@ -494,6 +527,10 @@ class ShotCommand(CommandTerm):
     self.metrics["concede_rate"] = self.shots_conceded / on_target
     self.metrics["touch_rate"] = self.shots_touched / self.shots_finished.clamp(min=1.0)
     self.metrics["shots_on_target"] = self.shots_on_target
+    # clear_rate is over shots that were going in, like save_rate, so it can never
+    # exceed it; clearance is the mean distance a saved ball ends up up the field.
+    self.metrics["clear_rate"] = self.shots_cleared / on_target
+    self.metrics["clearance"] = self.clearance_total / self.shots_saved.clamp(min=1.0)
     active = self.command_buf[:, 0] > 0.5
     self.metrics["command_dy_error"] = torch.where(
       active,
@@ -554,6 +591,11 @@ class ShotCommandCfg(CommandTermCfg):
   defuse_margin: float = 0.5
   """How far outside the post a deflected ball has to be headed (m) to count as fully
   out of danger."""
+  clear_distance: float = 3.0
+  """How far up the field from the goalie's start (m) a saved ball has to come to rest
+  for the save to count as a full clearance."""
+  cleared_at: float = 1.0
+  """Rest distance (m) past which a save is counted in the clear_rate metric."""
 
   # Simulated ball estimate, from the NUSim validation of the real chain.
   estimate_rate_hz: float = 30.0

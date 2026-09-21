@@ -77,6 +77,17 @@ def saved(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
   return _shot(env, command_name).saved_now.float()
 
 
+def cleared(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+  """One-off reward on a save for how far up the field the ball will come to rest.
+
+  A ball stopped at the goalie's feet or knocked just wide is still there for the
+  shooter to have another go at. This pays, on top of the save, for sending it away
+  from the goal and towards the other end: nothing for a ball left at the goalie's
+  feet, full value for one that will roll ``clear_distance`` or more up the field.
+  """
+  return _shot(env, command_name).cleared_now
+
+
 def conceded(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
   """One-off penalty the step a shot crosses the goal line inside the posts."""
   return _shot(env, command_name).scored_now.float()

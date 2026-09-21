@@ -306,6 +306,13 @@ def make_goalkeeper_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=100.0,
       params={"command_name": "shot"},
     ),
+    "cleared": RewardTermCfg(
+      # And once it is kept out, send it back up the field rather than leave it for
+      # the shooter. Paid only on a save, and worth less than one.
+      func=mdp.cleared,
+      weight=60.0,
+      params={"command_name": "shot"},
+    ),
     "conceded": RewardTermCfg(
       func=mdp.conceded,
       weight=-100.0,

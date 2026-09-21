@@ -290,3 +290,42 @@ def test_leaning_is_free_but_toppling_is_not() -> None:
     "a keeper paid full value right up to the angle it is terminated at has no "
     "gradient left to catch itself"
   )
+
+
+def test_rest_point_is_where_a_cleared_ball_stops(
+  block_env: ManagerBasedRlEnv,
+) -> None:
+  """The clearance is judged on a projected rest point; it has to be the real one."""
+  shot = block_env.command_manager.get_term("shot")
+  assert isinstance(shot, ShotCommand)
+  block_env.reset(seed=7)
+  action = torch.zeros(
+    block_env.num_envs,
+    block_env.action_manager.total_action_dim,
+    device=block_env.device,
+  )
+  # Roll the ball up the field, well clear of the goalie, and keep the shot timer
+  # from replacing it.
+  shot.time_left[:] = 100.0
+  shot.kicked[:] = True
+  n = block_env.num_envs
+  origins = block_env.scene.env_origins
+  pose = torch.zeros(n, 7, device=block_env.device)
+  pose[:, 0] = origins[:, 0] + 0.3
+  pose[:, 1] = origins[:, 1] + 2.0
+  pose[:, 2] = BALL_RADIUS
+  pose[:, 3] = 1.0
+  speed = 1.5
+  velocity = torch.zeros(n, 6, device=block_env.device)
+  velocity[:, 0] = speed
+  velocity[:, 4] = speed / BALL_RADIUS
+  shot.ball.write_root_link_pose_to_sim(pose, env_ids=torch.arange(n))
+  shot.ball.write_root_link_velocity_to_sim(velocity, env_ids=torch.arange(n))
+
+  # A ball slowing at the rate the projection assumes keeps the same rest point all
+  # the way in. (Not run to a stop: an unpowered goalie falls and resets first.)
+  expected = 0.3 + speed**2 / (2.0 * ROLLING_DECELERATION)
+  for _ in range(50):
+    block_env.step(action)
+    assert torch.allclose(shot.rest_x, torch.full_like(shot.rest_x, expected), atol=0.3)
+  assert float(shot.ball.data.root_link_lin_vel_w[:, 0].max()) < 0.8 * speed
