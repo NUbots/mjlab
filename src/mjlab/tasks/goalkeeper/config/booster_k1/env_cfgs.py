@@ -11,22 +11,26 @@ v0 blocks with the body and the feet only: see ``goalkeeper_env_cfg.py``.
 """
 
 import copy
+from dataclasses import replace
+from pathlib import Path
 
 from mjlab.asset_zoo.robots import K1_ACTION_SCALE, get_k1_robot_cfg
 from mjlab.asset_zoo.robots.booster_k1.k1_constants import FULL_COLLISION_GND_ONLY
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
-from mjlab.managers.observation_manager import ObservationGroupCfg
+from mjlab.managers.observation_manager import ObservationGroupCfg, ObservationTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.goalkeeper import mdp
 from mjlab.tasks.goalkeeper.goalkeeper_env_cfg import make_goalkeeper_env_cfg
 from mjlab.tasks.goalkeeper.mdp import ShotCommandCfg, ShotLevel
+from mjlab.tasks.goalkeeper.mdp.handoff import WalkHandoffActionCfg
 from mjlab.tasks.velocity.config.booster_k1.env_cfgs import (
   HISTORY_WINDOW,
   K1_POLICY_JOINT_REGEX,
 )
+from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
 
 _HEAD_ACTION_SCALE_KEYS = ("AAHead_yaw", "Head_pitch")
@@ -206,5 +210,118 @@ def booster_k1_block_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.observations["actor"].enable_corruption = False
     cfg.observations["history"].enable_corruption = False
     cfg.events.pop("push_robot", None)
+
+  return cfg
+
+
+WALK_CHECKPOINT = Path(__file__).parent / "assets" / "k1_walk_t98yksya.pt"
+"""The walk the goalie is handed over from: velocity-task run t98yksya
+(k1-noclock-linvel, model_14999), trained at mjlab 55b975c96. Its actor weights only;
+the file records the checkpoint it came from."""
+
+WALK_COMMAND_RANGES = UniformVelocityCommandCfg.Ranges(
+  lin_vel_x=(-0.3, 0.8),
+  lin_vel_y=(-0.5, 0.5),
+  ang_vel_z=(-1.0, 1.0),
+)
+"""What the goalie's walks ask for: NUbots_K1's PlanWalkPath caps the walk at 0.8 m/s
+forward, 0.5 m/s sideways and 1 rad/s, well inside what t98yksya was trained on."""
+
+
+def _walk_observation_terms() -> dict[str, ObservationTermCfg]:
+  """One frame of the walk's actor observation, exactly as t98yksya was trained: the
+  velocity task's K1 terms, noise and delays, 72 dims."""
+  policy = _policy_cfg()
+  return {
+    "base_lin_vel": ObservationTermCfg(
+      func=mdp.builtin_sensor,
+      params={"sensor_name": "robot/imu_lin_vel"},
+      noise=Gnoise(mean=0.0, std=(0.05, 0.05, 0.08)),
+      delay_max_lag=3,
+    ),
+    "base_ang_vel": ObservationTermCfg(
+      func=mdp.builtin_sensor,
+      params={"sensor_name": "robot/imu_ang_vel"},
+      noise=Gnoise(mean=0.0, std=(0.02, 0.03, 0.03)),
+      delay_max_lag=2,
+    ),
+    "projected_gravity": ObservationTermCfg(
+      func=mdp.projected_gravity,
+      noise=Gnoise(mean=0.0, std=(3.9e-03, 4.3e-03, 5.9e-04)),
+      delay_max_lag=2,
+    ),
+    "joint_pos": ObservationTermCfg(
+      func=mdp.joint_pos_rel,
+      params={"biased": True, "asset_cfg": policy},
+      noise=Gnoise(mean=0.0, std=0.01),
+      delay_max_lag=3,
+    ),
+    "joint_vel": ObservationTermCfg(
+      func=mdp.joint_vel_rel,
+      params={"asset_cfg": copy.deepcopy(policy)},
+      noise=Gnoise(mean=0.0, std=0.05),
+      delay_max_lag=3,
+    ),
+    "actions": ObservationTermCfg(func=mdp.last_action),
+    "command": ObservationTermCfg(
+      func=mdp.generated_commands, params={"command_name": "twist"}
+    ),
+  }
+
+
+def booster_k1_block_moving_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """The goalkeeper task with the goalie walking before shots, as on the robot.
+
+  Run 12 was only ever handed the goalie standing in its stance, and on the robot it
+  fell taking it over mid-stride. Here a frozen walk drives the goalie through half the
+  shot cycles and hands it over as planning::PlanSave does: once the kick has been seen,
+  or before it for a ball placed near, and mostly once both feet are down. The block
+  policy's observation contract is unchanged, so it fine-tunes from run 12 and deploys
+  through skill::K1BlockPolicy as before. See ``mdp/handoff.py``.
+  """
+  cfg = booster_k1_block_env_cfg(play=play)
+
+  # The walk's velocity command, and its own observation window.
+  cfg.commands["twist"] = UniformVelocityCommandCfg(
+    entity_name="robot",
+    resampling_time_range=(1.0, 3.0),
+    rel_standing_envs=0.1,
+    heading_command=False,
+    ranges=copy.deepcopy(WALK_COMMAND_RANGES),
+    debug_vis=False,
+  )
+  cfg.observations["walk_history"] = ObservationGroupCfg(
+    terms=_walk_observation_terms(),
+    concatenate_terms=True,
+    enable_corruption=not play,
+    history_length=HISTORY_WINDOW,
+    flatten_history_dim=False,
+  )
+
+  # The walk drives the goalie until the hand-off, through the same joint targets.
+  joint_pos = cfg.actions["joint_pos"]
+  assert isinstance(joint_pos, JointPositionActionCfg)
+  cfg.actions["joint_pos"] = WalkHandoffActionCfg(
+    entity_name=joint_pos.entity_name,
+    actuator_names=joint_pos.actuator_names,
+    scale=joint_pos.scale,
+    use_default_offset=joint_pos.use_default_offset,
+    walk_checkpoint=str(WALK_CHECKPOINT),
+  )
+
+  # The block policy sees an inactive command while the walk has the goalie, as the
+  # frames K1BlockPolicy records then are built. The critic keeps the real one.
+  for group in ("actor", "history"):
+    terms = cfg.observations[group].terms
+    terms["command"] = replace(terms["command"], func=mdp.block_command)
+
+  # The learner is only paid, or charged, for what it does itself.
+  for term in cfg.rewards.values():
+    term.func = mdp.while_blocking(term.func)
+
+  # Fine-tuning run 12, which cleared every drill: stay on the full envelope.
+  shot = cfg.commands["shot"]
+  assert isinstance(shot, ShotCommandCfg)
+  shot.start_level = len(SHOT_LEVELS) - 1
 
   return cfg

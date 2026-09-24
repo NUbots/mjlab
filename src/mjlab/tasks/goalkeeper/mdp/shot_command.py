@@ -62,7 +62,9 @@ class ShotCommand(CommandTerm):
     # Command published to the policy: [active, dy, t, v].
     self.command_buf = zeros(self.num_envs, 4)
 
-    # Shot bookkeeping.
+    # Shot bookkeeping. shot_count goes up by one with every shot placed, so anything
+    # that works shot by shot (the walk hand-off) can tell when a new one starts.
+    self.shot_count = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self.time_since_resample = zeros(self.num_envs)
     self.kick_delay = zeros(self.num_envs)
     self.kicked = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
@@ -278,6 +280,7 @@ class ShotCommand(CommandTerm):
     self._pending_forward = True
 
     self.shot_direction[env_ids] = direction
+    self.shot_count[env_ids] += 1
     self.time_since_resample[env_ids] = 0.0
     self.kicked[env_ids] = False
     self.was_moving[env_ids] = False
