@@ -978,7 +978,17 @@ class variable_posture:
 
   Uses per-joint standard deviations to control how much each joint can deviate
   from default pose. Smaller std = stricter (less deviation allowed), larger
-  std = more forgiving. The reward is: exp(-mean(error² / std²))
+  std = more forgiving. Each joint is scored with a logistic kernel of its
+  normalised error x = |error| / std, and the scores are averaged:
+
+    mean(4 / (exp(x) + 2 + exp(-x)))
+
+  The kernel is 1 at zero error and bell-shaped like a Gaussian, but its tail
+  falls off exponentially rather than as exp(-x²), so a joint far from its
+  default still gets a gradient back. Averaging per joint, rather than
+  exponentiating a mean, means one badly placed joint lowers the reward
+  without zeroing it. For the same std the kernel is looser than exp(-x²):
+  0.79 at x = 1 against 0.37.
 
   Three speed regimes (based on linear + angular command velocity):
     - std_standing (speed < walking_threshold): Tight tolerance for holding pose.
@@ -1052,6 +1062,8 @@ class variable_posture:
 
     current_joint_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
     desired_joint_pos = self.default_joint_pos[:, asset_cfg.joint_ids]
-    error_squared = torch.square(current_joint_pos - desired_joint_pos)
+    x = torch.abs(current_joint_pos - desired_joint_pos) / std
 
-    return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
+    # 4 / (exp(x) + 2 + exp(-x)) == sech²(x / 2) == 1 - tanh²(x / 2), written
+    # the last way because it cannot overflow for large x.
+    return torch.mean(1.0 - torch.square(torch.tanh(0.5 * x)), dim=1)

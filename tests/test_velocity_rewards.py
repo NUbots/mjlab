@@ -19,6 +19,7 @@ from mjlab.tasks.velocity.mdp.rewards import (
   track_angular_velocity_attainment,
   track_linear_velocity_attainment,
   upright,
+  variable_posture,
 )
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
 
@@ -376,3 +377,32 @@ def test_angular_attainment_pays_fraction_delivered():
   env = _attain_env([0.0, 0.0, 2.0], [0.0, 0.0, 0.0], 1.0)
   value = track_angular_velocity_attainment(env, command_name="twist")
   assert math.isclose(value.item(), 0.5, rel_tol=1e-6)
+
+
+def test_variable_posture_is_a_per_joint_logistic_kernel():
+  asset = MagicMock()
+  asset.find_joints.return_value = ([0, 1], ["hip", "knee"])
+  asset.data.default_joint_pos = torch.zeros(1, 2)
+  asset.data.joint_pos = torch.tensor([[0.0, 0.5]])
+  env = MagicMock()
+  env.device = "cpu"
+  env.scene.__getitem__ = MagicMock(return_value=asset)
+  env.command_manager.get_command.return_value = torch.tensor([[1.0, 0.0, 0.0]])
+  params: dict = {
+    "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+    "command_name": "twist",
+    "std_standing": {".*": 0.1},
+    "std_walking": {".*": 0.25},
+    "std_running": {".*": 1.0},
+    "walking_threshold": 0.05,
+    "running_threshold": 1.5,
+  }
+  cfg = MagicMock(spec=RewardTermCfg)
+  cfg.params = params
+
+  value = variable_posture(cfg, env)(env, **params).item()
+
+  # Walking std 0.25: the hip is on target (1.0), the knee is 2 std off,
+  # where the kernel 4 / (e^x + 2 + e^-x) is 0.42 rather than exp(-4) = 0.02.
+  knee = 4.0 / (math.exp(2.0) + 2.0 + math.exp(-2.0))
+  assert math.isclose(value, (1.0 + knee) / 2, rel_tol=1e-5)
