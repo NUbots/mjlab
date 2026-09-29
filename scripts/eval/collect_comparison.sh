@@ -162,17 +162,17 @@ done
 DURATION=${DURATION:-30}
 WARMUP=${WARMUP:-8}
 
-VX_MIN=${VX_MIN:--1.5}
-VX_MAX=${VX_MAX:-2.5}
+VX_MIN=${VX_MIN:--2.5}
+VX_MAX=${VX_MAX:-3.5}
 VX_STEP=${VX_STEP:-0.1}
 
-VY_MIN=${VY_MIN:--1.2}
-VY_MAX=${VY_MAX:-1.2}
+VY_MIN=${VY_MIN:--2.0}
+VY_MAX=${VY_MAX:-2.0}
 VY_STEP=${VY_STEP:-0.1}
 
-WZ_MIN=${WZ_MIN:--3.0}
-WZ_MAX=${WZ_MAX:-3.0}
-WZ_STEP=${WZ_STEP:-0.2}
+WZ_MIN=${WZ_MIN:--5.0}
+WZ_MAX=${WZ_MAX:-5.0}
+WZ_STEP=${WZ_STEP:-0.25}
 
 # Push batteries: walking at PUSH_VX, and standing. Anything left unset here
 # takes the default in mjlab.evaluation.push.PushCfg.
