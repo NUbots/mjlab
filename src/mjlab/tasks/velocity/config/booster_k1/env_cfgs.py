@@ -314,7 +314,7 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("Trunk",)
   cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("Trunk",)
 
-  cfg.rewards["gait_phase_regularity"].params["command_threshold"] = 0.00 # Disable
+  cfg.rewards["gait_phase_regularity"].params["command_threshold"] = 0.00  # Disable
 
   for reward_name in ["foot_clearance", "foot_slip"]:
     cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
@@ -324,7 +324,7 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # Velocity weighting is kept as the swing/stance gate.
   cfg.rewards["foot_clearance"].params["power"] = 2
   cfg.rewards["foot_clearance"].params["only_below"] = True
-  cfg.rewards["foot_clearance"].weight = 0.0 # Disable
+  cfg.rewards["foot_clearance"].weight = 0.0  # Disable
 
   # Flat-foot shaping: the K1 sole is the bottom face of the foot box, so the
   # sole normal is the foot body's local Z axis.
@@ -343,10 +343,10 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.rewards["body_ang_vel"].weight = -0.05
   cfg.rewards["angular_momentum"].weight = -0.01
-  cfg.rewards["air_time"].weight = 0.0 # Disable
-  cfg.rewards["gait_phase_regularity"].weight = 0.0 # Diable
-  cfg.rewards["feet_distance"].weight = 0.0 # Disable
-  cfg.rewards["foot_flat"].weight = 0.0 # Disable
+  cfg.rewards["air_time"].weight = 0.0  # Disable
+  cfg.rewards["gait_phase_regularity"].weight = 0.0  # Diable
+  cfg.rewards["feet_distance"].weight = 0.0  # Disable
+  cfg.rewards["foot_flat"].weight = 0.0  # Disable
 
   # Actor observation history (see mjlab.rl.obs_history): a HISTORY_WINDOW-step
   # window of the actor observation stream, shaped [B, T, D], encoded by a TCN

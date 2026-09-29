@@ -8,6 +8,14 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added a policy evaluation pipeline for the Booster K1 (``mjlab.evaluation``
+  and ``scripts/eval``), ported and cut down from the Nugus walk comparison.
+  ``collect_comparison.sh`` collects, for one or more checkpoints, only what
+  ``plot_comparison.py`` draws: a velocity profile, three two-axis command
+  grids for the normalised error plane, and walking and standing push
+  batteries for the push survival envelope. The harness reads only the root
+  link and pushes through the root body, so any velocity task can be
+  evaluated with ``--task-id``.
 - Added the Booster K1 humanoid and the ``Mjlab-Velocity-Flat-Booster-K1`` /
   ``Mjlab-Velocity-Rough-Booster-K1`` tasks. They follow the NUbots Nugus
   velocity recipe (25-step observation-history actor) without competence
