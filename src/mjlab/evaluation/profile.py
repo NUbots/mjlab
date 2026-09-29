@@ -22,12 +22,13 @@ from dataclasses import dataclass
 
 import torch
 
-RAMP_S = 1.5
+RAMP_S = 0.0
 """Seconds a command takes to slew between two plateaus.
 
-The command is a trapezoid, not a step: on the robot the operator's stick moves
-at a finite rate, and a step would measure the controller's response to a
-discontinuity that never happens.
+Zero by default: the command steps from one plateau to the next, so the trace
+shows the controller's response to an instant change -- the K1 policy trains
+with instant command drops. A positive value makes the command a trapezoid
+instead.
 """
 
 HOLD_S = 6.0
