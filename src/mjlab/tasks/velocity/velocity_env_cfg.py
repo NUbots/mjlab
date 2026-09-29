@@ -330,8 +330,8 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"sensor_name": "robot/root_angmom"},
     ),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
-    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.2),
-    "action_acc_l2": RewardTermCfg(func=mdp.action_acc_l2, weight=-0.2),
+    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1), # Reduce
+    "action_acc_l2": RewardTermCfg(func=mdp.action_acc_l2, weight=0.0), # Disable
     "actuation_power": RewardTermCfg(
       func=mdp.electrical_power_cost,
       weight=0.0,  # Override per-robot.
@@ -389,7 +389,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "foot_swing_height": RewardTermCfg(
       func=mdp.feet_swing_height,
-      weight=-0.5,
+      weight=0.0, # Disable
       params={
         "sensor_name": "feet_ground_contact",
         "height_sensor_name": "foot_height_scan",
@@ -400,7 +400,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "foot_slip": RewardTermCfg(
       func=mdp.feet_slip,
-      weight=-1.0,
+      weight=0.0, # Disable
       params={
         "sensor_name": "feet_ground_contact",
         "command_name": "twist",
@@ -430,7 +430,7 @@ def make_velocity_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "soft_landing": RewardTermCfg(
       func=mdp.soft_landing,
-      weight=-1e-5,
+      weight=0.0, # Disable
       params={
         "sensor_name": "feet_ground_contact",
         "command_name": "twist",
