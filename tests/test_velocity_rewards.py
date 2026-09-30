@@ -14,7 +14,6 @@ from mjlab.sensor.terrain_height_sensor import TerrainHeightSensor
 from mjlab.tasks.velocity.mdp.observations import gait_clock
 from mjlab.tasks.velocity.mdp.rewards import (
   _swing_height_profile,
-  action_rate_logistic,
   feet_swing_height_clock,
   gait_clock_contact_mismatch_cost,
   track_angular_velocity_attainment,
@@ -407,17 +406,3 @@ def test_variable_posture_is_a_per_joint_logistic_kernel():
   # where the kernel 4 / (e^x + 2 + e^-x) is 0.42 rather than exp(-4) = 0.02.
   knee = 4.0 / (math.exp(2.0) + 2.0 + math.exp(-2.0))
   assert math.isclose(value, (1.0 + knee) / 2, rel_tol=1e-5)
-
-
-def test_action_rate_logistic_matches_l2_small_and_saturates_large():
-  env = MagicMock()
-  env.action_manager.prev_action = torch.zeros(1, 2)
-
-  env.action_manager.action = torch.tensor([[0.01, -0.02]])
-  small = action_rate_logistic(env, std=0.5).item()
-  assert math.isclose(small, 0.01**2 + 0.02**2, rel_tol=1e-3)
-
-  # tanh²(x / 2) per dimension: x = 2 gives 0.58, x = 40 is saturated at 1.
-  env.action_manager.action = torch.tensor([[1.0, 20.0]])
-  large = action_rate_logistic(env, std=0.5).item()
-  assert math.isclose(large, math.tanh(1.0) ** 2 + 1.0, rel_tol=1e-5)

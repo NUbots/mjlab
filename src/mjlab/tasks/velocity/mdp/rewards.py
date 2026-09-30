@@ -1063,30 +1063,7 @@ class variable_posture:
     current_joint_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
     desired_joint_pos = self.default_joint_pos[:, asset_cfg.joint_ids]
     x = torch.abs(current_joint_pos - desired_joint_pos) / std
-    return torch.mean(logistic_kernel(x), dim=1)
 
-
-def logistic_kernel(x: torch.Tensor) -> torch.Tensor:
-  """``4 / (exp(x) + 2 + exp(-x))``: 1 at zero, bell-shaped, exponential tails.
-
-  Computed as the identical ``1 - tanh²(x / 2)``, which cannot overflow for
-  large ``x``.
-  """
-  return 1.0 - torch.square(torch.tanh(0.5 * x))
-
-
-def action_rate_logistic(env: ManagerBasedRlEnv, std: float = 0.5) -> torch.Tensor:
-  """Penalize the rate of change of the actions with a sigmoid-shaped cost.
-
-  Per action dimension, with x = |a_t - a_{t-1}| / std, the cost is
-  ``1 - logistic_kernel(x) = tanh²(x / 2)``, summed over dimensions. Near zero
-  it is ``x² / 4``, so at the default ``std = 0.5`` small changes cost exactly
-  what :func:`~mjlab.envs.mdp.action_rate_l2` charges and existing weights keep
-  their meaning. Large changes saturate at 1 per dimension instead of growing
-  quadratically, so a policy with a wide exploration noise is not buried in
-  smoothness cost early in training.
-
-  Operates on raw policy output (before per-term scale/offset).
-  """
-  delta = env.action_manager.action - env.action_manager.prev_action
-  return torch.sum(1.0 - logistic_kernel(torch.abs(delta) / std), dim=1)
+    # 4 / (exp(x) + 2 + exp(-x)) == sech²(x / 2) == 1 - tanh²(x / 2), written
+    # the last way because it cannot overflow for large x.
+    return torch.mean(1.0 - torch.square(torch.tanh(0.5 * x)), dim=1)
