@@ -633,6 +633,143 @@ instead would let the gait set the frame: the torso's yaw swings through a
 stride by several times any commanded turn, which is why the raw trace is
 drawn faintly and clipped rather than given room.
 
+## System identification
+
+`collect_sysid.py` produces data for fitting a per-axis model from commanded
+body velocity `(vx, vy, wz)` to achieved body velocity (gain, lag, delay, dead
+zone, saturation, cross-axis coupling), plus a capability envelope. It runs the
+RL policy in the task it was trained in, not on the evaluation plant, and it is
+separate from the comparison scripts above.
+
+```sh
+S=scripts/eval/collect_sysid.py
+uv run python $S sequences --variant nominal            # 1 robot per sequence
+uv run python $S sequences --variant randomised --seeds 0   # 64 per sequence
+uv run python $S envelope --variant nominal
+uv run python $S envelope --variant randomised --seeds 0 1 2
+uv run python $S export-commands                        # commands only, for the robot
+```
+
+Defaults are the qufuh82s checkpoint (`model_39997.pt`, the run's last) and
+`logs/eval/sysid_qufuh82s/`.
+
+**Command ranges come from the training run, not this checkout.** The task
+config here says vx ±1.0, vy ±1.0 with a curriculum ending at ±0.5 / ±0.1 / ±0.5;
+qufuh82s trained on vx ±0.9 m/s, vy ±0.3 m/s, wz ±0.5 rad/s (every curriculum
+stage of that run). The script reads the run's config from W&B
+(`--wandb-run`) the first time and keeps a copy in
+`<out>/training_config.json`, which later runs read instead. Every amplitude is
+a fraction of that range: a positive fraction scales the top of the range and a
+negative one the magnitude of the bottom.
+
+**How the command reaches the policy.** The velocity term's two hooks
+(`_resample_command`, `_update_command`) are swapped for ones that write the
+schedule row for the current step. `ManagerBasedRlEnv.step` calls the update
+hook immediately before it builds the observation, so the observation the policy
+acts on at step `k` contains command row `k` exactly, with nothing in between.
+This was checked by reading the command back out of the actor observation, on
+both plants.
+
+**The two plants.**
+
+| | nominal | randomised |
+| --- | --- | --- |
+| startup DR (foot friction, encoder bias, torso CoM, PD gains) | off | training ranges |
+| pushes (`push_robot`) | off | training ranges from the run (x, y ±0.5 m/s, roll, pitch ±0.1 rad/s, every 3–10 s) |
+| observation noise | off | on |
+| observation delay | pinned at 1 step (training 0–2 / 0–3) | random, as trained |
+| actuator command delay | pinned at 2 physics steps (training 1–3) | random, as trained |
+| reset pose | keyframe, yaw 0 | training ranges |
+
+Both delays are drawn afresh every step in training *and in play mode*. A
+"nominal" plant that left them random would not be nominal, so they are pinned to
+the middle of their range, rounded down. Nominal runs are deterministic up to
+float32 rounding. Two replicas start 1e-8 apart, because their world origins
+differ, and the gait amplifies that to around 1 cm/s over a minute. One robot per
+nominal sequence is therefore enough.
+
+**Falls.** The environment's terminations are removed and the task's own
+`fell_over` term (torso tilt > 50°) is evaluated after every policy step. A run
+stops at the first row where it holds, and that row has `fall = 1`. No run
+crosses a reset.
+
+**The gait-clock gate is a built-in dead zone.** The policy's clock observation
+is zeroed whenever `|v_xy| + |wz| <= 0.05`, which tells the policy to stand. The
+10% steps on vy (0.03 m/s) and wz (0.05 rad/s, exactly at the threshold) are
+inside the gate, and the robot stands still for them. The dead zone a fit finds
+should include this gate.
+
+### Sequences
+
+Every sequence starts with 2 s of zero command and ends standing.
+
+| family | runs | content |
+| --- | --- | --- |
+| `step` | 30 | 0 → ±{10, 25, 50, 75, 100}% per axis, 5 s, then 0 for 3 s |
+| `level` | 18 | ±25→±75%, ±75→±25%, +50→−50%, −50→+50%, 5 s per level |
+| `ramp` | 6 | 0 → ±100% linearly over 20 s per axis, then 0 |
+| `multilevel` | 3 + 3 | 120 s staircase per axis, levels U(±80%), holds U(0.5, 3) s; seeds 1000–1002, validation 2000–2002 (`validation/`) |
+| `chirp` | 3 | 50% amplitude, linear 0.05 → 2 Hz over 60 s per axis |
+| `combined` | 48 | (vx step, wz held), (wz step, vx held), (vy step, vx held); held ±50% for 4 s first, step ±{25, 50, 75, 100}% for 5 s, back to 0 for 3 s, then all 0 |
+
+The sequences are defined in `src/mjlab/evaluation/sysid_sequences.py`, which
+needs only numpy, so it can be copied to the robot tooling as is. Each one is
+built from whole control steps at 50 Hz. `export-commands` writes them as
+`commands/<split>/<family>/<name>.csv` (`t, cmd_vx, cmd_vy, cmd_wz`, where row
+`k` holds over `[t_k, t_k + 0.02)`) with an index in `sequences.json`. Each
+dataset directory carries the same export.
+
+### What comes out
+
+```
+logs/eval/sysid_qufuh82s/
+  training_config.json             the training run's env config, from W&B
+  nominal/                         one robot per sequence
+    dataset.json                   index, plant, provenance
+    commands/                      the command CSVs, for the robot
+    identification/<family>/<sequence>/env000.mat + metadata.json
+    validation/multilevel/<sequence>/env000.mat + metadata.json
+  randomised_seed0/                64 robots per sequence, env000..env063.mat
+  envelope/<nominal|randomised_seedN>/summary.csv, traces.mat, metadata.json
+```
+
+A run file (`.mat`, or `--format csv` for `<run>.csv` + `<run>_physics.csv`)
+holds a `policy` struct at 50 Hz and, for `step`, `level`, `combined` and
+`chirp`, a `physics` struct at 200 Hz. Every 4th physics row is the
+corresponding policy row. Both have the same columns:
+
+| column | meaning |
+| --- | --- |
+| `t` | s since reset; row `k` is at `k * dt` |
+| `cmd_vx`, `cmd_vy`, `cmd_wz` | command in force over `[t, t + dt)`, as the policy sees it |
+| `vx`, `vy` | root-body (`torso`) origin velocity in the heading frame, m/s |
+| `wz` | yaw rate (world z), rad/s |
+| `x`, `y`, `z`, `yaw` | root-body position (world, env origin not subtracted) and heading, wrapped |
+| `fall` | 1 on the row the fall condition first held; the run ends there |
+| `push` | 1 where a training push was applied immediately after this row's state |
+
+The heading frame is the world rotated by yaw alone, matching what motion
+capture of the torso gives. The state is read from the root free joint's
+`qpos`/`qvel` after each physics step, which is current at every substep, unlike
+the derived body quantities. Nothing is filtered. Scalars `fell`, `fall_time_s`
+and `env_index` sit beside the structs. `metadata.json` per sequence has the
+checkpoint path and SHA-256, the sequence parameters (fractions and absolute
+values, seeds, onset times), the plant (timestep, decimation, rates, delays,
+event parameters, seed, velocity body), the command ranges, and per run the fall
+time. Randomised runs also record each push's change to `qvel` and every
+parameter the startup DR drew for that robot.
+
+The envelope grid is 11 × 7 × 9 points over ±120% of each range, one robot per
+point. Each robot stands for 2 s and then holds its command for 8 s. The first
+3 s of the hold are discarded. `summary.csv` has the mean and standard deviation
+of the achieved velocity over the remaining window (up to any fall), the
+tracking score `exp(-‖v − v̂‖ / 0.25)` averaged over the window (the norm mixes
+m/s and rad/s, as specified), the same score counting post-fall samples as 0,
+the score of the window-mean velocity (the per-sample score is dominated by
+within-stride sway, which caps it near 0.6 even where the mean tracks well),
+and whether and when (s after onset) the robot fell. `traces.mat` keeps the raw
+policy-rate velocities of every point.
+
 ## Output
 
 Each run writes a directory under `--output-dir` (default `logs/eval/`), named
