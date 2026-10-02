@@ -16,6 +16,7 @@ policy neither observes nor commands it, so the actor observation is
 """
 
 import copy
+import math
 
 from mjlab.asset_zoo.robots import K1_ACTION_SCALE, get_k1_robot_cfg
 from mjlab.envs import ManagerBasedRlEnvCfg
@@ -52,6 +53,9 @@ pitch joints carry an "A" ordering prefix (ALeft_Shoulder_Pitch), hence the
 optional ``A?``."""
 
 _HEAD_ACTION_SCALE_KEYS = ("AAHead_yaw", "Head_pitch")
+
+IMU_TILT_RANGE_RAD = math.radians(4.0)
+"""Half-width of the per-episode IMU roll/pitch mounting offset."""
 
 _STEPS_PER_ITER = 24
 """Env steps per PPO iteration; must match ``num_steps_per_env`` in rl_cfg.
@@ -117,6 +121,14 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # privileged too. Both stay in the critic.
   cfg.observations["actor"].terms.pop("base_lin_vel", None)
   cfg.observations["actor"].terms.pop("height_scan", None)
+
+  # Read gravity in the IMU site's frame rather than the trunk's, so the
+  # imu_mount_tilt event below can misalign it. Nominally the two coincide, so
+  # the observation the robot builds is unchanged. Swapping the function in
+  # place keeps the term's noise and delay settings.
+  gravity_term = cfg.observations["actor"].terms["projected_gravity"]
+  gravity_term.func = envs_mdp.projected_gravity_site
+  gravity_term.params = {"asset_cfg": SceneEntityCfg("robot", site_names=("imu",))}
 
   # Sensor noise, as used for the NUgus (IMU measured, encoders from the
   # position/velocity resolution, both with a safety factor).
@@ -227,6 +239,25 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
   cfg.events["base_com"].params["asset_cfg"].body_names = ("Trunk",)
+
+  # IMU mounting/calibration offset. Gravity noise alone is ~0.2 deg per
+  # step, never a constant bias, and ynapuyo5 (trained that way) stood still
+  # on the robot but crept forward after a push without stopping. In sim an
+  # IMU that reads 6-8 deg less forward lean than the trunk's real tilt
+  # reproduced exactly that, while trunk CoM shifts of up to 9 cm and foot
+  # friction down to 0.25 did not. The robot's standing gravity read ~3 deg
+  # of forward pitch against 9.6 deg in sim. Each episode tilts the IMU site
+  # by a fixed roll/pitch, which also rotates the gyro read at that site,
+  # just as a misaligned IMU would.
+  cfg.events["imu_mount_tilt"] = EventTermCfg(
+    func=envs_mdp.dr.site_quat,
+    mode="reset",
+    params={
+      "asset_cfg": SceneEntityCfg("robot", site_names=("imu",)),
+      "roll_range": (-IMU_TILT_RANGE_RAD, IMU_TILT_RANGE_RAD),
+      "pitch_range": (-IMU_TILT_RANGE_RAD, IMU_TILT_RANGE_RAD),
+    },
+  )
 
   # Instant stops: now and then a moving command is cut straight to zero, with
   # no ramp, and held long enough to be rewarded, so the policy learns to stop

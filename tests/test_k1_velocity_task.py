@@ -5,11 +5,14 @@ import torch
 from conftest import get_test_device
 
 from mjlab.envs import ManagerBasedRlEnv
+from mjlab.envs.mdp import projected_gravity_site
 from mjlab.envs.mdp.actions import JointPositionAction
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.rl import RslRlVecEnvWrapper
 from mjlab.rl.obs_history import HistoryActor, HistoryModelCfg, OnnxHistoryPolicy
 from mjlab.tasks.velocity.config.booster_k1.env_cfgs import (
   HISTORY_WINDOW,
+  IMU_TILT_RANGE_RAD,
   VELOCITY_STAGES,
   booster_k1_flat_env_cfg,
 )
@@ -111,6 +114,29 @@ def test_history_group_clones_actor_terms() -> None:
   assert history.history_length == HISTORY_WINDOW
   assert history.flatten_history_dim is False
   assert list(history.terms) == list(cfg.observations["actor"].terms)
+
+
+def test_gravity_obs_reads_imu_site_with_noise_and_delay() -> None:
+  cfg = booster_k1_flat_env_cfg()
+  assert "imu_mount_tilt" in cfg.events
+  for group in ("actor", "history"):
+    term = cfg.observations[group].terms["projected_gravity"]
+    assert term.func is projected_gravity_site
+    assert term.params["asset_cfg"].site_names == ("imu",)
+    assert term.noise is not None
+    assert term.delay_max_lag == 2
+
+
+def test_imu_tilt_offsets_gravity_obs_within_range(k1_env) -> None:
+  asset_cfg = SceneEntityCfg("robot", site_names=("imu",))
+  asset_cfg.resolve(k1_env.scene)
+  g_site = projected_gravity_site(k1_env, asset_cfg)
+  g_trunk = k1_env.scene["robot"].data.projected_gravity_b
+  cos = (g_site * g_trunk).sum(-1) / (g_site.norm(dim=-1) * g_trunk.norm(dim=-1))
+  angle = torch.acos(cos.clamp(-1.0, 1.0))
+  # Independent roll and pitch, each within the range.
+  assert (angle > 1e-3).all()
+  assert (angle <= IMU_TILT_RANGE_RAD * 2**0.5 + 1e-3).all()
 
 
 def test_play_disables_corruption_and_command_curriculum() -> None:

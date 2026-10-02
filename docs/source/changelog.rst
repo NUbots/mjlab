@@ -8,6 +8,14 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added the ``projected_gravity_site`` observation, which expresses gravity in
+  the frame of a single site, and an ``imu_mount_tilt`` event for the Booster
+  K1 that tilts its IMU site by a fixed roll and pitch of up to 4 degrees each
+  episode. The K1 actor now reads gravity at that site, so it trains against an
+  IMU mounting or calibration offset. The gyro is read at the same site and
+  tilts with it. A K1 policy trained without this stood fine on the robot but
+  crept forward after a push without stopping, and in sim only a gravity
+  reading off by 6-8 degrees reproduced that.
 - Added a policy evaluation pipeline for the Booster K1 (``mjlab.evaluation``
   and ``scripts/eval``), ported and cut down from the Nugus walk comparison.
   ``collect_comparison.sh`` collects, for one or more checkpoints, only what

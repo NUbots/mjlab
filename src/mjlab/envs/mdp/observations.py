@@ -9,6 +9,7 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import BuiltinSensor, RayCastSensor
+from mjlab.utils.lab_api.math import quat_apply_inverse
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -121,6 +122,24 @@ def projected_gravity_from_sensor(
   sensor = env.scene[sensor_name]
   assert isinstance(sensor, BuiltinSensor)
   return -sensor.data
+
+
+def projected_gravity_site(
+  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg
+) -> torch.Tensor:
+  """Gravity vector expressed in the frame of a single site, e.g. the IMU.
+
+  Like :func:`projected_gravity_from_sensor`, this follows the site's own
+  orientation, so randomizing the site's quaternion (``dr.site_quat``) models
+  an IMU mounting or calibration offset. It needs no sensor in the model.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  site_ids = asset_cfg.site_ids
+  assert isinstance(site_ids, list) and len(site_ids) == 1, (
+    f"projected_gravity_site needs exactly one site, got {asset_cfg.site_names}"
+  )
+  quat_w = asset.data.site_quat_w[:, site_ids[0]]
+  return quat_apply_inverse(quat_w, asset.data.gravity_vec_w)
 
 
 def height_scan(
