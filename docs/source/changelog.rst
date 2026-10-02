@@ -20,9 +20,9 @@ Added
   ``Mjlab-Velocity-Rough-Booster-K1`` tasks. They follow the NUbots Nugus
   velocity recipe (25-step observation-history actor) without competence
   tracking and without a gait clock, so the policy is free to pick its own
-  cadence. Unlike the Nugus, the K1 has a usable base linear velocity
-  estimate on hardware, so the actor observes it, with noise and latency to
-  match. The head is left to the vision
+  cadence. Base linear velocity is critic-only: the Booster controller's
+  odometry twist read zero on the robot while the policy walked, so the
+  deployed policy has no estimate to observe. The head is left to the vision
   system, so the policy commands and observes only the 20 leg and arm joints. A
   time-staged command curriculum widens the envelope from a 0.5 m/s walk to
   ``lin_vel_x`` (-1.0, 2.0), ``lin_vel_y`` +/-0.8 and ``ang_vel_z`` +/-2.0 by

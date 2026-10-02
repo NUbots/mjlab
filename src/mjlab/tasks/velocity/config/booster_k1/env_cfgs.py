@@ -2,14 +2,17 @@
 
 A port of the NUgus velocity recipe (same base reward set and weights, same
 sensor noise/delay model and the same 25-step observation-history actor) to
-the K1, without competence tracking. Unlike the NUgus, the K1 has a usable
-base linear velocity estimate on hardware, so the policy observes it.
+the K1, without competence tracking. As on the NUgus, the actor does not
+observe base linear velocity: the Booster controller's odometry twist
+(rt/odom) read exactly zero on the robot while this policy owned the joints
+(CUSTOM mode), and policies trained to observe it used it as velocity
+feedback and fell.
 
 The head (AAHead_yaw, Head_pitch) is not policy-controlled; on hardware it
 belongs to the vision system. Its actuators hold the default pose and the
 policy neither observes nor commands it, so the actor observation is
-3 (lin vel) + 3 (ang vel) + 3 (gravity) + 20 (joint pos) + 20 (joint vel)
-+ 20 (actions) + 3 (command) = 72 dims.
+3 (ang vel) + 3 (gravity) + 20 (joint pos) + 20 (joint vel) + 20 (actions)
++ 3 (command) = 69 dims.
 """
 
 import copy
@@ -109,19 +112,14 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   """Create Booster K1 rough terrain velocity configuration."""
   cfg = make_velocity_env_cfg()
 
-  # Terrain height is privileged: critic-only. Base linear velocity stays in
-  # the actor observation -- unlike the NUgus, the K1 ships a usable base
-  # velocity estimate, so the deployed policy can be fed one.
+  # The deployed policy has no base velocity estimate (see the module
+  # docstring), so it must not observe base linear velocity. Terrain height is
+  # privileged too. Both stay in the critic.
+  cfg.observations["actor"].terms.pop("base_lin_vel", None)
   cfg.observations["actor"].terms.pop("height_scan", None)
 
   # Sensor noise, as used for the NUgus (IMU measured, encoders from the
   # position/velocity resolution, both with a safety factor).
-  # Base linear velocity comes from the K1's on-board estimator (leg
-  # kinematics fused with the IMU), not a direct measurement: noisier and
-  # laggier than the gyro, so it gets a wider std and the encoder-grade delay.
-  cfg.observations["actor"].terms["base_lin_vel"].noise = Gnoise(
-    mean=0.0, std=(0.05, 0.05, 0.08)
-  )
   cfg.observations["actor"].terms["base_ang_vel"].noise = Gnoise(
     mean=0.0, std=(0.02, 0.03, 0.03)
   )
@@ -132,8 +130,6 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.observations["actor"].terms["joint_vel"].noise = Gnoise(mean=0.0, std=0.05)
 
   # Sensor delays.
-  cfg.observations["actor"].terms["base_lin_vel"].delay_min_lag = 0
-  cfg.observations["actor"].terms["base_lin_vel"].delay_max_lag = 3  # 0-60ms
   cfg.observations["actor"].terms["base_ang_vel"].delay_min_lag = 0
   cfg.observations["actor"].terms["base_ang_vel"].delay_max_lag = 2  # 0-40ms
   cfg.observations["actor"].terms["projected_gravity"].delay_min_lag = 0

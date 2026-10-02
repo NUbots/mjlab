@@ -46,9 +46,9 @@ EXPECTED_POLICY_JOINTS = (
 )
 
 
-# lin vel (3) + ang vel (3) + gravity (3) + joint pos/vel/actions (3 x 20)
+# ang vel (3) + gravity (3) + joint pos/vel/actions (3 x 20)
 # + command (3).
-ACTOR_DIM = 72
+ACTOR_DIM = 69
 
 
 @pytest.fixture(scope="module")
@@ -65,7 +65,6 @@ def k1_env():
 def test_actor_terms_and_order() -> None:
   cfg = booster_k1_flat_env_cfg()
   assert list(cfg.observations["actor"].terms) == [
-    "base_lin_vel",
     "base_ang_vel",
     "projected_gravity",
     "joint_pos",
@@ -90,12 +89,12 @@ def test_no_competence_machinery() -> None:
   assert "competence_diagnostics" not in cfg.curriculum
 
 
-def test_base_lin_vel_has_odometry_noise_and_delay() -> None:
-  """The K1 observes base linear velocity, corrupted like a real estimate."""
+def test_base_lin_vel_is_critic_only() -> None:
+  """The robot has no base velocity estimate while the policy walks."""
   cfg = booster_k1_flat_env_cfg()
-  term = cfg.observations["actor"].terms["base_lin_vel"]
-  assert term.noise is not None
-  assert term.delay_max_lag > 0
+  assert "base_lin_vel" not in cfg.observations["actor"].terms
+  assert "base_lin_vel" not in cfg.observations["history"].terms
+  assert "base_lin_vel" in cfg.observations["critic"].terms
 
 
 def test_no_gait_clock() -> None:
