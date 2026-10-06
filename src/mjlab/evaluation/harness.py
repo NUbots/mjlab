@@ -39,7 +39,6 @@ RANDOMISATION_EVENTS: tuple[str, ...] = (
   "encoder_bias",
   "base_com",
   "pd_gains",
-  "imu_mount_tilt",
 )
 """Startup events that perturb the model away from nominal.
 
