@@ -126,7 +126,6 @@ class CommandSequence:
     commands: Shape ``(T, 3)`` absolute commands, ordered as :data:`AXES`.
     params: How the sequence was built, as fractions of range and as absolute
       values. JSON-serialisable.
-    physics_rate: Whether the run is also logged at the physics rate.
   """
 
   name: str
@@ -135,7 +134,6 @@ class CommandSequence:
   dt: float
   commands: np.ndarray
   params: dict[str, Any] = field(default_factory=dict)
-  physics_rate: bool = False
 
   @property
   def num_steps(self) -> int:
@@ -157,7 +155,6 @@ class CommandSequence:
       "num_steps": self.num_steps,
       "duration_s": self.duration,
       "lead_in_s": LEAD_IN_S,
-      "physics_rate_logged": self.physics_rate,
       "params": self.params,
     }
 
@@ -227,7 +224,6 @@ def step_sequences(ranges: Ranges, dt: float) -> list[CommandSequence]:
               "hold_s": STEP_HOLD_S,
               "return_s": RETURN_S,
             },
-            physics_rate=True,
           )
         )
   return out
@@ -265,7 +261,6 @@ def level_sequences(ranges: Ranges, dt: float) -> list[CommandSequence]:
             "hold_s": LEVEL_HOLD_S,
             "return_s": RETURN_S,
           },
-          physics_rate=True,
         )
       )
   return out
@@ -299,7 +294,6 @@ def ramp_sequences(ranges: Ranges, dt: float) -> list[CommandSequence]:
             "slope_per_s": end / RAMP_S,
             "return_s": RETURN_S,
           },
-          physics_rate=False,
         )
       )
   return out
@@ -357,7 +351,6 @@ def multilevel_sequence(
       "return_s": RETURN_S,
       "levels": levels,
     },
-    physics_rate=False,
   )
 
 
@@ -413,7 +406,6 @@ def chirp_sequences(ranges: Ranges, dt: float) -> list[CommandSequence]:
           "return_s": RETURN_S,
           "instantaneous_frequency_hz": "f0 + (f1 - f0) * (t - start_s) / sweep_s",
         },
-        physics_rate=True,
       )
     )
   return out
@@ -455,7 +447,6 @@ def combined_sequences(ranges: Ranges, dt: float) -> list[CommandSequence]:
               "hold_off_s": step_onset + COMBINED_STEP_S + COMBINED_BACK_S,
               "return_s": RETURN_S,
             },
-            physics_rate=True,
           )
         )
   return out

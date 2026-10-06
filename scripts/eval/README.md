@@ -733,31 +733,44 @@ logs/eval/sysid_qufuh82s/
   envelope/<nominal|randomised_seedN>/summary.csv, traces.mat, metadata.json
 ```
 
-A run file (`.mat`, or `--format csv` for `<run>.csv` + `<run>_physics.csv`)
-holds a `policy` struct at 50 Hz and, for `step`, `level`, `combined` and
-`chirp`, a `physics` struct at 200 Hz. Every 4th physics row is the
-corresponding policy row. Both have the same columns:
+A run file (`.mat` with a `physics` struct, or `<run>.csv` with `--format csv`)
+holds every physics step at 200 Hz, for every family. Nothing is filtered or
+decimated: a plain every-4th-row decimation to the 50 Hz policy rate would alias
+foot-impact content above 25 Hz into the band being identified, so the
+anti-aliasing filter (and, for comparison with motion capture, the
+differentiation of positions) is left to offline processing, where the same
+pipeline can be applied to both. Commands change only on policy steps, so each
+command value repeats over 4 rows. Columns:
 
 | column | meaning |
 | --- | --- |
-| `t` | s since reset; row `k` is at `k * dt` |
+| `t` | s since reset; row `k` is at `k * 0.005` |
 | `cmd_vx`, `cmd_vy`, `cmd_wz` | command in force over `[t, t + dt)`, as the policy sees it |
 | `vx`, `vy` | root-body (`torso`) origin velocity in the heading frame, m/s |
 | `wz` | yaw rate (world z), rad/s |
 | `x`, `y`, `z`, `yaw` | root-body position (world, env origin not subtracted) and heading, wrapped |
+| `qw`, `qx`, `qy`, `qz` | root-body orientation, world frame |
+| `lin_vel_w_x/y/z` | root-body origin linear velocity, world frame, m/s |
+| `ang_vel_b_x/y/z` | root-body angular velocity, body frame, rad/s |
 | `fall` | 1 on the row the fall condition first held; the run ends there |
 | `push` | 1 where a training push was applied immediately after this row's state |
 
 The heading frame is the world rotated by yaw alone, matching what motion
 capture of the torso gives. The state is read from the root free joint's
 `qpos`/`qvel` after each physics step, which is current at every substep, unlike
-the derived body quantities. Nothing is filtered. Scalars `fell`, `fall_time_s`
-and `env_index` sit beside the structs. `metadata.json` per sequence has the
-checkpoint path and SHA-256, the sequence parameters (fractions and absolute
-values, seeds, onset times), the plant (timestep, decimation, rates, delays,
+the derived body quantities. The full free-joint state (position, quaternion,
+`qvel`) is kept so that the pose of a motion-capture rigid body offset from the
+torso origin can be reconstructed offline, and velocities estimated from
+positions can be checked against the exact `qvel`. Positions include the env
+origin, which the simulator integrates in float32 at those world coordinates;
+the origin is saved per run (`env_origin`) for subtracting offline. The fall
+condition is checked once per policy step, so `fall` lands on a multiple of 4
+rows. Scalars `fell`, `fall_time_s`, `env_index` and `env_origin` sit beside the
+struct. `metadata.json` per sequence has the checkpoint path and SHA-256, the
+sequence parameters (fractions and absolute values, seeds, onset times), the plant (timestep, decimation, rates, delays,
 event parameters, seed, velocity body), the command ranges, and per run the fall
-time. Randomised runs also record each push's change to `qvel` and every
-parameter the startup DR drew for that robot.
+time and env origin. Randomised runs also record each push's change to `qvel`
+and every parameter the startup DR drew for that robot.
 
 The envelope grid is 11 × 7 × 9 points over ±120% of each range, one robot per
 point. Each robot stands for 2 s and then holds its command for 8 s. The first

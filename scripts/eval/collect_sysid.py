@@ -6,9 +6,10 @@ Three subcommands:
   plays every scripted command sequence of :mod:`mjlab.evaluation.sysid_sequences`
   (steps, level changes, ramps, random staircases, chirps, combined-axis steps,
   plus held-out staircases) and writes one file per run with the commanded and
-  achieved velocity. ``--variant nominal`` runs one robot per sequence with every
-  randomisation off; ``--variant randomised`` runs ``--replicas`` robots per
-  sequence drawn from the training distribution.
+  achieved motion at the physics rate, unfiltered, for filtering offline.
+  ``--variant nominal`` runs one robot per sequence with every randomisation
+  off; ``--variant randomised`` runs ``--replicas`` robots per sequence drawn
+  from the training distribution.
 ``envelope``
   holds each point of a (vx, vy, wz) grid spanning 120 % of the training range,
   one robot per point, and summarises the steady state.
@@ -78,7 +79,7 @@ DEFAULT_WANDB_RUN = "vincenttumm-the-university-of-newcastle/mjlab/qufuh82s"
 DEFAULT_OUT = Path("logs/eval/sysid_qufuh82s")
 
 COLUMN_DOC = {
-  "t": "s since reset; row k is at k * dt",
+  "t": "s since reset; row k is at k * physics_dt",
   "cmd_vx": "m/s, command in force over [t, t + dt), as the policy observes it",
   "cmd_vy": "m/s",
   "cmd_wz": "rad/s",
@@ -89,6 +90,16 @@ COLUMN_DOC = {
   "y": "m",
   "z": "m",
   "yaw": "rad, heading of the root body x axis, wrapped to (-pi, pi]",
+  "qw": "root body orientation, world frame, unit quaternion (w, x, y, z)",
+  "qx": "",
+  "qy": "",
+  "qz": "",
+  "lin_vel_w_x": "m/s, root body origin linear velocity, world frame (qvel)",
+  "lin_vel_w_y": "m/s",
+  "lin_vel_w_z": "m/s",
+  "ang_vel_b_x": "rad/s, root body angular velocity, body frame (qvel)",
+  "ang_vel_b_y": "rad/s",
+  "ang_vel_b_z": "rad/s",
   "fall": "1 on the row the task's fall condition first held; the run ends there",
   "push": "1 where a training push was applied right after this row's state",
 }
@@ -212,8 +223,9 @@ def _rig_metadata(rig: SysidRig) -> dict[str, Any]:
     "physics_rate_hz": 1.0 / info.physics_dt,
     "velocity_body": info.velocity_body,
     "velocity_source": (
-      "root body free joint qpos/qvel, read after each physics step; linear "
-      "velocity of the body origin rotated into the heading frame (yaw only)"
+      "root body free joint qpos/qvel, read after every physics step and not "
+      "filtered or decimated; vx, vy, wz are the body origin's velocity rotated "
+      "into the heading frame (yaw only), the raw state is kept beside them"
     ),
     "observation_noise": info.observation_noise,
     "observation_delay_steps": info.observation_delays,
@@ -231,7 +243,7 @@ def _rig_metadata(rig: SysidRig) -> dict[str, Any]:
 def _batches(
   sequences: list[CommandSequence], replicas: int, max_envs: int
 ) -> list[list[CommandSequence]]:
-  """Group by family (one logging rate per batch), split to fit ``max_envs``."""
+  """Group by family, so a batch pads little, and split to fit ``max_envs``."""
   per_batch = max(1, max_envs // replicas)
   batches = []
   for family in dict.fromkeys(sequence.family for sequence in sequences):
@@ -288,8 +300,8 @@ def run_sequences(args: Sequences) -> None:
       )
       _check_dt(batch, rig)
       rig_meta = _rig_metadata(rig)
-      physics_rate = batch[0].physics_rate
-      result = rig.run(_schedule(batch, replicas), physics_rate)
+      result = rig.run(_schedule(batch, replicas), physics_rate=True)
+      origins = rig.env.scene.env_origins.cpu().numpy().astype(np.float64)
       randomised = rig.randomised_parameters() if args.variant == "randomised" else None
       rig.close()
       sim_s = time.time() - started
@@ -301,7 +313,14 @@ def run_sequences(args: Sequences) -> None:
           env_id = seq_no * replicas + replica
           runs.append(
             _write_sequence_run(
-              args, sequence, result, env_id, replica, directory, randomised
+              args,
+              sequence,
+              result,
+              env_id,
+              replica,
+              directory,
+              randomised,
+              origins[env_id],
             )
           )
         meta = {
@@ -328,7 +347,7 @@ def run_sequences(args: Sequences) -> None:
         sequences.append(sequence)
       print(
         f"[{dataset}] batch {batch_no}: {len(batch)} x {replicas} "
-        f"({batch[0].family}), {result.policy.root.shape[0] * rig.control_dt:.0f} s "
+        f"({batch[0].family}), {len(result.policy.commands) * rig.control_dt:.0f} s "
         f"simulated in {sim_s:.0f} s, falls "
         f"{int((result.fall_step >= 0).sum())}/{num_envs}"
       )
@@ -389,42 +408,43 @@ def _write_sequence_run(
   replica: int,
   directory: Path,
   randomised: list[dict[str, Any]] | None,
+  env_origin: np.ndarray,
 ) -> dict[str, Any]:
+  physics = result.physics
+  assert physics is not None
+  decimation = round(result.policy.dt / physics.dt)
   steps = sequence.num_steps
   fall_step = int(result.fall_step[env_id])
-  # The trace has rows 0..T-1; a fall on the very last step is dated to the last
-  # row rather than dropped.
+  # The fall condition is checked once per policy step, so a fall is dated to the
+  # physics row of that policy step. One on the very last step is dated to the
+  # last policy step rather than dropped.
   fell = 0 <= fall_step and fall_step <= steps
-  fall_row = min(fall_step, steps - 1) if fell else None
-  num_rows = fall_row + 1 if fall_row is not None else steps
-  policy = run_table(
-    result.policy, env_id, num_rows, fall_row, result.push_flag, rows_per_push_step=1
+  fall_row = min(fall_step, steps - 1) * decimation if fell else None
+  num_rows = fall_row + 1 if fall_row is not None else steps * decimation
+  table = run_table(
+    physics,
+    env_id,
+    num_rows,
+    fall_row,
+    result.push_flag,
+    rows_per_push_step=decimation,
   )
-  physics = None
-  if result.physics is not None:
-    decimation = round(result.policy.dt / result.physics.dt)
-    phys_fall = fall_row * decimation if fall_row is not None else None
-    phys_rows = phys_fall + 1 if phys_fall is not None else steps * decimation
-    physics = run_table(
-      result.physics,
-      env_id,
-      phys_rows,
-      phys_fall,
-      result.push_flag,
-      rows_per_push_step=decimation,
-    )
-  fall_time = fall_row * result.policy.dt if fall_row is not None else math.nan
+  fall_time = fall_row * physics.dt if fall_row is not None else math.nan
   files = write_run(
     directory / f"env{replica:03d}",
-    policy,
-    physics,
-    {"fell": float(fell), "fall_time_s": fall_time, "env_index": float(env_id)},
+    table,
+    {
+      "fell": float(fell),
+      "fall_time_s": fall_time,
+      "env_index": float(env_id),
+      "env_origin": env_origin,
+    },
     args.format,
   )
   pushes = [
     {"t_s": step * result.policy.dt, "dqvel": delta}
     for push_env, step, delta in result.pushes
-    if push_env == env_id and step < num_rows
+    if push_env == env_id and step * decimation < num_rows
   ]
   run: dict[str, Any] = {
     "replica": replica,
@@ -432,8 +452,8 @@ def _write_sequence_run(
     "files": files,
     "fell": bool(fell),
     "fall_time_s": nan_to_none(fall_time),
-    "policy_rows": num_rows,
-    "physics_rows": None if physics is None else int(len(physics["t"])),
+    "rows": num_rows,
+    "env_origin": env_origin.tolist(),
   }
   if randomised is not None:
     run["pushes"] = pushes

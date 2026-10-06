@@ -642,10 +642,40 @@ COLUMNS: tuple[str, ...] = (
   "y",
   "z",
   "yaw",
+  "qw",
+  "qx",
+  "qy",
+  "qz",
+  "lin_vel_w_x",
+  "lin_vel_w_y",
+  "lin_vel_w_z",
+  "ang_vel_b_x",
+  "ang_vel_b_y",
+  "ang_vel_b_z",
   "fall",
   "push",
 )
-"""Columns of every run file, in order. See :func:`run_table`."""
+"""Columns of every run file, in order. See :func:`run_table`.
+
+Besides the heading-frame quantities, the root free joint's full state is kept
+as it came out of the simulator, so that anything a motion capture pipeline
+estimates (the pose of a point offset from the root, velocities by differencing)
+can be recomputed offline and checked against the exact velocity.
+"""
+
+RAW_STATE_COLUMNS: tuple[tuple[str, int], ...] = (
+  ("qw", 3),
+  ("qx", 4),
+  ("qy", 5),
+  ("qz", 6),
+  ("lin_vel_w_x", 7),
+  ("lin_vel_w_y", 8),
+  ("lin_vel_w_z", 9),
+  ("ang_vel_b_x", 10),
+  ("ang_vel_b_y", 11),
+  ("ang_vel_b_z", 12),
+)
+"""Run-file columns copied straight from the root state, with their index in it."""
 
 
 def run_table(
@@ -672,6 +702,9 @@ def run_table(
     out[f"cmd_{axis}"] = commands[:, index]
   for key in ("vx", "vy", "wz", "x", "y", "z", "yaw"):
     out[key] = frame[key].cpu().numpy().astype(np.float64)
+  raw = trace.root[:num_rows, env_id].cpu().numpy().astype(np.float64)
+  for key, column in RAW_STATE_COLUMNS:
+    out[key] = raw[:, column]
   fall = np.zeros(num_rows, dtype=np.int8)
   if fall_row is not None:
     fall[fall_row] = 1
@@ -687,45 +720,41 @@ def run_table(
 
 def write_run(
   path: Path,
-  policy: dict[str, np.ndarray],
-  physics: dict[str, np.ndarray] | None,
-  scalars: dict[str, float],
+  table: dict[str, np.ndarray],
+  scalars: dict[str, Any],
   fmt: Literal["mat", "csv"],
 ) -> list[str]:
   """Write one run. Returns the file names written, relative to ``path.parent``.
 
-  ``mat`` writes one file with a ``policy`` struct and, where logged, a
-  ``physics`` struct, each holding the :data:`COLUMNS` as column vectors.
-  ``csv`` writes the policy-rate table to ``<name>.csv`` and the physics-rate
-  one to ``<name>_physics.csv``.
+  ``mat`` writes one file with a ``physics`` struct holding the :data:`COLUMNS`
+  as column vectors, and the scalars beside it. ``csv`` writes the table alone
+  to ``<name>.csv``; the scalars are in the sequence's ``metadata.json`` either
+  way.
   """
   path.parent.mkdir(parents=True, exist_ok=True)
   if fmt == "mat":
     import scipy.io
 
-    content: dict[str, Any] = {
-      "policy": {key: value.reshape(-1, 1) for key, value in policy.items()},
-      **scalars,
-    }
-    if physics is not None:
-      content["physics"] = {key: value.reshape(-1, 1) for key, value in physics.items()}
     file = path.with_suffix(".mat")
-    scipy.io.savemat(file, content, do_compression=True, oned_as="column")
+    scipy.io.savemat(
+      file,
+      {
+        "physics": {key: value.reshape(-1, 1) for key, value in table.items()},
+        **scalars,
+      },
+      do_compression=True,
+      oned_as="column",
+    )
     return [file.name]
 
-  written = []
-  for suffix, table in (("", policy), ("_physics", physics)):
-    if table is None:
-      continue
-    file = path.with_name(f"{path.name}{suffix}.csv")
-    matrix = np.column_stack([table[key].astype(np.float64) for key in COLUMNS])
-    integer_columns = {"fall", "push"}
-    formats = ["%d" if key in integer_columns else "%.9g" for key in COLUMNS]
-    np.savetxt(
-      file, matrix, delimiter=",", header=",".join(COLUMNS), comments="", fmt=formats
-    )
-    written.append(file.name)
-  return written
+  file = path.with_name(f"{path.name}.csv")
+  matrix = np.column_stack([table[key].astype(np.float64) for key in COLUMNS])
+  integer_columns = {"fall", "push"}
+  formats = ["%d" if key in integer_columns else "%.9g" for key in COLUMNS]
+  np.savetxt(
+    file, matrix, delimiter=",", header=",".join(COLUMNS), comments="", fmt=formats
+  )
+  return [file.name]
 
 
 def tracking_score(

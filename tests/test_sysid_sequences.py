@@ -6,7 +6,14 @@ import numpy as np
 import pytest
 import torch
 
-from mjlab.evaluation.sysid import heading_frame
+from mjlab.evaluation.sysid import (
+  COLUMNS,
+  RAW_STATE_COLUMNS,
+  Trace,
+  heading_frame,
+  run_table,
+  write_run,
+)
 from mjlab.evaluation.sysid_sequences import (
   AXES,
   LEAD_IN_S,
@@ -108,3 +115,21 @@ def test_heading_frame_removes_yaw_only():
   assert float(frame["vx"]) == pytest.approx(speed)
   assert float(frame["vy"]) == pytest.approx(0.0, abs=1e-12)
   assert float(frame["wz"]) == pytest.approx(rate)
+
+
+def test_run_table_keeps_raw_state(tmp_path):
+  rows, num_envs = 8, 2
+  root = torch.randn(rows, num_envs, 13)
+  root[..., 3:7] /= root[..., 3:7].norm(dim=-1, keepdim=True)
+  trace = Trace(root, torch.zeros(rows, num_envs, 3), dt=0.005)
+  push_flag = np.zeros((2, num_envs), dtype=np.int8)
+  push_flag[1, 1] = 1
+  table = run_table(trace, 1, 5, 4, push_flag, rows_per_push_step=4)
+  assert list(table) == list(COLUMNS)
+  for key, column in RAW_STATE_COLUMNS:
+    assert np.allclose(table[key], root[:5, 1, column].numpy()), key
+  assert table["fall"].tolist() == [0, 0, 0, 0, 1]
+  assert table["push"].tolist() == [0, 0, 0, 0, 1]
+  (written,) = write_run(tmp_path / "env000", table, {"fell": 1.0}, "csv")
+  loaded = np.loadtxt(tmp_path / written, delimiter=",", skiprows=1)
+  assert loaded.shape == (5, len(COLUMNS))
