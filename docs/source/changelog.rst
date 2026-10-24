@@ -5,6 +5,13 @@ Changelog
 Upcoming version (not yet released)
 -----------------------------------
 
+Added
+^^^^^
+
+- ``play --demo`` loads a task's bundled pretrained checkpoint, registered via
+  the new ``demo_checkpoint`` argument of ``register_mjlab_task``. The
+  ``Mjlab-Velocity-Flat-Nubots-Nugus`` task ships with one.
+
 Version 1.6.0 (August 8, 2026)
 ------------------------------
 

@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.rl import RslRlBaseRunnerCfg
@@ -13,6 +14,7 @@ class _TaskCfg:
   play_env_cfg: ManagerBasedRlEnvCfg
   rl_cfg: RslRlBaseRunnerCfg
   runner_cls: type | None
+  demo_checkpoint: Path | None = None
 
 
 # Private module-level registry: task_id -> task config.
@@ -25,6 +27,7 @@ def register_mjlab_task(
   play_env_cfg: ManagerBasedRlEnvCfg,
   rl_cfg: RslRlBaseRunnerCfg,
   runner_cls: type | None = None,
+  demo_checkpoint: Path | None = None,
 ) -> None:
   """Register an environment task.
 
@@ -34,10 +37,13 @@ def register_mjlab_task(
     play_env_cfg: Environment configuration in "play" mode.
     rl_cfg: RL runner configuration.
     runner_cls: Optional custom runner class. If None, uses OnPolicyRunner.
+    demo_checkpoint: Optional pretrained checkpoint loaded by ``play --demo``.
   """
   if task_id in _REGISTRY:
     raise ValueError(f"Task '{task_id}' is already registered")
-  _REGISTRY[task_id] = _TaskCfg(env_cfg, play_env_cfg, rl_cfg, runner_cls)
+  _REGISTRY[task_id] = _TaskCfg(
+    env_cfg, play_env_cfg, rl_cfg, runner_cls, demo_checkpoint
+  )
 
 
 def list_tasks() -> list[str]:
@@ -69,3 +75,8 @@ def load_runner_cls(task_name: str) -> type | None:
   If None, the default OnPolicyRunner will be used.
   """
   return _REGISTRY[task_name].runner_cls
+
+
+def load_demo_checkpoint(task_name: str) -> Path | None:
+  """Load the pretrained demo checkpoint path for a task, if one is registered."""
+  return _REGISTRY[task_name].demo_checkpoint
