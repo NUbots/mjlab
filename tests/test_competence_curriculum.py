@@ -841,7 +841,7 @@ def test_competence_wiring_is_log_only() -> None:
   # keeps the base task's weight instead of being held at stage 0.
   for reward_name in ("joule_heating", "joint_acc_l2", "torque_rate"):
     assert reward_name not in cfg.rewards
-  assert cfg.rewards["soft_landing"].weight == -1e-5
+  assert cfg.rewards["soft_landing"].weight == 0.0
 
 
 def test_curriculum_terms_accept_manager_kwargs() -> None:

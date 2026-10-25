@@ -1,7 +1,5 @@
 """NUbots Nugus velocity environment confiurations."""
 
-import copy
-
 from mjlab.asset_zoo.robots import (
   NUGUS_ACTION_SCALE,
   NUGUS_MOTOR_JOINT_REGEX,
@@ -12,10 +10,7 @@ from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
-from mjlab.managers.observation_manager import (
-  ObservationGroupCfg,
-  ObservationTermCfg,
-)
+from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import (
   ContactMatch,
@@ -29,11 +24,6 @@ from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
-
-HISTORY_WINDOW = 25
-"""Length (in control steps) of the actor observation window fed to the
-policy's history encoder (``mjlab.rl.obs_history``). At the 50 Hz policy
-rate this is 0.5 s, roughly one gait cycle."""
 
 
 def _add_competence_tracker_event(cfg: ManagerBasedRlEnvCfg) -> None:
@@ -320,42 +310,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
 
   # Competence tracking plus the frontier diagnostics it publishes. Log-only:
   # these install event/curriculum terms but set no reward weight, so the
-  # objective is identical to the non-competence config. They add no actor
-  # observation terms, so they are free to sit either side of the history
-  # block below.
+  # objective is identical to the non-competence config.
   _add_competence_tracker_event(cfg)
   if not play:
     _add_competence_diagnostics(cfg)
-
-  # Actor observation history (see mjlab.rl.obs_history): a HISTORY_WINDOW-step
-  # window of the actor observation stream, shaped [B, T, D], encoded by a TCN
-  # inside the actor model and concatenated onto the current observation.
-  #
-  # This block MUST stay after every actor-term mutation above: the window is
-  # built from deep copies of the actor terms, so it only clones the final
-  # layout. That equality is the deployment contract — one history frame is
-  # byte-for-byte the actor observation vector, so the robot keeps a single
-  # ring buffer of the vector it already builds. Keep it last in this
-  # function so new config blocks land above it by default.
-  #
-  # The copies carry their own noise/delay state, so the window draws an
-  # independent corruption realization rather than replaying the exact frames
-  # the policy saw. That is intended: the encoder should read the signal, not
-  # memorize one noise draw.
-  cfg.observations["history"] = ObservationGroupCfg(
-    terms={
-      name: copy.deepcopy(term)
-      for name, term in cfg.observations["actor"].terms.items()
-    },
-    concatenate_terms=True,
-    enable_corruption=True,
-    history_length=HISTORY_WINDOW,
-    flatten_history_dim=False,
-  )
-  
-  # Only push 30% of envs; the rest match the push-free deployment setting.
-  cfg.events["push_robot"].func = envs_mdp.push_cohort_by_setting_velocity
-  cfg.events["push_robot"].params["cohort_frac"] = 0.3
 
   # Apply play mode overrides.
   if play:
@@ -363,7 +321,6 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.episode_length_s = int(1e9)
 
     cfg.observations["actor"].enable_corruption = False
-    cfg.observations["history"].enable_corruption = False
     cfg.events.pop("push_robot", None)
     cfg.events["randomize_terrain"] = EventTermCfg(
       func=envs_mdp.randomize_terrain,
