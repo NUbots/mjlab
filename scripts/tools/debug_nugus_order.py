@@ -39,7 +39,9 @@ def main() -> None:
     "Action joint order (action[i] -> joint, for JointPositionActionCfg"
     ' with actuator_names=(".*",)):'
   )
-  for i, (jid, name) in enumerate(zip(action_joint_ids, action_joint_names)):
+  for i, (jid, name) in enumerate(
+    zip(action_joint_ids, action_joint_names, strict=True)
+  ):
     print(f"  [{i:2d}] joint_id={jid:2d} {name}")
 
   print()
@@ -98,7 +100,9 @@ def print_action_term_offset_and_scale(entity: Entity) -> None:
     "Action term offset / scale (target = action * scale + offset; "
     "offset = default_joint_pos via keyframe, scale = NUGUS_ACTION_SCALE):"
   )
-  for i, (jid, name) in enumerate(zip(action_joint_ids, action_joint_names)):
+  for i, (jid, name) in enumerate(
+    zip(action_joint_ids, action_joint_names, strict=True)
+  ):
     offset = joint_pos_resolved[jid]
     scale = scale_resolved[jid]
     print(

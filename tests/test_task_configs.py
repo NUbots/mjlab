@@ -4,7 +4,7 @@ import pytest
 
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.managers.observation_manager import ObservationGroupCfg
-from mjlab.tasks.registry import list_tasks, load_env_cfg
+from mjlab.tasks.registry import list_tasks, load_demo_checkpoint, load_env_cfg
 
 
 @pytest.fixture(scope="module")
@@ -23,6 +23,14 @@ def test_all_tasks_loadable(all_task_ids: list[str]) -> None:
       )
     except Exception as e:
       pytest.fail(f"Failed to load task '{task_id}': {e}")
+
+
+def test_demo_checkpoints_exist(all_task_ids: list[str]) -> None:
+  """Registered demo checkpoints should point to files that exist."""
+  for task_id in all_task_ids:
+    checkpoint = load_demo_checkpoint(task_id)
+    if checkpoint is not None:
+      assert checkpoint.is_file(), f"Missing demo checkpoint for {task_id}"
 
 
 def test_all_tasks_have_play_config(all_task_ids: list[str]) -> None:

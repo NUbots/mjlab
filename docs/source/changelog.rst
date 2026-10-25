@@ -68,6 +68,9 @@ Added
   clean cohort (via ``push_cohort_by_setting_velocity``) so the frontier is
   measured on uncontaminated episodes and the push effect reads as a
   difference in rates. Log-only; it drives nothing.
+- ``play --demo`` loads a task's bundled pretrained checkpoint, registered via
+  the new ``demo_checkpoint`` argument of ``register_mjlab_task``. The
+  ``Mjlab-Velocity-Flat-Nubots-Nugus`` task ships with one.
 
 Version 1.6.0 (August 8, 2026)
 ------------------------------

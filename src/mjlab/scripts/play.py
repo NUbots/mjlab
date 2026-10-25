@@ -14,7 +14,13 @@ import tyro
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.scripts._cli import maybe_print_top_level_help
-from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
+from mjlab.tasks.registry import (
+  list_tasks,
+  load_demo_checkpoint,
+  load_env_cfg,
+  load_rl_cfg,
+  load_runner_cls,
+)
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.utils.os import get_wandb_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
@@ -38,6 +44,10 @@ class PlayConfig:
   wandb_checkpoint_name: str | None = None
   """Optional checkpoint name within the W&B run to load (e.g. 'model_4000.pt')."""
   checkpoint_file: str | None = None
+  # A counter so `--demo` works as a bare flag despite FlagConversionOff.
+  demo: tyro.conf.UseCounterAction[int] = 0
+  """Play the task's bundled pretrained checkpoint (ignored if `checkpoint_file` is
+  set)."""
   motion_file: str | None = None
   num_envs: int | None = None
   device: str | None = None
@@ -129,12 +139,19 @@ def run_play(task_id: str, cfg: PlayConfig):
             raise RuntimeError("No motion artifact found in the run.")
           motion_cmd.motion_file = str(Path(art.download()) / "motion.npz")
 
+  checkpoint_file = cfg.checkpoint_file
+  if TRAINED_MODE and cfg.demo and checkpoint_file is None:
+    demo_checkpoint = load_demo_checkpoint(task_id)
+    if demo_checkpoint is None:
+      raise ValueError(f"Task '{task_id}' has no demo checkpoint registered.")
+    checkpoint_file = str(demo_checkpoint)
+
   log_dir: Path | None = None
   resume_path: Path | None = None
   if TRAINED_MODE:
     log_root_path = (Path(cfg.log_root) / agent_cfg.experiment_name).resolve()
-    if cfg.checkpoint_file is not None:
-      resume_path = Path(cfg.checkpoint_file)
+    if checkpoint_file is not None:
+      resume_path = Path(checkpoint_file)
       if not resume_path.exists():
         raise FileNotFoundError(f"Checkpoint file not found: {resume_path}")
       print(f"[INFO]: Loading checkpoint: {resume_path.name}")

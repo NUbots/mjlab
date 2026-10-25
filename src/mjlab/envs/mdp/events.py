@@ -337,6 +337,26 @@ def push_by_setting_velocity(
   asset.write_root_link_velocity_to_sim(vel_w, env_ids=env_ids)
 
 
+def push_cohort_by_setting_velocity(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  velocity_range: dict[str, tuple[float, float]],
+  cohort_frac: float = 0.3,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """:func:`push_by_setting_velocity` restricted to a fixed cohort of envs.
+
+  Only env indices below ``round(cohort_frac * num_envs)`` are ever pushed; the
+  rest train push-free. The cohort is fixed by index for the whole run.
+  """
+  env_ids = resolve_env_ids(env, env_ids)
+  n_pushed = int(round(cohort_frac * env.num_envs))
+  pushed_ids = env_ids[env_ids < n_pushed]
+  if len(pushed_ids) == 0:
+    return
+  push_by_setting_velocity(env, pushed_ids, velocity_range, asset_cfg)
+
+
 def apply_external_force_torque(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,

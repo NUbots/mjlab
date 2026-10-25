@@ -352,6 +352,10 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     history_length=HISTORY_WINDOW,
     flatten_history_dim=False,
   )
+  
+  # Only push 30% of envs; the rest match the push-free deployment setting.
+  cfg.events["push_robot"].func = envs_mdp.push_cohort_by_setting_velocity
+  cfg.events["push_robot"].params["cohort_frac"] = 0.3
 
   # Apply play mode overrides.
   if play:
