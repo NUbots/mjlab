@@ -308,12 +308,9 @@ def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["feet_distance"].weight = -0.1
   cfg.rewards["foot_flat"].weight = -0.5  # Encourage flat-footed, level swing.
 
-  # Competence tracking plus the frontier diagnostics it publishes. Log-only:
-  # these install event/curriculum terms but set no reward weight, so the
-  # objective is identical to the non-competence config.
-  _add_competence_tracker_event(cfg)
-  if not play:
-    _add_competence_diagnostics(cfg)
+  # Only push 30% of envs; the rest match the push-free deployment setting.
+  cfg.events["push_robot"].func = envs_mdp.push_cohort_by_setting_velocity
+  cfg.events["push_robot"].params["cohort_frac"] = 0.3
 
   # Apply play mode overrides.
   if play:
