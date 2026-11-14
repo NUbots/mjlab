@@ -8,7 +8,6 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs import mdp as envs_mdp
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.managers.curriculum_manager import CurriculumTermCfg
 from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.observation_manager import ObservationTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
@@ -24,31 +23,6 @@ from mjlab.tasks.velocity import mdp
 from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import GaussianNoiseCfg as Gnoise
-
-
-def _add_competence_tracker_event(cfg: ManagerBasedRlEnvCfg) -> None:
-  """Accumulate the per-step competence statistics on every env step."""
-  cfg.events["competence_tracker"] = EventTermCfg(
-    mode="step",
-    func=mdp.competence_tracker_step,
-    params={},
-  )
-
-
-def _add_competence_diagnostics(cfg: ManagerBasedRlEnvCfg) -> None:
-  """Stratify pushes by cohort and publish the frontier diagnostics.
-
-  Only the low ``PUSH_COHORT_FRAC`` share of env indices is pushed; the
-  clean cohort is the uncontaminated tracking-competence baseline (and the
-  only source of frontier exposure), and it matches the mostly push-free
-  deployment distribution.
-  """
-  if "push_robot" in cfg.events:
-    cfg.events["push_robot"].func = mdp.push_cohort_by_setting_velocity
-  cfg.curriculum["competence_diagnostics"] = CurriculumTermCfg(
-    func=mdp.competence_diagnostics,
-    params={},
-  )
 
 
 def nubots_nugus_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:

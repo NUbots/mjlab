@@ -2,7 +2,7 @@
 
 A port of the NUgus velocity recipe (same base reward set and weights, same
 sensor noise/delay model and the same 25-step observation-history actor) to
-the K1, without competence tracking. As on the NUgus, the actor does not
+the K1. As on the NUgus, the actor does not
 observe base linear velocity: the Booster controller's odometry twist
 (rt/odom) read exactly zero on the robot while this policy owned the joints
 (CUSTOM mode), and policies trained to observe it used it as velocity
@@ -303,9 +303,9 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # early on the policy learns that falling ends them: episodes shrink to ~8
   # steps until the action std decays and the penalties with it. The NUgus
   # never gets there because its 0.05 action scale cannot throw it over; the
-  # K1's ~0.5 rad scale can. An upright bonus (as on k1_competence, whose K1
-  # runs showed the same dip and recovered by iteration ~300) gives staying
-  # alive a dense positive value and shortens that transient.
+  # K1's ~0.5 rad scale can. An upright bonus (earlier K1 runs showed the same
+  # dip and recovered by iteration ~300 with one) gives staying alive a dense positive value and shortens that
+  # transient.
   cfg.rewards["upright"].weight = 1.0
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("Trunk",)
   cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("Trunk",)

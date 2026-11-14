@@ -18,9 +18,8 @@ Added
   evaluated with ``--task-id``.
 - Added the Booster K1 humanoid and the ``Mjlab-Velocity-Flat-Booster-K1`` /
   ``Mjlab-Velocity-Rough-Booster-K1`` tasks. They follow the NUbots Nugus
-  velocity recipe (25-step observation-history actor) without competence
-  tracking and without a gait clock, so the policy is free to pick its own
-  cadence. Base linear velocity is critic-only: the Booster controller's
+  velocity recipe (25-step observation-history actor) without a gait
+  clock, so the policy is free to pick its own cadence. Base linear velocity is critic-only: the Booster controller's
   odometry twist read zero on the robot while the policy walked, so the
   deployed policy has no estimate to observe. The head is left to the vision
   system, so the policy commands and observes only the 20 leg and arm joints. A
@@ -50,24 +49,6 @@ Added
   ``history_window``, ``history_obs_dim``, and ``history_layout`` describing
   that deployment contract. Enabled for NUbots Nugus with a 25-step (0.5 s)
   window.
-- Added competence tracking for velocity tasks. A new
-  ``mjlab.tasks.velocity.mdp.competence`` module tracks per-env episode
-  statistics (tracking error, attainment, near-fall wobble, falls, episode
-  length) and EMAs them into population competence signals. The
-  ``staged_on_competence`` curriculum term walks a reward term's weight up a
-  five-stage ramp from zero while the population is demonstrably stable, backs
-  it down a stage when stability is badly lost, and freezes in between. It is
-  implemented and tested but installed on no config: NUbots Nugus tracks
-  competence and publishes the diagnostics below without gating any reward, so
-  its objective is identical to the ungated config.
-- Added a ``competence_diagnostics`` curriculum term publishing the frontier
-  estimates behind the gate: fall hazard and attainment as functions of
-  commanded speed and of the Mahalanobis command radius, push survival by
-  shove magnitude, and the push-to-fall delay distribution, plus W&B histogram
-  views of each. Pushes are stratified into a pushed cohort and a push-free
-  clean cohort (via ``push_cohort_by_setting_velocity``) so the frontier is
-  measured on uncontaminated episodes and the push effect reads as a
-  difference in rates. Log-only; it drives nothing.
 - ``play --demo`` loads a task's bundled pretrained checkpoint, registered via
   the new ``demo_checkpoint`` argument of ``register_mjlab_task``. The
   ``Mjlab-Velocity-Flat-Nubots-Nugus`` task ships with one.
