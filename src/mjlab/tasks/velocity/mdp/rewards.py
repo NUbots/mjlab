@@ -66,6 +66,116 @@ def track_angular_velocity(
   return torch.exp(-ang_vel_error / std**2)
 
 
+def _attainment_credit(
+  ratio: torch.Tensor, min_credit: float, penalize_overshoot: bool
+) -> torch.Tensor:
+  """Map delivered/commanded ``ratio`` to attainment credit in [min_credit, 1]."""
+  if penalize_overshoot:
+    # Tent: overshoot costs credit at the same rate undershoot does.
+    ratio = 1.0 - torch.abs(ratio - 1.0)
+  return ratio.clamp(min=min_credit, max=1.0)
+
+
+def track_linear_velocity_attainment(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  channel_weights: tuple[float, float, float] = (1.0, 1.0, 1.0),
+  command_threshold: float = 0.15,
+  min_credit: float = -0.5,
+  penalize_overshoot: bool = False,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward the fraction of the commanded linear velocity actually delivered.
+
+  The exponential kernel in :func:`track_linear_velocity` is a *precision*
+  reward: beyond roughly two ``std`` of error it is numerically zero and,
+  worse, flat. A policy handed a command past its capability therefore
+  sees no gradient toward trying harder -- every attainable fraction of
+  that command pays the same nothing -- while moving still costs the
+  movement penalties. Standing still wins. This term restores the missing
+  gradient by paying linearly in the fraction delivered, so closing the
+  last of an unreachable command pays what closing the first of an easy
+  one pays. Pair it with the kernel rather than replacing it: this supplies
+  reach, the kernel supplies accuracy.
+
+  ``channel_weights`` is ``(forward, backward, strafe)`` and makes the
+  measure directional. The value is the weighted projection
+
+  ``sum_c w_c * v_c * c_c / sum_c w_c * c_c^2``
+
+  with the fore/aft weight selected per env by the sign of the commanded
+  x. Weighting forward above strafe means a diagonal command pays mostly
+  for closing its forward component, which is what "I want forward speed
+  more than anything else" has to mean for a term that sees both at once.
+  The expression is scale-invariant in the weights, so only their ratios
+  matter and the term's magnitude stays governed by its configured weight.
+
+  With equal weights this reduces to the plain projection onto the command
+  direction. Credit is capped at 1.0 (overshoot earns nothing extra;
+  precision remains the kernel's job) and floored at ``min_credit`` so a
+  backwards lunge under a small command cannot dominate the return.
+  Commands shorter than ``command_threshold`` score zero, where the
+  normalization blows up and the kernel is the right instrument anyway.
+
+  The cap makes the credit asymmetric: shortfall costs, overshoot does not.
+  Where the delivered velocity oscillates within a stride (strafe, and yaw
+  in the angular term), aiming above the command keeps every step's credit
+  near 1, so the policy learns to overshoot unless the kernel is tight
+  enough to push back. ``penalize_overshoot=True`` uses the tent
+  ``1 - |ratio - 1|`` instead, which peaks exactly at the command.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  command = env.command_manager.get_command(command_name)
+  assert command is not None, f"Command '{command_name}' not found."
+  actual = asset.data.root_link_lin_vel_b
+  w_forward, w_backward, w_strafe = channel_weights
+
+  cmd_x, cmd_y = command[:, 0], command[:, 1]
+  w_x = torch.where(
+    cmd_x >= 0.0,
+    torch.full_like(cmd_x, w_forward),
+    torch.full_like(cmd_x, w_backward),
+  )
+  numerator = w_x * actual[:, 0] * cmd_x + w_strafe * actual[:, 1] * cmd_y
+  denominator = w_x * torch.square(cmd_x) + w_strafe * torch.square(cmd_y)
+  attain = _attainment_credit(
+    numerator / denominator.clamp(min=1e-6), min_credit, penalize_overshoot
+  )
+
+  cmd_sq = torch.sum(torch.square(command[:, :2]), dim=1)
+  return torch.where(cmd_sq >= command_threshold**2, attain, torch.zeros_like(attain))
+
+
+def track_angular_velocity_attainment(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  command_threshold: float = 0.15,
+  min_credit: float = -0.5,
+  penalize_overshoot: bool = False,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Yaw-rate counterpart of :func:`track_linear_velocity_attainment`.
+
+  Kept as its own term rather than folded in as a fourth channel: the
+  linear form normalizes by ``sum w_c * c_c^2``, and mixing rad/s with m/s
+  inside one normalizer would make the linear-versus-angular balance
+  depend silently on the units. Two terms, two weights, no coupling.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  command = env.command_manager.get_command(command_name)
+  assert command is not None, f"Command '{command_name}' not found."
+  cmd_yaw = command[:, 2]
+  # Projection form rather than a plain ratio, so a zero command produces a
+  # clamped denominator instead of an inf that the mask would have to hide.
+  numerator = asset.data.root_link_ang_vel_b[:, 2] * cmd_yaw
+  attain = _attainment_credit(
+    numerator / torch.square(cmd_yaw).clamp(min=1e-6), min_credit, penalize_overshoot
+  )
+  return torch.where(
+    cmd_yaw.abs() >= command_threshold, attain, torch.zeros_like(attain)
+  )
+
+
 class upright:
   """Reward for keeping the base upright.
 
@@ -448,6 +558,60 @@ def feet_swing_height_clock(
   return reward
 
 
+def gait_clock_contact_mismatch_cost(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  period: float,
+  swing_ratio: float,
+  foot_offsets: tuple[float, ...] = (0.0, 0.5),
+  command_name: str | None = None,
+  command_threshold: float = 0.05,
+) -> torch.Tensor:
+  """Penalize foot contact states that contradict the gait clock's windows.
+
+  Grounds the clock of :func:`feet_swing_height_clock` in the physical gait:
+  each foot must be airborne during its swing window (``foot_phase <
+  swing_ratio``, same phase convention and ``foot_offsets``) and in contact
+  during its stance window. The cost is the number of feet whose contact
+  state contradicts their window.
+
+  The height-tracking term alone cannot force stepping: a planted foot still
+  collects its full reward through the stance window and a large share of it
+  through a low swing arc, so a policy can stand still and keep most of it.
+  This term charges a planted foot for every swing-window step instead.
+  """
+  contact_sensor: ContactSensor = env.scene[sensor_name]
+  assert contact_sensor.data.found is not None
+  in_contact = contact_sensor.data.found > 0  # [B, F]
+  num_feet = in_contact.shape[1]
+  assert len(foot_offsets) == num_feet, (
+    f"foot_offsets has {len(foot_offsets)} entries but sensor reports {num_feet} feet."
+  )
+
+  t = env.episode_length_buf.float() * env.step_dt  # [B]
+  base_phase = torch.remainder(t / period, 1.0)  # [B]
+  offsets = torch.tensor(foot_offsets, device=env.device, dtype=torch.float32)
+  foot_phase = torch.remainder(base_phase[:, None] + offsets[None, :], 1.0)  # [B, F]
+  in_swing = foot_phase < swing_ratio  # [B, F]
+
+  mismatch = (in_swing == in_contact).float()  # [B, F]
+  cost = torch.sum(mismatch, dim=1)  # [B]
+
+  active = torch.ones_like(cost, dtype=torch.bool)
+  if command_name is not None:
+    command = env.command_manager.get_command(command_name)
+    if command is not None:
+      linear_norm = torch.norm(command[:, :2], dim=1)
+      angular_norm = torch.abs(command[:, 2])
+      active = (linear_norm + angular_norm) > command_threshold
+      cost = cost * active.float()
+  if active.any():
+    env.extras["log"]["Metrics/gait_clock_contact_match_mean"] = (
+      1.0 - mismatch[active].mean()
+    )
+  return cost
+
+
 def feet_slip(
   env: ManagerBasedRlEnv,
   sensor_name: str,
@@ -645,10 +809,10 @@ def feet_lateral_distance_cost(
   isolating lateral spread from fore-aft offset during a stride.
 
 
-  The penalty shape is ``exp(sharpness * shortfall) - 1`` where 
-  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``. 
-  When nominal_distance == lateral_distance the cost is zero. For 
-  anything else, the cost grows exponentially with the difference. 
+  The penalty shape is ``exp(sharpness * shortfall) - 1`` where
+  ``shortfall = max(0, abs(nominal_distance - lateral_distance))``.
+  When nominal_distance == lateral_distance the cost is zero. For
+  anything else, the cost grows exponentially with the difference.
   """
   asset: Entity = env.scene[asset_cfg.name]
   foot_pos_w = asset.data.site_pos_w[:, asset_cfg.site_ids, :]  # [B, N, 3]
@@ -814,7 +978,17 @@ class variable_posture:
 
   Uses per-joint standard deviations to control how much each joint can deviate
   from default pose. Smaller std = stricter (less deviation allowed), larger
-  std = more forgiving. The reward is: exp(-mean(error² / std²))
+  std = more forgiving. Each joint is scored with a logistic kernel of its
+  normalised error x = |error| / std, and the scores are averaged:
+
+    mean(4 / (exp(x) + 2 + exp(-x)))
+
+  The kernel is 1 at zero error and bell-shaped like a Gaussian, but its tail
+  falls off exponentially rather than as exp(-x²), so a joint far from its
+  default still gets a gradient back. Averaging per joint, rather than
+  exponentiating a mean, means one badly placed joint lowers the reward
+  without zeroing it. For the same std the kernel is looser than exp(-x²):
+  0.79 at x = 1 against 0.37.
 
   Three speed regimes (based on linear + angular command velocity):
     - std_standing (speed < walking_threshold): Tight tolerance for holding pose.
@@ -888,6 +1062,8 @@ class variable_posture:
 
     current_joint_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
     desired_joint_pos = self.default_joint_pos[:, asset_cfg.joint_ids]
-    error_squared = torch.square(current_joint_pos - desired_joint_pos)
+    x = torch.abs(current_joint_pos - desired_joint_pos) / std
 
-    return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
+    # 4 / (exp(x) + 2 + exp(-x)) == sech²(x / 2) == 1 - tanh²(x / 2), written
+    # the last way because it cannot overflow for large x.
+    return torch.mean(1.0 - torch.square(torch.tanh(0.5 * x)), dim=1)

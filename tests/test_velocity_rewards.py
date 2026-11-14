@@ -15,7 +15,11 @@ from mjlab.tasks.velocity.mdp.observations import gait_clock
 from mjlab.tasks.velocity.mdp.rewards import (
   _swing_height_profile,
   feet_swing_height_clock,
+  gait_clock_contact_mismatch_cost,
+  track_angular_velocity_attainment,
+  track_linear_velocity_attainment,
   upright,
+  variable_posture,
 )
 from mjlab.utils.lab_api.math import quat_from_euler_xyz
 
@@ -254,6 +258,37 @@ def test_clock_reward_gated_off_when_not_commanded():
   assert r.item() == 0.0
 
 
+def _contact_mismatch(found: torch.Tensor, command: torch.Tensor) -> float:
+  # Same clock as _clock_reward: at episode_step=2 foot 0 is in its swing window
+  # and foot 1 in its stance window.
+  sensor = MagicMock()
+  sensor.data.found = found
+  env = _make_clock_env(torch.zeros(1, 2), 2, command)
+  env.scene.__getitem__ = MagicMock(return_value=sensor)
+  cost = gait_clock_contact_mismatch_cost(
+    env,
+    sensor_name="feet_ground_contact",
+    period=0.8,
+    swing_ratio=0.5,
+    command_name="twist",
+    command_threshold=0.05,
+  )
+  return cost.item()
+
+
+def test_contact_mismatch_charges_planted_swing_foot():
+  moving = torch.tensor([[0.5, 0.0, 0.0]])
+  # Swing foot airborne, stance foot planted: matches the clock.
+  assert _contact_mismatch(torch.tensor([[0, 1]]), moving) == 0.0
+  # Standing still: the swing-window foot is planted -> one mismatch.
+  assert _contact_mismatch(torch.tensor([[1, 1]]), moving) == 1.0
+  # Exactly out of phase: both feet contradict their windows.
+  assert _contact_mismatch(torch.tensor([[1, 0]]), moving) == 2.0
+  # Gated off at zero command.
+  still = torch.tensor([[0.0, 0.0, 0.0]])
+  assert _contact_mismatch(torch.tensor([[1, 1]]), still) == 0.0
+
+
 def _make_clock_obs_env(episode_step: int, command: torch.Tensor):
   """Mock env exposing just what gait_clock reads."""
   env = MagicMock()
@@ -298,3 +333,76 @@ def test_gait_clock_ungated_without_command_name():
   clock = gait_clock(_make_clock_obs_env(2, still), period=0.8)
   assert math.isclose(clock[0, 0].item(), 1.0, abs_tol=1e-6)
   assert math.isclose(clock[0, 1].item(), 0.0, abs_tol=1e-6)
+
+
+def _attain_env(command: list[float], lin_vel: list[float], ang_vel_z: float):
+  asset = MagicMock()
+  asset.data.root_link_lin_vel_b = torch.tensor([lin_vel])
+  asset.data.root_link_ang_vel_b = torch.tensor([[0.0, 0.0, ang_vel_z]])
+  env = MagicMock()
+  env.scene.__getitem__ = MagicMock(return_value=asset)
+  env.command_manager.get_command = MagicMock(return_value=torch.tensor([command]))
+  return env
+
+
+def test_linear_attainment_pays_fraction_delivered():
+  def attain(command, lin_vel):
+    env = _attain_env(command, lin_vel, 0.0)
+    return track_linear_velocity_attainment(env, command_name="twist").item()
+
+  # Linear in the delivered fraction, so an unreachable command still has a
+  # gradient where the exponential kernel is flat.
+  assert math.isclose(attain([2.0, 0.0, 0.0], [1.5, 0.0, 0.0]), 0.75, rel_tol=1e-6)
+  assert attain([2.0, 0.0, 0.0], [0.0, 0.0, 0.0]) == 0.0
+  assert attain([1.0, 0.0, 0.0], [1.4, 0.0, 0.0]) == 1.0  # overshoot capped
+  assert attain([1.0, 0.0, 0.0], [-3.0, 0.0, 0.0]) == -0.5  # floored
+  assert attain([0.1, 0.0, 0.0], [0.1, 0.0, 0.0]) == 0.0  # below threshold
+
+
+def test_attainment_tent_penalizes_overshoot():
+  env = _attain_env([1.0, 0.0, 0.0], [1.4, 0.0, 0.0], 0.0)
+  lin = track_linear_velocity_attainment(
+    env, command_name="twist", penalize_overshoot=True
+  )
+  # 40% over pays what 40% under pays.
+  assert math.isclose(lin.item(), 0.6, rel_tol=1e-6)
+  env = _attain_env([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 1.6)
+  ang = track_angular_velocity_attainment(
+    env, command_name="twist", penalize_overshoot=True
+  )
+  assert math.isclose(ang.item(), 0.4, rel_tol=1e-6)
+
+
+def test_angular_attainment_pays_fraction_delivered():
+  env = _attain_env([0.0, 0.0, 2.0], [0.0, 0.0, 0.0], 1.0)
+  value = track_angular_velocity_attainment(env, command_name="twist")
+  assert math.isclose(value.item(), 0.5, rel_tol=1e-6)
+
+
+def test_variable_posture_is_a_per_joint_logistic_kernel():
+  asset = MagicMock()
+  asset.find_joints.return_value = ([0, 1], ["hip", "knee"])
+  asset.data.default_joint_pos = torch.zeros(1, 2)
+  asset.data.joint_pos = torch.tensor([[0.0, 0.5]])
+  env = MagicMock()
+  env.device = "cpu"
+  env.scene.__getitem__ = MagicMock(return_value=asset)
+  env.command_manager.get_command.return_value = torch.tensor([[1.0, 0.0, 0.0]])
+  params: dict = {
+    "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+    "command_name": "twist",
+    "std_standing": {".*": 0.1},
+    "std_walking": {".*": 0.25},
+    "std_running": {".*": 1.0},
+    "walking_threshold": 0.05,
+    "running_threshold": 1.5,
+  }
+  cfg = MagicMock(spec=RewardTermCfg)
+  cfg.params = params
+
+  value = variable_posture(cfg, env)(env, **params).item()
+
+  # Walking std 0.25: the hip is on target (1.0), the knee is 2 std off,
+  # where the kernel 4 / (e^x + 2 + e^-x) is 0.42 rather than exp(-4) = 0.02.
+  knee = 4.0 / (math.exp(2.0) + 2.0 + math.exp(-2.0))
+  assert math.isclose(value, (1.0 + knee) / 2, rel_tol=1e-5)

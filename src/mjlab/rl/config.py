@@ -104,7 +104,7 @@ class RslRlBaseRunnerCfg:
   display name for the run in wandb."""
   logger: Literal["wandb", "tensorboard"] = "wandb"
   """The logger to use. Default is wandb."""
-  wandb_project: str = "mjlab"
+  wandb_project: str = "k1-rl-walk"
   """The wandb project name."""
   wandb_tags: Tuple[str, ...] = ()
   """Tags for the wandb run. Default is empty tuple."""

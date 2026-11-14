@@ -87,7 +87,7 @@ def get_base_metadata(
     observation_term_flatten_history_dim.append(cfg.flatten_history_dim)
     observation_term_history_length.append(cfg.history_length)
 
-  return {
+  metadata: dict[str, list | str | float] = {
     "run_path": run_path,
     "joint_names": list(robot.joint_names),
     "joint_stiffness": joint_stiffness.tolist(),
@@ -103,6 +103,19 @@ def get_base_metadata(
     if isinstance(joint_action._scale, torch.Tensor)
     else joint_action._scale,
   }
+  # Observation-history policies (mjlab.rl.obs_history): the ONNX input is a
+  # flat T-frame window (time-major, oldest frame first) whose per-frame
+  # layout equals the actor observation vector ("observation_names" above).
+  # The deployment side keeps a ring buffer of that vector, seeded by
+  # repeating the first frame (matches the training CircularBuffer backfill
+  # on reset).
+  obs_mgr = env.observation_manager
+  if "history" in obs_mgr.active_terms:
+    history_dims = obs_mgr.group_obs_term_dim["history"]
+    metadata["history_window"] = int(history_dims[0][0])
+    metadata["history_obs_dim"] = sum(int(dims[-1]) for dims in history_dims)
+    metadata["history_layout"] = "time_major_oldest_first"
+  return metadata
 
 
 def attach_metadata_to_onnx(

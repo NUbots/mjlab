@@ -8,6 +8,47 @@ Upcoming version (not yet released)
 Added
 ^^^^^
 
+- Added a policy evaluation pipeline for the Booster K1 (``mjlab.evaluation``
+  and ``scripts/eval``), ported and cut down from the Nugus walk comparison.
+  ``collect_comparison.sh`` collects, for one or more checkpoints, only what
+  ``plot_comparison.py`` draws: a velocity profile, three two-axis command
+  grids for the normalised error plane, and walking and standing push
+  batteries for the push survival envelope. The harness reads only the root
+  link and pushes through the root body, so any velocity task can be
+  evaluated with ``--task-id``.
+- Added the Booster K1 humanoid and the ``Mjlab-Velocity-Flat-Booster-K1`` /
+  ``Mjlab-Velocity-Rough-Booster-K1`` tasks. They follow the NUbots Nugus
+  velocity recipe (25-step observation-history actor) without a gait
+  clock, so the policy is free to pick its own cadence. Base linear velocity is critic-only: the Booster controller's
+  odometry twist read zero on the robot while the policy walked, so the
+  deployed policy has no estimate to observe. The head is left to the vision
+  system, so the policy commands and observes only the 20 leg and arm joints. A
+  time-staged command curriculum widens the envelope from a 0.5 m/s walk to
+  ``lin_vel_x`` (-1.0, 2.0), ``lin_vel_y`` +/-0.8 and ``ang_vel_z`` +/-2.0 by
+  iteration 8000.
+- Added ``track_linear_velocity_attainment`` and
+  ``track_angular_velocity_attainment`` rewards, which pay linearly in the
+  fraction of the commanded velocity actually delivered. They restore a
+  gradient toward trying harder on commands past the robot's capability,
+  where the exponential tracking kernels are flat. Enabled for the Booster
+  K1, whose wide-envelope policy otherwise learned to march on the spot
+  above ~1 m/s.
+- Added the ``drop_command_to_zero`` velocity event: at random intervals it
+  cuts a moving command to zero in a single step and holds it there for a
+  sampled time, so the policy learns to stop abruptly without falling. It is
+  enabled for the Booster K1.
+- Added ``mjlab.rl.obs_history``: an actor observation-history encoder. The
+  environment publishes a ``"history"`` observation group holding a T-step
+  window of the actor observation stream (shape ``[num_envs, T, obs_dim]``),
+  and ``HistoryActor`` compresses it with a small temporal convolutional
+  network into a latent that is concatenated onto the current observation
+  before the policy MLP. The encoder trains end-to-end with PPO (no auxiliary
+  loss, no teacher/student stage) and stays stateless, so
+  ``OnnxHistoryPolicy`` exports encoder plus policy as one graph driven by a
+  flat ring buffer of past observation vectors. ONNX metadata gains
+  ``history_window``, ``history_obs_dim``, and ``history_layout`` describing
+  that deployment contract. Enabled for NUbots Nugus with a 25-step (0.5 s)
+  window.
 - ``play --demo`` loads a task's bundled pretrained checkpoint, registered via
   the new ``demo_checkpoint`` argument of ``register_mjlab_task``. The
   ``Mjlab-Velocity-Flat-Nubots-Nugus`` task ships with one.
