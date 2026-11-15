@@ -31,16 +31,15 @@ from mjlab.tasks.dribbling.mdp import BallCommandStage, KickCommandCfg
 
 _STEPS_PER_ITER = 24
 
-# JOGA Table VII ramps passing from 1.5-2.5 to 3-5 m/s over 6k iterations on
-# a G1. The K1 is smaller and its ball lighter; these are a first guess at
-# its range, starting where a clumsy touch already earns partial credit.
+# JOGA Table VII passing stages, as published for the G1. Slow controlled
+# kicks are not a goal, so the range starts at a pass rather than a tap.
 KICK_SPEED_STAGES: list[BallCommandStage] = [
-  {"step": 0, "speed_range": (1.0, 2.0)},
-  {"step": 2_000 * _STEPS_PER_ITER, "speed_range": (1.5, 3.0)},
-  {"step": 4_000 * _STEPS_PER_ITER, "speed_range": (2.0, 4.0)},
-  {"step": 6_000 * _STEPS_PER_ITER, "speed_range": (2.5, 5.0)},
+  {"step": 0, "speed_range": (1.5, 2.5)},
+  {"step": 2_000 * _STEPS_PER_ITER, "speed_range": (2.0, 3.0)},
+  {"step": 4_000 * _STEPS_PER_ITER, "speed_range": (2.5, 4.0)},
+  {"step": 6_000 * _STEPS_PER_ITER, "speed_range": (3.0, 5.0)},
 ]
-KICK_PLAY_SPEED_RANGE = (2.0, 4.0)
+KICK_PLAY_SPEED_RANGE = (2.5, 4.0)
 
 STRIKE_ZONE = (0.15, 0.0)
 EPISODE_LENGTH_S = 6.0
@@ -58,10 +57,11 @@ def booster_k1_kick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     COMMAND_NAME: KickCommandCfg(
       # One command per episode.
       resampling_time_range=(1.0e6, 1.0e6),
-      speed_range=KICK_PLAY_SPEED_RANGE if play else (1.0, 2.0),
+      speed_range=KICK_PLAY_SPEED_RANGE if play else (1.5, 2.5),
       initial_heading_range=(-math.pi / 4, math.pi / 4),
       rel_standing_envs=0.0,
       debug_vis=True,
+      leg_contact_sensor="leg_ball_contact",
     )
   }
 
@@ -80,6 +80,7 @@ def booster_k1_kick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     fields=("found", "force"),
     reduce="netforce",
     num_slots=1,
+    history_length=cfg.decimation,
   )
   cfg.scene.sensors = (cfg.scene.sensors or ()) + (leg_ball,)
 
@@ -101,6 +102,12 @@ def booster_k1_kick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["ball_exit_velocity"] = RewardTermCfg(
     func=mdp.ball_exit_velocity, weight=15.0, params={**cmd, "loft_penalty": 0.2}
   )
+  cfg.rewards["ball_exit_direction"] = RewardTermCfg(
+    # 0.1 rad: at 0.2 the policy settled at a 6 degree median with a long tail.
+    func=mdp.ball_exit_direction,
+    weight=8.0,
+    params={**cmd, "std": 0.1},
+  )
   cfg.rewards["ball_in_strike_zone"] = RewardTermCfg(
     func=mdp.ball_in_strike_zone, weight=1.5, params={**cmd, "zone": STRIKE_ZONE}
   )
@@ -108,7 +115,12 @@ def booster_k1_kick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     func=mdp.face_ball_before_kick, weight=1.0, params=dict(cmd)
   )
   cfg.rewards["stay_still_after_kick"] = RewardTermCfg(
-    func=mdp.stay_still_after_kick, weight=2.0, params=dict(cmd)
+    # Must stay above what the robot earns before the strike (strike zone
+    # plus face ball, 1.5 once the zone weight has faded): at 1.0 it paid
+    # better to stand by the ball and never kick.
+    func=mdp.stay_still_after_kick,
+    weight=2.0,
+    params=dict(cmd),
   )
   cfg.rewards["time_to_kick"] = RewardTermCfg(
     func=mdp.time_to_kick, weight=-0.25, params=dict(cmd)

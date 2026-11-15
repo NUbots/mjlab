@@ -18,7 +18,8 @@ register_mjlab_task(
   env_cfg=booster_k1_kick_env_cfg(),
   play_env_cfg=booster_k1_kick_env_cfg(play=True),
   rl_cfg=booster_k1_dribble_ppo_runner_cfg(
-    experiment_name="k1_kick", max_iterations=10_000
+    experiment_name="k1_kick",
+    max_iterations=10_000,
   ),
   runner_cls=VelocityOnPolicyRunner,
 )

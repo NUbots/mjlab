@@ -31,6 +31,7 @@ def main() -> None:
     vals = rm._step_reward[0]
     keep = (
       "ball_exit_velocity",
+      "ball_exit_direction",
       "ball_in_strike_zone",
       "face_ball",
       "stay_still_after_kick",
@@ -43,7 +44,13 @@ def main() -> None:
   print(f"[pre]    struck={kick.struck[0].item()} cmd={kick.command[0, :2].tolist()}")
   print(f"[pre]    {terms()}")
 
-  # Give the ball exactly the commanded velocity, as a perfect kick would.
+  # Put the ball at the feet (the reset can place it beyond the strike
+  # radius) and give it the commanded velocity, as a perfect kick would.
+  robot = env.scene["robot"]
+  pose = ball.data.root_link_pose_w.clone()
+  pose[:, :2] = robot.data.root_link_pos_w[:, :2]
+  pose[:, 0] += 0.3
+  ball.write_root_link_pose_to_sim(pose, env_ids=ids)
   vel = torch.zeros(4, 6, device=env.device)
   vel[:, :2] = kick.command[:, :2]
   ball.write_root_link_velocity_to_sim(vel, env_ids=ids)

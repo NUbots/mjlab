@@ -49,14 +49,17 @@ from mjlab.utils.spec_config import CollisionCfg
 
 COMMAND_NAME = "ball_velocity"
 
-# Size 3 ball, as on tumminello/k1-goalkeeper-task (Humanoid League).
-BALL_RADIUS = 0.095
-BALL_MASS = 0.33
+# The ball in the team's NUSim RoboCup scene (radius 78.5 mm, 290 g). The
+# 95 mm ball used at first (from the goalkeeper branch) sat high enough on
+# the K1 that it learned to kick with its knee.
+BALL_RADIUS = 0.0785
+BALL_MASS = 0.29
 
 # JOGA Table VIII, ball-ground. Rolling friction is a length in MuJoCo, so
 # their turf value (0.02 for a 0.11 m ball) is scaled down for this ball and
-# bracketed between carpet (0.007, measured on the goalkeeper branch) and turf.
-BALL_FRICTION = (0.75, 0.05, 0.012)
+# bracketed between carpet (0.007 for a 95 mm ball, measured on the goalkeeper
+# branch) and turf.
+BALL_FRICTION = (0.75, 0.05, 0.010)
 BALL_SOLREF = (0.055, 0.18)
 BALL_SOLIMP = (0.85, 0.95, 0.001, 0.5, 2.0)
 FOOT_BALL_FRICTION = 0.3
@@ -83,17 +86,16 @@ _STEPS_PER_ITER = 24
 # two thirds the height of a G1 and tops out near 1.5 m/s).
 BALL_COMMAND_STAGES: list[BallCommandStage] = [
   {"step": 0, "speed_range": (0.4, 0.9), "resampling_time_range": (7.0, 7.0)},
-  {"step": 3_000 * _STEPS_PER_ITER, "speed_range": (0.4, 1.3)},
-  {"step": 4_500 * _STEPS_PER_ITER, "speed_range": (0.4, 1.7)},
-  {"step": 6_500 * _STEPS_PER_ITER, "speed_range": (0.5, 2.0)},
+  {"step": 3_000 * _STEPS_PER_ITER, "speed_range": (0.4, 1.2)},
+  {"step": 6_000 * _STEPS_PER_ITER, "speed_range": (0.4, 1.5)},
   {"step": 10_000 * _STEPS_PER_ITER, "resampling_time_range": (5.0, 7.0)},
   {"step": 14_000 * _STEPS_PER_ITER, "resampling_time_range": (3.0, 7.0)},
   {"step": 18_000 * _STEPS_PER_ITER, "resampling_time_range": (2.0, 8.0)},
 ]
 
-MAX_BALL_SPEED = 2.0
-"""Top of the command ramp. 2.0 m/s is the K1 velocity task's own ceiling,
-which that task's notes say the robot does not quite reach while walking."""
+MAX_BALL_SPEED = 1.5
+"""Top of the command ramp. A run ramped to 2.0 m/s fell more and more often
+past 1.3 m/s and threw its arms overhead for balance."""
 
 _FOOT_REGEX = r".*foot_collision$"
 _LEG_REGEX = r".*(shin|knee)_collision$"
@@ -305,7 +307,7 @@ def booster_k1_dribble_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
       "asset_cfg": SceneEntityCfg("ball", geom_names=("ball_geom",)),
       "operation": "abs",
       "axes": [0, 1, 2],
-      "ranges": {0: (0.5, 0.9), 1: (0.01, 0.1), 2: (0.007, 0.02)},
+      "ranges": {0: (0.5, 0.9), 1: (0.01, 0.1), 2: (0.006, 0.0165)},
     },
   )
 

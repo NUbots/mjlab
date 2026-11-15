@@ -33,7 +33,31 @@ def ball_exit_velocity(
   vel = ball.data.root_link_lin_vel_w
   err = torch.sum(torch.square(vel[:, :2] - kick.command[:, :2]), dim=-1)
   loft = loft_penalty * torch.square(vel[:, 2])
-  return kick.in_window.float() * torch.exp(-err / std**2 - loft)
+  return kick.window_weight * torch.exp(-err / std**2 - loft)
+
+
+def ball_exit_direction(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  std: float = 0.2,
+  min_speed_fraction: float = 0.5,
+) -> torch.Tensor:
+  """I_win exp(-angle^2 / std^2) for a ball leaving at a real fraction of speed.
+
+  Not in JOGA. Its exit-velocity kernel is 1 m/s wide, so at K1 pass speeds a
+  ball 20 degrees off line still collects most of the reward; this term pays
+  for the direction alone. The speed gate stops a slow roll on line counting.
+  """
+  kick = _kick(env, command_name)
+  ball: Entity = env.scene["ball"]
+  vel = ball.data.root_link_lin_vel_w[:, :2]
+  cmd = kick.command[:, :2]
+  speed = torch.norm(vel, dim=-1)
+  cmd_speed = torch.norm(cmd, dim=-1)
+  cos = torch.sum(vel * cmd, dim=-1) / (speed * cmd_speed).clamp(min=1e-6)
+  angle = torch.acos(cos.clamp(-1.0 + 1e-6, 1.0 - 1e-6))
+  moving = speed > min_speed_fraction * cmd_speed
+  return kick.window_weight * moving.float() * torch.exp(-torch.square(angle / std))
 
 
 def ball_in_strike_zone(
