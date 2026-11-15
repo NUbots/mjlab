@@ -47,7 +47,11 @@ def test_all_tasks_have_play_config(all_task_ids: list[str]) -> None:
 
 def test_play_mode_episode_length(all_task_ids: list[str]) -> None:
   """Play mode tasks should have infinite episode length."""
+  # One kick per episode: without the reset, play would show a single kick.
+  episodic = {"Mjlab-Kick-Flat-Booster-K1"}
   for task_id in all_task_ids:
+    if task_id in episodic:
+      continue
     cfg = load_env_cfg(task_id, play=True)
     assert cfg.episode_length_s >= 1e9, (
       f"{task_id} (play mode) episode_length_s={cfg.episode_length_s}, expected >= 1e9"

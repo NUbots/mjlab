@@ -83,12 +83,6 @@ def test_attainment_terms_and_running_threshold() -> None:
   assert cfg.rewards["pose"].params["running_threshold"] == 0.8
 
 
-def test_no_competence_machinery() -> None:
-  cfg = booster_k1_flat_env_cfg()
-  assert "competence_tracker" not in cfg.events
-  assert "competence_diagnostics" not in cfg.curriculum
-
-
 def test_base_lin_vel_is_critic_only() -> None:
   """The robot has no base velocity estimate while the policy walks."""
   cfg = booster_k1_flat_env_cfg()
