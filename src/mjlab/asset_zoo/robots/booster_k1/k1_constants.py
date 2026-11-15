@@ -1,16 +1,17 @@
 """Booster K1 robot constants.
 
-Model and actuator data come from the official Booster Robotics assets and
-Isaac Lab training configs (https://github.com/BoosterRobotics/booster_assets
-and https://github.com/BoosterRobotics/booster_train, BSD-3-Clause). Motor
-specs (effort limits, velocity limits, rotor armature) are per-joint motor
-models from Booster's actuator library; PD gains follow Booster's formula
-``kp = armature * (2*pi*f)**2``, ``kd = 2 * zeta * armature * (2*pi*f)`` with
-their published natural frequency ``f`` and damping ratio ``zeta`` per joint
-group.
+The model comes from the official Booster Robotics assets
+(https://github.com/BoosterRobotics/booster_assets, BSD-3-Clause), and the motor
+specs (effort limits, velocity limits, rotor armature) from Booster's actuator
+library (https://github.com/BoosterRobotics/booster_train).
+
+PD gains, the default pose, joint ranges and collision geometry follow
+booster_mjlab (https://github.com/IntelligentRoboticsLab/booster_mjlab), whose
+velocity policies transfer to the real K1. Policies trained on the previous
+gains here (``armature * (2*pi*f)**2`` at f = 4 Hz, about 30 N*m/rad at the
+hip) did not.
 """
 
-import math
 from pathlib import Path
 
 import mujoco
@@ -38,14 +39,6 @@ def get_spec() -> mujoco.MjSpec:
 ##
 # Actuator config.
 ##
-
-
-def _stiffness(armature: float, natural_freq_hz: float) -> float:
-  return armature * (2 * math.pi * natural_freq_hz) ** 2
-
-
-def _damping(armature: float, natural_freq_hz: float, damping_ratio: float) -> float:
-  return 2 * damping_ratio * armature * (2 * math.pi * natural_freq_hz)
 
 
 # Booster motor models used in the K1 (from booster_train's actuator library).
@@ -87,111 +80,76 @@ ACTUATOR_HT4438 = ElectricActuator(  # Head.
   effort_limit=6.0,
 )
 
-# Natural frequency (Hz) / damping ratio per joint group, from Booster's K1
-# training config. Arms and head use the actuator library defaults (10 Hz, 2.0).
-_LEG_FREQ = 4.0
-_ARM_FREQ = 10.0
-_ARM_DAMPING_RATIO = 2.0
-
-# Command delay in physics timesteps, matching Booster's actuator delay
-# randomization (min_delay=2, max_delay=8 at the same 5 ms physics step).
+# Command delay in physics timesteps (2-8 at the 5 ms physics step), with a 30%
+# chance per step of holding the previous delay, as in booster_mjlab.
 _DELAY_MIN_LAG = 2
 _DELAY_MAX_LAG = 8
+_DELAY_HOLD_PROB = 0.3
 
-K1_ACTUATOR_HIP_PITCH = BuiltinPositionActuatorCfg(
-  target_names_expr=(".*_Hip_Pitch",),
-  stiffness=_stiffness(ACTUATOR_E6408.reflected_inertia, _LEG_FREQ),
-  damping=_damping(ACTUATOR_E6408.reflected_inertia, _LEG_FREQ, 1.5),
-  effort_limit=ACTUATOR_E6408.effort_limit,
-  armature=ACTUATOR_E6408.reflected_inertia,
-  delay_min_lag=_DELAY_MIN_LAG,
-  delay_max_lag=_DELAY_MAX_LAG,
+# PD gains (N*m/rad, N*m*s/rad) per joint group, from booster_mjlab.
+_LEG_KP, _LEG_KD = 80.0, 4.0
+_ANKLE_KP, _ANKLE_KD = 50.0, 2.0
+_ARM_KP, _ARM_KD = 10.0, 1.0
+_HEAD_KP, _HEAD_KD = 4.0, 0.25
+
+
+def _actuator(
+  target_names_expr: tuple[str, ...],
+  motor: ElectricActuator,
+  stiffness: float,
+  damping: float,
+) -> BuiltinPositionActuatorCfg:
+  return BuiltinPositionActuatorCfg(
+    target_names_expr=target_names_expr,
+    stiffness=stiffness,
+    damping=damping,
+    effort_limit=motor.effort_limit,
+    armature=motor.reflected_inertia,
+    delay_min_lag=_DELAY_MIN_LAG,
+    delay_max_lag=_DELAY_MAX_LAG,
+    delay_hold_prob=_DELAY_HOLD_PROB,
+  )
+
+
+K1_ACTUATOR_HIP_PITCH = _actuator((".*_Hip_Pitch",), ACTUATOR_E6408, _LEG_KP, _LEG_KD)
+K1_ACTUATOR_HIP_ROLL = _actuator((".*_Hip_Roll",), ACTUATOR_E4315, _LEG_KP, _LEG_KD)
+K1_ACTUATOR_HIP_YAW = _actuator((".*_Hip_Yaw",), ACTUATOR_E4310, _LEG_KP, _LEG_KD)
+K1_ACTUATOR_KNEE = _actuator((".*_Knee_Pitch",), ACTUATOR_E6416, _LEG_KP, _LEG_KD)
+K1_ACTUATOR_ANKLE = _actuator(
+  (".*_Ankle_Pitch", ".*_Ankle_Roll"), ACTUATOR_ANKLE, _ANKLE_KP, _ANKLE_KD
 )
-
-K1_ACTUATOR_HIP_ROLL = BuiltinPositionActuatorCfg(
-  target_names_expr=(".*_Hip_Roll",),
-  stiffness=_stiffness(ACTUATOR_E4315.reflected_inertia, _LEG_FREQ),
-  damping=_damping(ACTUATOR_E4315.reflected_inertia, _LEG_FREQ, 1.5),
-  effort_limit=ACTUATOR_E4315.effort_limit,
-  armature=ACTUATOR_E4315.reflected_inertia,
-  delay_min_lag=_DELAY_MIN_LAG,
-  delay_max_lag=_DELAY_MAX_LAG,
-)
-
-K1_ACTUATOR_HIP_YAW = BuiltinPositionActuatorCfg(
-  target_names_expr=(".*_Hip_Yaw",),
-  stiffness=_stiffness(ACTUATOR_E4310.reflected_inertia, _LEG_FREQ),
-  damping=_damping(ACTUATOR_E4310.reflected_inertia, _LEG_FREQ, 1.5),
-  effort_limit=ACTUATOR_E4310.effort_limit,
-  armature=ACTUATOR_E4310.reflected_inertia,
-  delay_min_lag=_DELAY_MIN_LAG,
-  delay_max_lag=_DELAY_MAX_LAG,
-)
-
-K1_ACTUATOR_KNEE = BuiltinPositionActuatorCfg(
-  target_names_expr=(".*_Knee_Pitch",),
-  stiffness=_stiffness(ACTUATOR_E6416.reflected_inertia, _LEG_FREQ),
-  damping=_damping(ACTUATOR_E6416.reflected_inertia, _LEG_FREQ, 1.0),
-  effort_limit=ACTUATOR_E6416.effort_limit,
-  armature=ACTUATOR_E6416.reflected_inertia,
-  delay_min_lag=_DELAY_MIN_LAG,
-  delay_max_lag=_DELAY_MAX_LAG,
-)
-
-K1_ACTUATOR_ANKLE = BuiltinPositionActuatorCfg(
-  target_names_expr=(".*_Ankle_Pitch", ".*_Ankle_Roll"),
-  stiffness=_stiffness(ACTUATOR_ANKLE.reflected_inertia, _LEG_FREQ),
-  damping=_damping(ACTUATOR_ANKLE.reflected_inertia, _LEG_FREQ, 1.5),
-  effort_limit=ACTUATOR_ANKLE.effort_limit,
-  armature=ACTUATOR_ANKLE.reflected_inertia,
-  delay_min_lag=_DELAY_MIN_LAG,
-  delay_max_lag=_DELAY_MAX_LAG,
-)
-
-K1_ACTUATOR_ARMS = BuiltinPositionActuatorCfg(
-  target_names_expr=(
+K1_ACTUATOR_ARMS = _actuator(
+  (
     ".*_Shoulder_Pitch",
     ".*_Shoulder_Roll",
     ".*_Elbow_Pitch",
     ".*_Elbow_Yaw",
   ),
-  stiffness=_stiffness(ACTUATOR_R14.reflected_inertia, _ARM_FREQ),
-  damping=_damping(ACTUATOR_R14.reflected_inertia, _ARM_FREQ, _ARM_DAMPING_RATIO),
-  effort_limit=ACTUATOR_R14.effort_limit,
-  armature=ACTUATOR_R14.reflected_inertia,
-  delay_min_lag=_DELAY_MIN_LAG,
-  delay_max_lag=_DELAY_MAX_LAG,
+  ACTUATOR_R14,
+  _ARM_KP,
+  _ARM_KD,
 )
-
-K1_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
-  target_names_expr=("AAHead_yaw", "Head_pitch"),
-  stiffness=_stiffness(ACTUATOR_HT4438.reflected_inertia, _ARM_FREQ),
-  damping=_damping(ACTUATOR_HT4438.reflected_inertia, _ARM_FREQ, _ARM_DAMPING_RATIO),
-  effort_limit=ACTUATOR_HT4438.effort_limit,
-  armature=ACTUATOR_HT4438.reflected_inertia,
-  delay_min_lag=_DELAY_MIN_LAG,
-  delay_max_lag=_DELAY_MAX_LAG,
+K1_ACTUATOR_HEAD = _actuator(
+  ("AAHead_yaw", "Head_pitch"), ACTUATOR_HT4438, _HEAD_KP, _HEAD_KD
 )
 
 ##
 # Keyframe config.
 ##
 
-# Bent-knee stand: Booster's arms-down init pose plus the hip/knee/ankle bend
-# used by their K1 walking configs. Base height puts the foot soles on the
-# ground (computed via forward kinematics on the compiled model).
-STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
-  pos=(0, 0, 0.5435),
+# booster_mjlab's home pose: a deep bent-knee crouch with the arms down. The
+# base height puts the foot soles on the ground (booster_mjlab's 0.5125 sinks
+# them 5.6 mm; 0.518 was its earlier value).
+HOME_KEYFRAME = EntityCfg.InitialStateCfg(
+  pos=(0, 0, 0.518),
   joint_pos={
-    "Left_Shoulder_Roll": -1.3,
-    "Right_Shoulder_Roll": 1.3,
-    ".*_Hip_Pitch": -0.2,
-    ".*_Knee_Pitch": 0.4,
-    ".*_Ankle_Pitch": -0.2,
-    # Elbow yaw's hard stop is at 0, which lies outside the 0.9 soft joint
-    # limit, so the arms-down pose would pay dof_pos_limits every step.
-    "Left_Elbow_Yaw": -0.15,
-    "Right_Elbow_Yaw": 0.15,
+    "Left_Shoulder_Roll": -1.4,
+    "Right_Shoulder_Roll": 1.4,
+    "Left_Elbow_Yaw": -0.4,
+    "Right_Elbow_Yaw": 0.4,
+    ".*_Hip_Pitch": -0.4,
+    ".*_Knee_Pitch": 0.8,
+    ".*_Ankle_Pitch": -0.4,
   },
   joint_vel={".*": 0.0},
 )
@@ -203,11 +161,23 @@ STAND_BENT_KNEES_KEYFRAME = EntityCfg.InitialStateCfg(
 FOOT_COLLISION_REGEX = r".*foot_collision$"
 
 FOOT_GROUND_FRICTION = 1.0
-NON_FOOT_COLLISION_FRICTION = 1.0
+NON_FOOT_COLLISION_FRICTION = 0.45
 
 # Feet get priority 1 so their (randomized) friction decides foot-ground
 # contact instead of MuJoCo taking the max of the foot and terrain values.
+# booster_mjlab gets the same effect by giving its terrain near-zero friction.
 _FOOT_PRIORITY = {FOOT_COLLISION_REGEX: 1, ".*": 0}
+_FRICTION: dict[str, tuple[float, ...]] = {
+  FOOT_COLLISION_REGEX: (FOOT_GROUND_FRICTION,),
+  ".*_collision": (NON_FOOT_COLLISION_FRICTION,),
+}
+# Non-foot geoms, as in booster_mjlab: stiff robot-robot contacts, and a small
+# solmix so the terrain's parameters decide contacts with the ground. The feet
+# keep the XML's solref, since their priority makes it decide foot-ground
+# contact.
+_NON_FOOT_REGEX = r"^(?!.*foot_collision$).*_collision$"
+_NON_FOOT_SOLREF: dict[str, tuple[float, ...]] = {_NON_FOOT_REGEX: (0.01, 1.0)}
+_NON_FOOT_SOLMIX: dict[str, float] = {_NON_FOOT_REGEX: 0.001}
 
 FEET_COLLISION = CollisionCfg(
   geom_names_expr=(".*foot_collision",),
@@ -226,10 +196,9 @@ FULL_COLLISION = CollisionCfg(
   conaffinity=1,
   condim=3,
   priority=_FOOT_PRIORITY,
-  friction={
-    FOOT_COLLISION_REGEX: (FOOT_GROUND_FRICTION,),
-    ".*_collision": (NON_FOOT_COLLISION_FRICTION,),
-  },
+  friction=_FRICTION,
+  solref=_NON_FOOT_SOLREF,
+  solmix=_NON_FOOT_SOLMIX,
 )
 
 FULL_COLLISION_GND_ONLY = CollisionCfg(
@@ -239,10 +208,9 @@ FULL_COLLISION_GND_ONLY = CollisionCfg(
   conaffinity=0,
   condim=3,
   priority=_FOOT_PRIORITY,
-  friction={
-    FOOT_COLLISION_REGEX: (FOOT_GROUND_FRICTION,),
-    ".*_collision": (NON_FOOT_COLLISION_FRICTION,),
-  },
+  friction=_FRICTION,
+  solref=_NON_FOOT_SOLREF,
+  solmix=_NON_FOOT_SOLMIX,
 )
 
 ##
@@ -270,8 +238,9 @@ def get_k1_robot_cfg() -> EntityCfg:
   the config is shared across multiple places.
   """
   return EntityCfg(
-    init_state=STAND_BENT_KNEES_KEYFRAME,
-    collisions=(FEET_COLLISION,),
+    init_state=HOME_KEYFRAME,
+    # Every collision geom, self-collisions included, as in booster_mjlab.
+    collisions=(FULL_COLLISION,),
     spec_fn=get_spec,
     articulation=K1_ARTICULATION,
   )

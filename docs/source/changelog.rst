@@ -115,6 +115,17 @@ Added
 Changed
 ^^^^^^^
 
+- The Booster K1 model now follows booster_mjlab, whose velocity policies
+  transfer to the real robot where policies trained here did not. Leg PD
+  gains are kp 80 / kd 4 (ankles 50 / 2, arms 10 / 1, head 4 / 0.25) instead
+  of the frequency-derived ~30 N*m/rad, which shrinks the action scale to
+  0.12-0.35 rad. The default pose is booster_mjlab's deeper crouch (knees
+  0.8 rad, shoulder roll +/-1.4, elbow yaw +/-0.4). Joint ranges are the ones
+  measured on the robot. The feet collide as the foot mesh rather than a
+  box, the head, arm and shin collision shapes match booster_mjlab, and every
+  collision geom is enabled, self-collisions included, instead of the feet
+  only. Actuator delays gain a 30% per-step hold probability. K1 checkpoints
+  trained on the previous model are not compatible.
 - Bumped ``mujoco`` and ``mujoco-warp`` from 3.10 to 3.11, and regenerated the
   bundled MuJoCo type stubs.
 - Bumped ``rsl-rl-lib`` from 5.4.0 to 5.4.2.

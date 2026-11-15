@@ -303,9 +303,10 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   # early on the policy learns that falling ends them: episodes shrink to ~8
   # steps until the action std decays and the penalties with it. The NUgus
   # never gets there because its 0.05 action scale cannot throw it over; the
-  # K1's ~0.5 rad scale can. An upright bonus (earlier K1 runs showed the same
-  # dip and recovered by iteration ~300 with one) gives staying alive a dense positive value and shortens that
-  # transient.
+  # K1's could (~0.5 rad under the earlier gains, 0.12-0.35 rad now). An
+  # upright bonus (earlier K1 runs showed the same dip and recovered by
+  # iteration ~300 with one) gives staying alive a dense positive value and
+  # shortens that transient.
   cfg.rewards["upright"].weight = 1.0
   cfg.rewards["upright"].params["asset_cfg"].body_names = ("Trunk",)
   cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("Trunk",)
@@ -322,8 +323,8 @@ def booster_k1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
   cfg.rewards["foot_clearance"].params["only_below"] = True
   cfg.rewards["foot_clearance"].weight = 0.0  # Disable
 
-  # Flat-foot shaping: the K1 sole is the bottom face of the foot box, so the
-  # sole normal is the foot body's local Z axis.
+  # Flat-foot shaping: the K1 sole is flat and level with the foot body's XY
+  # plane, so the sole normal is the foot body's local Z axis.
   cfg.rewards["foot_flat"].params["asset_cfg"].body_names = (
     "left_foot_link",
     "right_foot_link",
