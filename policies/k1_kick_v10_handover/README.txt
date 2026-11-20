@@ -1,0 +1,1 @@
+K1 kick (ground) from dribble (60%), receive (25%) and first-touch (15%) states. Real-robot PD gains (legs 80/4, ankles 50/2, arms 10/1, head 4/0.25), entropy coefficient 0.002. From policies/k1_kick_v9_real_gains/model_39494.pt. Source logs/rsl_rl/k1_kick_power/2026-11-20_14-32-30/ model_40493.pt. Saved Fri Nov 20 03:12:28 PM AEDT 2026.

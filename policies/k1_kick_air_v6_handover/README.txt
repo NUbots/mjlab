@@ -1,0 +1,1 @@
+K1 air shot from dribble (60%), receive (25%) and first-touch (15%) states, 800 iterations from policies/k1_kick_air_v5_real_gains/model_42493.pt, entropy 0.002. Note: its dribble states came from dribble v11's final checkpoint, which was worse than model_33500. Source logs/rsl_rl/k1_kick_air/2026-11-20_15-13-09/ model_43292.pt. Saved Fri Nov 20 03:48:03 PM AEDT 2026.

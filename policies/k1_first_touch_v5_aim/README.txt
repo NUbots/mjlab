@@ -1,0 +1,1 @@
+K1 directional first touch v5: aim fix (MJLAB_K1_TOUCH_AIM=1), from policies/k1_first_touch_v4_real_gains_long/model_25500.pt, entropy 0.002. Best by test: model_26999.pt (85% within 20 deg on play passes). Source logs/rsl_rl/k1_first_touch/2026-11-20_18-30-40/. Fri Nov 20 07:39:10 PM AEDT 2026

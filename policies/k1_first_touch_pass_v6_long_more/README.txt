@@ -1,0 +1,2 @@
+Mjlab-FirstTouchPass-Flat-Booster-K1: 800 more iterations on passes up to 8 m, from policies/k1_first_touch_pass_v5_real_gains_long/model_33491.pt. Real-robot PD gains (legs 80/4, ankles 50/2, arms 10/1, head 4/0.25), entropy coefficient 0.002. From policies/k1_first_touch_pass_v5_real_gains_long/model_33491.pt. Source logs/rsl_rl/k1_first_touch_pass/2026-11-20_16-30-40/ model_34290.pt. Saved Fri Nov 20 05:02:38 PM AEDT 2026.
+Best by test: model_34290.pt
